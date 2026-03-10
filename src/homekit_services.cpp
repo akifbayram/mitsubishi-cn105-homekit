@@ -297,19 +297,23 @@ boolean MitsubishiFan::update() {
         uint8_t active = _active->getNewVal();
         LOG_INFO("[HK:Fan] HomeKit -> active: %d", active);
         if (active == 0) {
-            _ctrl->setFanSpeed(CN105_FAN_AUTO);
+            _ctrl->setPower(false);
         }
 
     }
 
-    if (_speed->updated() && s.power) {
+    if (_speed->updated()) {
         uint8_t pct = _speed->getNewVal();
-        uint8_t fanByte = percentToCN105Fan(pct);
-        LOG_INFO("[HK:Fan] HomeKit -> speed: %d%% -> CN105 fan=0x%02X", pct, fanByte);
-        _ctrl->setFanSpeed(fanByte);
-
-    } else if (_speed->updated() && !s.power) {
-        LOG_WARN("[HK:Fan] HomeKit -> speed: %d%% IGNORED (unit off)", _speed->getNewVal());
+        if (pct == 0) {
+            LOG_INFO("[HK:Fan] HomeKit -> speed: 0%% -> power off");
+            _ctrl->setPower(false);
+        } else if (s.power) {
+            uint8_t fanByte = percentToCN105Fan(pct);
+            LOG_INFO("[HK:Fan] HomeKit -> speed: %d%% -> CN105 fan=0x%02X", pct, fanByte);
+            _ctrl->setFanSpeed(fanByte);
+        } else {
+            LOG_WARN("[HK:Fan] HomeKit -> speed: %d%% IGNORED (unit off)", pct);
+        }
     }
 
     return true;
@@ -368,7 +372,6 @@ uint8_t MitsubishiFan::cn105FanToPercent(uint8_t fan) {
 }
 
 uint8_t MitsubishiFan::percentToCN105Fan(uint8_t pct) {
-    if (pct == 0)       return CN105_FAN_AUTO;
     if (pct <= 20)      return CN105_FAN_QUIET;
     if (pct <= 40)      return CN105_FAN_1;
     if (pct <= 60)      return CN105_FAN_2;

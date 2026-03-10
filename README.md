@@ -141,14 +141,14 @@ HomeKit's Fan service uses a 0–100% rotation speed slider, mapped to discrete 
 
 | HomeKit % | Speed |
 |-----------|-------|
-| 0% | Auto |
-| 1–17% | Quiet |
-| 18–34% | Speed 1 |
-| 35–51% | Speed 2 |
-| 52–68% | Speed 3 |
-| 69–100% | Speed 4 |
+| 0% | Off (powers off unit) |
+| 1–20% | Quiet |
+| 21–40% | Speed 1 |
+| 41–60% | Speed 2 |
+| 61–80% | Speed 3 |
+| 81–100% | Speed 4 |
 
-The slider is continuous but snaps to these bands. A separate **Fan Auto** switch provides a direct toggle for automatic fan speed without using the 0% position.
+Setting the slider to 0% or deactivating the fan service powers the unit off. Auto fan speed is controlled exclusively via the **Fan Auto** switch.
 
 ### Dual Setpoint (Auto Mode)
 
