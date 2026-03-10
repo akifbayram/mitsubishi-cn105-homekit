@@ -36,3 +36,6 @@ include/web_ui_html.h
 include/wifi_recovery_html.h
 include/icon_192_png.h
 include/icon_512_png.h
+
+# Branded build auto-generated headers
+*.brand

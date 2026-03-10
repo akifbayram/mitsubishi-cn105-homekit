@@ -108,13 +108,13 @@ Access the web interface at `http://<device-ip>:8080`.
 
 The single-page interface provides:
 
-- **Power & Mode** — toggle power, switch between Heat/Cool/Auto/Dry/Fan modes
-- **Temperature** — set target temperature with 0.5°C precision
+- **Mode** — Off/Heat/Cool/Auto/Dry/Fan mode selector (power integrated as Off mode)
+- **Temperature** — set target temperature with 0.5°C precision, +/− step buttons
 - **Dual Setpoints** — independent heat/cool thresholds in Auto mode (persisted to flash)
 - **Fan Speed** — Auto, Quiet, Speed 1–4
 - **Vane Control** — vertical and wide vane positions, swing mode
 - **Diagnostics** — compressor frequency, outside temp, runtime hours, error codes, sub mode/stage
-- **HomeKit** — pairing status, controller count, setup code display, QR code for pairing, reset pairing button
+- **HomeKit** — pairing status, controller count, setup code with copy button, QR code for pairing, reset pairing button
 - **Settings** — device name, poll interval (ms), log level, °C/°F toggle
 - **Logs** — real-time log streaming via WebSocket
 - **OTA** — firmware upload with integrity verification (see [OTA Updates](#ota-updates))
