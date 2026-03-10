@@ -832,19 +832,30 @@ body{
   }
 
   // ── WebSocket ──────────────────────────────────────────────────────────────
+  var connTimeout=null;   // timeout for connection handshake
+  var lastMsgTime=0;      // staleness detection
+
   function connect(){
     if(ws && ws.readyState<=1) return;
     var host=location.hostname||'192.168.1.1';
     var port=location.port||'8080';
     ws=new WebSocket('ws://'+host+':'+port+'/ws');
 
+    // If handshake doesn't complete in 4s, tear down and retry
+    connTimeout=setTimeout(function(){
+      if(ws&&ws.readyState===0){ws.onclose=null;ws.close();ws=null;connect()}
+    },4000);
+
     ws.onopen=function(){
+      clearTimeout(connTimeout);
+      lastMsgTime=Date.now();
       connDot.className='conn-dot ok';
       connDot.title='Connected';
       if(reconnTimer){clearInterval(reconnTimer);reconnTimer=null}
     };
 
     ws.onclose=function(){
+      clearTimeout(connTimeout);
       connDot.className='conn-dot err';
       connDot.title='Disconnected';
       ws=null;
@@ -856,6 +867,7 @@ body{
     };
 
     ws.onmessage=function(ev){
+      lastMsgTime=Date.now();
       try{
         var msg=JSON.parse(ev.data);
         if(msg.type==='state') onState(msg);
@@ -869,8 +881,28 @@ body{
 
   function scheduleReconnect(){
     if(reconnTimer) return;
-    reconnTimer=setInterval(function(){connect()},3000);
+    reconnTimer=setInterval(function(){connect()},1500);
   }
+
+  // Force-close a stale WS that reports OPEN but receives nothing
+  function forceReconnect(){
+    clearTimeout(connTimeout);
+    if(ws){try{ws.onclose=null;ws.close();}catch(e){}}
+    ws=null;
+    connDot.className='conn-dot err';
+    connect();
+  }
+
+  // Server pushes state every 1s — 5s silence means dead connection
+  setInterval(function(){
+    if(ws&&ws.readyState===1&&lastMsgTime>0&&(Date.now()-lastMsgTime)>5000)
+      forceReconnect();
+  },2000);
+
+  // Reconnect immediately when page returns from background (mobile)
+  document.addEventListener('visibilitychange',function(){
+    if(!document.hidden) forceReconnect();
+  });
 
   function send(obj){
     if(ws&&ws.readyState===1) ws.send(JSON.stringify(obj));
@@ -1327,7 +1359,9 @@ body{
   $('cfgPass').addEventListener('input',checkWifiFields);
 
   // ── Init ───────────────────────────────────────────────────────────────────
-  connect();
+  // Delay WS connect slightly — Safari on iOS can fail if the WebSocket
+  // upgrade races with the HTTP connection that delivered this page.
+  setTimeout(connect, 150);
 
 })();
 </script>
