@@ -54,7 +54,7 @@ void setup() {
 
     homeSpan.setLogLevel(2);
     homeSpan.enableOTA();
-    homeSpan.setSketchVersion("1.0.0");
+    homeSpan.setSketchVersion("0.1.0");
     homeSpan.setHostNameSuffix("");
 
     // Derive unique device name from WiFi MAC: <prefix>-XXXX
@@ -101,7 +101,7 @@ void setup() {
             new Characteristic::Name("Mini Split");
             new Characteristic::Manufacturer(BRAND_MANUFACTURER);
             new Characteristic::Model(BRAND_MODEL);
-            new Characteristic::FirmwareRevision("1.0.0");
+            new Characteristic::FirmwareRevision("0.1.0");
 
         new MitsubishiThermostat(&cn105);
         new MitsubishiFan(&cn105);
