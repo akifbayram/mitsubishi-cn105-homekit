@@ -483,6 +483,15 @@ body{
       </div>
       <button class="save-btn" onclick="saveConfig()">Save Settings</button>
       <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+        <div class="card-label">Remote Temperature Sensor</div>
+        <div id="ble-status" style="font-size:13px;color:var(--text2);margin-bottom:8px">No sensor configured</div>
+        <div style="display:flex;gap:8px">
+          <button class="save-btn" style="width:auto;padding:8px 16px;margin:0" id="ble-scan-btn" onclick="bleScan()">Scan for Sensors</button>
+          <button class="save-btn" style="width:auto;padding:8px 16px;margin:0;background:var(--red);display:none" id="ble-disable-btn" onclick="bleDisable()">Disable</button>
+        </div>
+        <div id="ble-scan-results" style="margin-top:8px"></div>
+      </div>
+      <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
         <div class="card-label">Firmware Update</div>
         <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
           <input type="file" id="fwFile" accept=".bin" style="flex:1;font-size:12px;color:var(--text2)">
@@ -877,6 +886,8 @@ body{
         else if(msg.type==='log') onLog(msg.msg);
         else if(msg.type==='ota') onOta(msg);
         else if(msg.type==='wifiSaved') onWifiSaved();
+        else if(msg.type==='bleScanResults') renderBleScanResults(msg);
+        else if(msg.type==='bleScanRunning') setTimeout(function(){send({cmd:'bleScanResults'})},2000);
         else if(msg.type==='error') alert(msg.msg);
       }catch(e){}
     };
@@ -1053,6 +1064,9 @@ body{
       $('vaneSection').style.display=s.vaneConfig>=1?'':'none';
       $('wideVaneSection').style.display=s.vaneConfig>=2?'':'none';
     }
+
+    // BLE sensor status
+    updateBleStatus(s.bleSensor);
 
     // HomeKit status
     if(s.hkPaired!=null){
@@ -1246,6 +1260,111 @@ body{
       vaneConfig:parseInt($('cfgVanes').value)
     });
   };
+
+  // ── BLE Remote Temperature Sensor ─────────────────────────────────────────
+  window.bleScan=function(){
+    var btn=$('ble-scan-btn');
+    btn.disabled=true;
+    btn.textContent='Scanning...';
+    var res=$('ble-scan-results');
+    while(res.firstChild) res.removeChild(res.firstChild);
+    send({cmd:'bleScan'});
+    setTimeout(function(){send({cmd:'bleScanResults'})},6000);
+  };
+
+  window.bleSelect=function(addr,name){
+    send({cmd:'bleSelect',addr:addr,name:name});
+    var res=$('ble-scan-results');
+    while(res.firstChild) res.removeChild(res.firstChild);
+  };
+
+  window.bleDisable=function(){
+    if(confirm('Disable remote temperature sensor? The heat pump will revert to its internal sensor.')){
+      send({cmd:'bleDisable'});
+    }
+  };
+
+  function renderBleScanResults(data){
+    var btn=$('ble-scan-btn');
+    btn.disabled=false;
+    btn.textContent='Scan for Sensors';
+    var container=$('ble-scan-results');
+    while(container.firstChild) container.removeChild(container.firstChild);
+    if(!data.sensors||data.sensors.length===0){
+      var msg=document.createElement('div');
+      msg.style.cssText='color:var(--text2);padding:8px;font-size:12px';
+      msg.textContent='No sensors found. Make sure your sensor is nearby and powered on.';
+      container.appendChild(msg);
+      return;
+    }
+    data.sensors.forEach(function(s){
+      var row=document.createElement('div');
+      row.style.cssText='display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border)';
+      var info=document.createElement('div');
+      var nm=document.createElement('strong');
+      nm.textContent=s.name;
+      nm.style.fontSize='13px';
+      info.appendChild(nm);
+      info.appendChild(document.createElement('br'));
+      var detail=document.createElement('span');
+      detail.style.cssText='color:var(--text2);font-size:11px';
+      var tStr=s.temp?' ('+s.temp.toFixed(1)+'\u00B0)':'';
+      detail.textContent=s.addr+' \u00B7 '+s.format+tStr+' \u00B7 '+s.rssi+'dBm';
+      info.appendChild(detail);
+      row.appendChild(info);
+      var selBtn=document.createElement('button');
+      selBtn.textContent='Select';
+      selBtn.className='save-btn';
+      selBtn.style.cssText='width:auto;padding:4px 12px;margin:0';
+      (function(a,n){selBtn.addEventListener('click',function(){bleSelect(a,n)})})(s.addr,s.name);
+      row.appendChild(selBtn);
+      container.appendChild(row);
+    });
+  }
+
+  function updateBleStatus(bleSensor){
+    var el=$('ble-status');
+    var disBtn=$('ble-disable-btn');
+    if(!bleSensor){
+      el.textContent='No sensor configured';
+      el.style.color='var(--text2)';
+      disBtn.style.display='none';
+      return;
+    }
+    el.style.color='';
+    disBtn.style.display='inline-block';
+    var wrap=document.createElement('div');
+    wrap.style.fontSize='13px';
+    var nameRow=document.createElement('div');
+    var nameB=document.createElement('strong');
+    nameB.textContent=bleSensor.name||'Remote Sensor';
+    nameRow.appendChild(nameB);
+    var srcSpan=document.createElement('span');
+    srcSpan.style.color='var(--text2)';
+    srcSpan.textContent=' ('+(bleSensor.api?'API':'BLE')+')';
+    nameRow.appendChild(srcSpan);
+    wrap.appendChild(nameRow);
+    var statusRow=document.createElement('div');
+    var stStr=bleSensor.active?'\u2705 Active':(bleSensor.stale?'\u274C Stale':'\u23F3 Waiting...');
+    statusRow.textContent='Status: '+stStr;
+    wrap.appendChild(statusRow);
+    if(bleSensor.active||bleSensor.stale){
+      var readRow=document.createElement('div');
+      var parts=['Temp: '+bleSensor.temp.toFixed(1)+'\u00B0'];
+      if(bleSensor.hum>=0) parts.push('Hum: '+bleSensor.hum.toFixed(0)+'%');
+      if(bleSensor.bat>=0) parts.push('Bat: '+bleSensor.bat+'%');
+      readRow.textContent=parts.join(' \u00B7 ');
+      wrap.appendChild(readRow);
+      if(!bleSensor.api){
+        var sigRow=document.createElement('div');
+        sigRow.style.color='var(--text2)';
+        sigRow.textContent='Signal: '+bleSensor.rssi+'dBm \u00B7 Updated '+bleSensor.age+'s ago';
+        wrap.appendChild(sigRow);
+      }
+    }
+    while(el.firstChild) el.removeChild(el.firstChild);
+    el.appendChild(wrap);
+  }
 
   window.saveWifi=function(){
     var ssid=$('cfgSSID').value.trim();
