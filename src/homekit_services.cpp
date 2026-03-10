@@ -359,20 +359,20 @@ uint8_t MitsubishiFan::cn105FanToPercent(uint8_t fan) {
     switch (fan) {
         case CN105_FAN_AUTO:  return 0;
         case CN105_FAN_QUIET: return 10;
-        case CN105_FAN_1:     return 27;
-        case CN105_FAN_2:     return 44;
-        case CN105_FAN_3:     return 61;
-        case CN105_FAN_4:     return 78;
+        case CN105_FAN_1:     return 30;
+        case CN105_FAN_2:     return 50;
+        case CN105_FAN_3:     return 70;
+        case CN105_FAN_4:     return 100;
         default:              return 0;
     }
 }
 
 uint8_t MitsubishiFan::percentToCN105Fan(uint8_t pct) {
     if (pct == 0)       return CN105_FAN_AUTO;
-    if (pct <= 17)      return CN105_FAN_QUIET;
-    if (pct <= 34)      return CN105_FAN_1;
-    if (pct <= 51)      return CN105_FAN_2;
-    if (pct <= 68)      return CN105_FAN_3;
+    if (pct <= 20)      return CN105_FAN_QUIET;
+    if (pct <= 40)      return CN105_FAN_1;
+    if (pct <= 60)      return CN105_FAN_2;
+    if (pct <= 80)      return CN105_FAN_3;
     return CN105_FAN_4;
 }
 
