@@ -402,7 +402,10 @@ body{
         </div>
       </div>
       <div id="hkSetupCode" style="display:none"></div>
-      <button id="hkSetupLink" href="#" class="save-btn" style="display:none;background:#E87400;margin-top:8px;text-align:center;text-decoration:none;color:#fff">Add to Home</button>
+      <div id="hkButtons" style="display:none;gap:8px;margin-top:8px;">
+        <a id="hkSetupLink" href="com.apple.home://" class="save-btn" style="flex:1;background:#E87400;text-align:center;text-decoration:none;color:#fff;margin:0">Open Home App</a>
+        <button id="hkCopyBtn" class="save-btn" style="flex:1;background:#333;margin:0" onclick="copySetupCode()">Copy Code</button>
+      </div>
       <button class="save-btn" style="background:var(--red);margin-top:8px" onclick="resetHomeKit()">Reset HomeKit Pairing</button>
     </div>
   </div>
@@ -541,6 +544,7 @@ body{
   var sliderDragging = false;
   var MAX_LOG_LINES = 200;
   var lastCmdTime = 0;       // timestamp of last user command (covers in-flight stale pushes)
+  var lastMsgTime = 0;       // timestamp of last received WS message (staleness detection)
   var tempUnit = 'C';        // 'C' or 'F' — display unit (protocol always Celsius)
 
   // ── DOM refs ───────────────────────────────────────────────────────────────
@@ -884,22 +888,24 @@ body{
     reconnTimer=setInterval(function(){connect()},1500);
   }
 
-  // Force-close a stale WS that reports OPEN but receives nothing
+  // Force-close a stale WebSocket that reports OPEN but receives nothing
   function forceReconnect(){
     clearTimeout(connTimeout);
     if(ws){try{ws.onclose=null;ws.close();}catch(e){}}
     ws=null;
     connDot.className='conn-dot err';
+    connDot.title='Disconnected';
     connect();
   }
 
-  // Server pushes state every 1s — 5s silence means dead connection
+  // Staleness check: server pushes state every 1s, so 5s silence = dead
   setInterval(function(){
-    if(ws&&ws.readyState===1&&lastMsgTime>0&&(Date.now()-lastMsgTime)>5000)
+    if(ws&&ws.readyState===1&&lastMsgTime>0&&(Date.now()-lastMsgTime)>5000){
       forceReconnect();
+    }
   },2000);
 
-  // Reconnect immediately when page returns from background (mobile)
+  // Reconnect immediately when page returns from background
   document.addEventListener('visibilitychange',function(){
     if(!document.hidden) forceReconnect();
   });
@@ -1069,9 +1075,7 @@ body{
       if(s.hkSetupURI&&s.hkSetupURI!==lastQRURI){
         lastQRURI=s.hkSetupURI;
         renderQR(s.hkSetupURI,qrCanvas);
-        var link=$('hkSetupLink');
-        link.href=s.hkSetupURI;
-        link.style.display='';
+        $('hkButtons').style.display='flex';
       }
     }
   }
@@ -1327,6 +1331,22 @@ body{
     if(confirm('This will remove all HomeKit pairings. You will need to re-pair in the Home app. Continue?')){
       send({cmd:'hkReset'});
     }
+  };
+
+  window.copySetupCode=function(){
+    var code=$('hkSetupCode').textContent;
+    if(!code||code==='--')return;
+    var btn=$('hkCopyBtn');
+    var ta=document.createElement('textarea');
+    ta.value=code;
+    ta.style.position='fixed';
+    ta.style.opacity='0';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    btn.textContent='Copied!';
+    setTimeout(function(){btn.textContent='Copy Code'},1500);
   };
 
   window.copyLogs=function(){
