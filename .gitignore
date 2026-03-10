@@ -1,0 +1,36 @@
+# PlatformIO
+.pio/
+
+# Python venv (provisioning script dependencies)
+.venv/
+
+# IDE
+.vscode/
+
+# Claude Code
+.claude/
+.agents/
+skills-lock.json
+docs/
+CLAUDE.md
+
+# Editor swap/backup files
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Provisioning
+labels/
+scripts/provision.sh
+scripts/generate_wifi_qr.py
+
+# Branded build overrides (per-brand -D flags)
+platformio_override.ini
+
+# Auto-generated (regenerate via scripts/embed_html.py)
+include/web_ui_html.h
+include/wifi_recovery_html.h

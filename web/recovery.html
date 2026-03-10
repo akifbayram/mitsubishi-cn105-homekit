@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>{{BRAND_NAME}} - WiFi Setup</title>
+<style>
+:root{--bg:#f0f1f6;--surface:#fff;--surface2:#e6e7ee;--border:#d0d1da;
+  --text:#1c1c2e;--text2:#6b6b85;--accent:#3a7fdb;--red:#e84060;--green:#2db55a;
+  --orange:#e8922a;--radius:8px}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  background:var(--bg);color:var(--text);min-height:100vh;padding:16px;
+  display:flex;align-items:center;justify-content:center}
+.container{max-width:380px;width:100%}
+.card{background:var(--surface);border-radius:var(--radius);padding:20px;margin-bottom:12px}
+h1{font-size:20px;font-weight:600;margin-bottom:4px}
+.subtitle{font-size:13px;color:var(--text2);margin-bottom:16px}
+.status{padding:10px;border-radius:6px;font-size:13px;margin-bottom:16px;text-align:center}
+.status.err{background:rgba(255,68,102,.15);border:1px solid var(--red);color:var(--red)}
+.status.ok{background:rgba(68,204,102,.15);border:1px solid var(--green);color:var(--green)}
+.status.warn{background:rgba(255,170,51,.15);border:1px solid var(--orange);color:var(--orange)}
+.field{margin-bottom:12px}
+.field label{display:block;font-size:12px;color:var(--text2);margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px}
+.field input{width:100%;padding:10px;border:1px solid var(--border);border-radius:6px;
+  background:var(--surface2);color:var(--text);font-size:14px;outline:none}
+.field input:focus{border-color:var(--accent)}
+.pw-toggle{position:absolute;right:6px;top:50%;transform:translateY(-50%);
+  background:none;border:none;color:var(--text2);cursor:pointer;font-size:14px;
+  padding:4px;line-height:1}
+.current-ssid{font-size:13px;color:var(--text2);margin-bottom:16px}
+.current-ssid strong{color:var(--text)}
+.btn{width:100%;padding:12px;border:none;border-radius:6px;font-size:14px;font-weight:600;
+  cursor:pointer;transition:all .2s}
+.btn:active{transform:scale(.97)}
+.btn-primary{background:var(--accent);color:#fff}
+.btn-primary:disabled{background:var(--surface2);color:var(--text2);cursor:not-allowed}
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="card">
+    <h1 id="devName">{{BRAND_NAME}}</h1>
+    <div class="subtitle">WiFi Recovery</div>
+    <div class="status err" id="statusBox">Not connected to WiFi</div>
+    <div class="current-ssid" id="currentSSID"></div>
+    <div class="field">
+      <label>WiFi Network (SSID)</label>
+      <input type="text" id="ssid" placeholder="Enter network name" maxlength="32" autocomplete="off">
+    </div>
+    <div class="field">
+      <label>Password</label>
+      <div style="position:relative">
+        <input type="password" id="pass" placeholder="Enter password" maxlength="64" style="padding-right:36px">
+        <button type="button" class="pw-toggle" onclick="togglePw('pass',this)" aria-label="Show password">👁‍🗨</button>
+      </div>
+    </div>
+    <button class="btn btn-primary" id="saveBtn" onclick="saveWifi()" disabled>Save & Connect</button>
+  </div>
+</div>
+<script>
+(function(){
+  window.togglePw=function(id,btn){
+    var el=document.getElementById(id);
+    var show=el.type==='password';
+    el.type=show?'text':'password';
+    btn.textContent='\u{1F441}\u200D\u{1F5E8}';
+    btn.setAttribute('aria-label',show?'Hide password':'Show password');
+  };
+  var ssidEl=document.getElementById('ssid');
+  var passEl=document.getElementById('pass');
+  var saveBtn=document.getElementById('saveBtn');
+  var statusBox=document.getElementById('statusBox');
+  var currentSSID=document.getElementById('currentSSID');
+  var devName=document.getElementById('devName');
+
+  function checkFields(){
+    saveBtn.disabled=!(ssidEl.value.trim()&&passEl.value);
+  }
+  ssidEl.addEventListener('input',checkFields);
+  passEl.addEventListener('input',checkFields);
+
+  // Load current WiFi status
+  fetch('/wifi-status').then(function(r){return r.json()}).then(function(d){
+    if(d.deviceName) devName.textContent=d.deviceName;
+    if(d.ssid){
+      currentSSID.textContent='';
+      var prefix=document.createTextNode('Current network: ');
+      var b=document.createElement('strong');
+      b.textContent=d.ssid;
+      currentSSID.appendChild(prefix);
+      currentSSID.appendChild(b);
+    }
+    if(d.connected){
+      statusBox.className='status ok';
+      statusBox.textContent='Connected to WiFi';
+    }
+  }).catch(function(){});
+
+  window.saveWifi=function(){
+    var ssid=ssidEl.value.trim();
+    var pass=passEl.value;
+    if(!ssid||!pass) return;
+
+    saveBtn.disabled=true;
+    saveBtn.textContent='Saving...';
+
+    fetch('/wifi-setup',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({ssid:ssid,password:pass})
+    }).then(function(r){return r.json()}).then(function(d){
+      statusBox.className='status warn';
+      statusBox.textContent='Credentials saved. Connecting to '+ssid+'...';
+      saveBtn.textContent='Saved';
+      // Poll for connection status
+      var attempts=0;
+      var poll=setInterval(function(){
+        attempts++;
+        if(attempts>30){clearInterval(poll);statusBox.textContent='Connection timeout. Try again or check credentials.';saveBtn.disabled=false;saveBtn.textContent='Save & Connect';return}
+        fetch('/wifi-status').then(function(r){return r.json()}).then(function(s){
+          if(s.connected){
+            clearInterval(poll);
+            statusBox.className='status ok';
+            statusBox.textContent='Connected! The device is now on your network. Rebooting...';
+          }
+        }).catch(function(){});
+      },3000);
+    }).catch(function(){
+      statusBox.className='status err';
+      statusBox.textContent='Failed to save. Check connection to device AP.';
+      saveBtn.disabled=false;
+      saveBtn.textContent='Save & Connect';
+    });
+  };
+})();
+</script>
+</body>
+</html>

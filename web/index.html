@@ -1,0 +1,1313 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Mitsubishi AC</title>
+<style>
+:root{
+  --bg:#121220;--surface:#1a1a2e;--surface2:#242442;--border:#2d2d50;
+  --text:#e0e0f0;--text2:#8888aa;--accent:#4a9eff;--accent-dim:#2a5e9f;
+  --red:#ff4466;--green:#44cc66;--orange:#ffaa33;--yellow:#ffe066;
+  --btn-bg:#2a2a48;--btn-active:#4a9eff;--btn-hover:#33335a;
+  --mode-accent:#4a9eff;--mode-accent-dim:#2a5e9f;
+  --radius:8px;
+}
+.mode-heat{--mode-accent:#ff6b35;--mode-accent-dim:#9f4020;--btn-active:#ff6b35}
+.mode-cool{--mode-accent:#4a9eff;--mode-accent-dim:#2a5e9f;--btn-active:#4a9eff}
+.mode-auto{--mode-accent:#a855f7;--mode-accent-dim:#6b21a8;--btn-active:#a855f7}
+.mode-dry{--mode-accent:#f59e0b;--mode-accent-dim:#92400e;--btn-active:#f59e0b}
+.mode-fan{--mode-accent:#22d3ee;--mode-accent-dim:#155e75;--btn-active:#22d3ee}
+[data-theme="light"]{
+  --bg:#f0f1f6;--surface:#fff;--surface2:#e6e7ee;--border:#d0d1da;
+  --text:#1c1c2e;--text2:#6b6b85;--accent:#3a7fdb;--accent-dim:#2a5fa5;
+  --red:#e84060;--green:#2db55a;--orange:#e8922a;--yellow:#d9a020;
+  --btn-bg:#e2e3ec;--btn-active:#3a7fdb;--btn-hover:#d4d5e0;
+  --mode-accent:#3a7fdb;--mode-accent-dim:#2a5fa5;
+}
+[data-theme="light"] .mode-heat{--mode-accent:#e85a2a;--mode-accent-dim:#b84520;--btn-active:#e85a2a}
+[data-theme="light"] .mode-cool{--mode-accent:#3a7fdb;--mode-accent-dim:#2a5fa5;--btn-active:#3a7fdb}
+[data-theme="light"] .mode-auto{--mode-accent:#9333ea;--mode-accent-dim:#7e22ce;--btn-active:#9333ea}
+[data-theme="light"] .mode-dry{--mode-accent:#d97706;--mode-accent-dim:#b45309;--btn-active:#d97706}
+[data-theme="light"] .mode-fan{--mode-accent:#0891b2;--mode-accent-dim:#0e7490;--btn-active:#0891b2}
+*{box-sizing:border-box;margin:0;padding:0}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  background:var(--bg);color:var(--text);
+  min-height:100vh;padding:12px;
+  -webkit-tap-highlight-color:transparent;
+}
+.container{max-width:420px;margin:0 auto}
+
+/* Header */
+.header{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:12px 16px;background:var(--surface);border-radius:var(--radius);
+  margin-bottom:12px;
+}
+.header-left{display:flex;flex-direction:column;gap:2px}
+.device-name{font-size:16px;font-weight:600}
+.fw-version{font-size:11px;color:var(--text2)}
+.conn-dot{
+  width:32px;height:32px;border-radius:50%;flex-shrink:0;
+  transition:background .3s;
+}
+.conn-dot.ok{background:var(--green)}
+.conn-dot.err{background:var(--red)}
+.theme-toggle{
+  width:32px;height:32px;border:none;border-radius:50%;
+  background:var(--surface2);cursor:pointer;display:flex;
+  align-items:center;justify-content:center;color:var(--text2);padding:0;
+}
+.theme-toggle:active{transform:scale(.9)}
+.theme-toggle svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.icon-moon{display:none}
+[data-theme="light"] .icon-sun{display:none}
+[data-theme="light"] .icon-moon{display:block}
+
+/* Card */
+.card{
+  background:var(--surface);border-radius:var(--radius);
+  padding:14px 16px;margin-bottom:10px;
+}
+.card-label{font-size:11px;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px}
+
+/* Power button */
+.power-btn{
+  display:block;width:100%;padding:14px;border:none;border-radius:var(--radius);
+  font-size:16px;font-weight:600;cursor:pointer;transition:all .2s;
+  text-transform:uppercase;letter-spacing:1px;
+}
+.power-btn.on{background:var(--mode-accent);color:#fff}
+.power-btn.off{background:var(--btn-bg);color:var(--text2)}
+.power-btn:active{transform:scale(.97)}
+
+/* Button groups */
+.btn-group{display:flex;gap:6px;flex-wrap:wrap}
+.btn-group button{
+  flex:1;min-width:0;padding:12px 6px;border:none;border-radius:6px;
+  background:var(--btn-bg);color:var(--text2);font-size:12px;font-weight:500;
+  cursor:pointer;transition:all .15s;white-space:nowrap;
+}
+.btn-group button.active{background:var(--btn-active);color:#fff}
+.btn-group button:not(.active):hover{background:var(--btn-hover)}
+.btn-group button:active{transform:scale(.95)}
+
+/* Temperature */
+.temp-display{
+  display:flex;justify-content:space-between;align-items:flex-end;
+  margin-bottom:12px;
+}
+.temp-room{font-size:42px;font-weight:300;letter-spacing:-1px;color:var(--mode-accent);transition:color .3s}
+.temp-val{font-size:24px;font-weight:600}
+.temp-display small{display:block;font-size:11px;color:var(--text2);margin-top:2px}
+.slider-row{display:flex;align-items:center;gap:10px}
+.slider-row input[type=range]{flex:1;-webkit-appearance:none;appearance:none;height:6px;border-radius:3px;background:var(--surface2);outline:none}
+.slider-row input[type=range]::-webkit-slider-thumb{
+  -webkit-appearance:none;width:24px;height:24px;border-radius:50%;
+  background:var(--mode-accent);cursor:pointer;border:2px solid var(--bg);
+}
+.slider-row input[type=range]::-moz-range-thumb{
+  width:24px;height:24px;border-radius:50%;
+  background:var(--mode-accent);cursor:pointer;border:2px solid var(--bg);
+}
+.slider-val{font-size:18px;font-weight:600;min-width:52px;text-align:right}
+
+/* Status row */
+.status-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.status-item{
+  display:flex;align-items:center;gap:6px;
+  padding:8px 10px;background:var(--surface2);border-radius:6px;font-size:13px;
+}
+.status-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.status-dot.running{background:var(--green)}
+.status-dot.idle{background:var(--text2)}
+.status-label{color:var(--text2);margin-right:auto}
+
+/* Collapsible */
+.collapse-header{
+  display:flex;align-items:center;gap:8px;cursor:pointer;
+  padding:12px 16px;background:var(--surface);border-radius:var(--radius);
+  margin-bottom:2px;user-select:none;
+}
+.collapse-header.open{border-radius:var(--radius) var(--radius) 0 0;margin-bottom:0}
+.collapse-arrow{
+  font-size:10px;transition:transform .2s;color:var(--text2);
+}
+.collapse-header.open .collapse-arrow{transform:rotate(90deg)}
+.collapse-title{font-size:13px;font-weight:500;flex:1}
+.collapse-body{
+  background:var(--surface);border-radius:0 0 var(--radius) var(--radius);
+  padding:0 16px;max-height:0;overflow:hidden;transition:max-height .3s ease,padding .3s ease;
+}
+.collapse-body.open{max-height:600px;padding:12px 16px}
+
+/* Settings form */
+.setting-row{
+  display:flex;align-items:center;gap:10px;margin-bottom:10px;
+}
+.setting-row label{font-size:13px;color:var(--text2);min-width:80px}
+.setting-row select,.setting-row input{
+  flex:1;padding:8px;border:1px solid var(--border);border-radius:6px;
+  background:var(--surface2);color:var(--text);font-size:13px;
+}
+.setting-row .unit{font-size:12px;color:var(--text2);min-width:20px}
+.pw-toggle{position:absolute;right:6px;top:50%;transform:translateY(-50%);
+  background:none;border:none;color:var(--text2);cursor:pointer;font-size:14px;
+  padding:4px;line-height:1}
+.save-btn{
+  width:100%;padding:10px;border:none;border-radius:6px;
+  background:var(--accent);color:#fff;font-size:13px;font-weight:600;
+  cursor:pointer;margin-top:4px;
+}
+.save-btn:active{transform:scale(.97)}
+
+/* Log panel */
+.log-toolbar{display:flex;justify-content:flex-end;gap:8px;margin-bottom:6px}
+.clear-btn{
+  padding:4px 12px;border:1px solid var(--border);border-radius:4px;
+  background:transparent;color:var(--text2);font-size:11px;cursor:pointer;
+}
+.log-box{
+  background:var(--bg);border:1px solid var(--border);border-radius:6px;
+  padding:8px;height:200px;overflow-y:auto;
+  font-family:'SF Mono',Monaco,Consolas,monospace;font-size:11px;
+  line-height:1.5;color:var(--text2);white-space:pre-wrap;word-break:break-all;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar{width:4px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+
+/* HomeKit QR Label */
+.hk-label{
+  background:#fff;border:2.5px solid #000;border-radius:12px;
+  padding:14px 14px 10px;margin:10px auto;max-width:220px;
+  display:flex;flex-direction:column;align-items:center;gap:10px;
+}
+.hk-label-top{
+  display:flex;align-items:center;gap:10px;width:100%;
+}
+.hk-icon{width:52px;height:52px;flex-shrink:0}
+.hk-digits{display:flex;flex-direction:column;gap:3px;flex:1}
+.hk-digit-row{display:flex;gap:6px;justify-content:center}
+.hk-digit{
+  font-family:'SF Pro Rounded','SF Pro Display',-apple-system,system-ui,sans-serif;
+  font-size:22px;font-weight:700;color:#000;
+  width:24px;text-align:center;line-height:1.1;
+}
+.hk-label canvas{width:100%;aspect-ratio:1;display:block}
+</style>
+</head>
+<body>
+<div class="container">
+
+  <!-- Header -->
+  <div class="header">
+    <div class="header-left">
+      <div class="device-name" id="devName">Mitsubishi AC</div>
+      <div class="fw-version" id="fwVer">v1.0.0</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px">
+      <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="Toggle theme">
+        <svg class="icon-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+        <svg class="icon-moon" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3a7 7 0 0 0 9.79 9.79z"/></svg>
+      </button>
+      <div class="conn-dot err" id="connDot" title="Disconnected"></div>
+    </div>
+  </div>
+
+  <!-- Power -->
+  <div class="card">
+    <button class="power-btn off" id="powerBtn" onclick="togglePower()">Power Off</button>
+  </div>
+
+  <!-- Mode -->
+  <div class="card">
+    <div class="card-label">Mode</div>
+    <div class="btn-group" id="modeGrp">
+      <button data-v="heat" onclick="setMode(this)">Heat</button>
+      <button data-v="cool" onclick="setMode(this)">Cool</button>
+      <button data-v="auto" onclick="setMode(this)">Auto</button>
+      <button data-v="dry" onclick="setMode(this)">Dry</button>
+      <button data-v="fan" onclick="setMode(this)">Fan</button>
+    </div>
+  </div>
+
+  <!-- Temperature -->
+  <div class="card">
+    <div class="card-label">Temperature</div>
+    <div class="temp-display">
+      <div><span class="temp-room" id="roomTemp">--</span><small><span class="temp-unit-label">&deg;C</span> room</small></div>
+      <div><span class="temp-val" id="targetTemp">--</span><small><span class="temp-unit-label">&deg;C</span> target</small></div>
+    </div>
+    <div class="slider-row">
+      <input type="range" id="tempSlider" min="16" max="31" step="0.5" value="22"
+             oninput="onSliderInput()" onchange="onSliderChange()">
+      <div class="slider-val" id="sliderVal">22.0</div>
+    </div>
+    <!-- Dual setpoint for AUTO mode -->
+    <div id="dualTemp" style="display:none;margin-top:12px">
+      <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+        <span style="color:var(--red);font-size:13px">Heat: <span id="heatThreshVal">20.0</span><span class="temp-unit-label">&deg;C</span></span>
+        <span style="color:var(--accent);font-size:13px">Cool: <span id="coolThreshVal">25.0</span><span class="temp-unit-label">&deg;C</span></span>
+      </div>
+      <div style="margin-bottom:6px">
+        <input type="range" id="heatSlider" min="16" max="31" step="0.5" value="20"
+          style="width:100%;accent-color:var(--red)">
+      </div>
+      <div>
+        <input type="range" id="coolSlider" min="16" max="31" step="0.5" value="25"
+          style="width:100%;accent-color:var(--accent)">
+      </div>
+    </div>
+  </div>
+
+  <!-- Fan Speed -->
+  <div class="card">
+    <div class="card-label">Fan Speed</div>
+    <div class="btn-group" id="fanGrp">
+      <button data-v="auto" onclick="setFan(this)">Auto</button>
+      <button data-v="quiet" onclick="setFan(this)">Quiet</button>
+      <button data-v="1" onclick="setFan(this)">1</button>
+      <button data-v="2" onclick="setFan(this)">2</button>
+      <button data-v="3" onclick="setFan(this)">3</button>
+      <button data-v="4" onclick="setFan(this)">4</button>
+    </div>
+  </div>
+
+  <!-- Vane Position -->
+  <div class="card" id="vaneCard">
+    <div class="card-label">Vane Position</div>
+    <div class="btn-group" id="vaneGrp">
+      <button data-v="auto" onclick="setVane(this)">Auto</button>
+      <button data-v="1" onclick="setVane(this)">1</button>
+      <button data-v="2" onclick="setVane(this)">2</button>
+      <button data-v="3" onclick="setVane(this)">3</button>
+      <button data-v="4" onclick="setVane(this)">4</button>
+      <button data-v="5" onclick="setVane(this)">5</button>
+      <button data-v="swing" onclick="setVane(this)">Swing</button>
+    </div>
+  </div>
+
+  <!-- Wide Vane (Horizontal) -->
+  <div class="card" id="wideVaneCard">
+    <div class="card-label">Horizontal Vane</div>
+    <div class="btn-group" id="wideVaneGrp">
+      <button data-v="ll" onclick="setWideVane(this)">&laquo;</button>
+      <button data-v="l" onclick="setWideVane(this)">&lsaquo;</button>
+      <button data-v="c" onclick="setWideVane(this)">|</button>
+      <button data-v="r" onclick="setWideVane(this)">&rsaquo;</button>
+      <button data-v="rr" onclick="setWideVane(this)">&raquo;</button>
+      <button data-v="split" onclick="setWideVane(this)">&lsaquo;&rsaquo;</button>
+      <button data-v="swing" onclick="setWideVane(this)">Swing</button>
+    </div>
+  </div>
+
+  <!-- Status (collapsible) -->
+  <div class="card" style="padding:0">
+    <div class="collapse-header" onclick="togglePanel(this)">
+      <span class="collapse-arrow">&#9654;</span>
+      <span class="collapse-title">Status</span>
+    </div>
+    <div class="collapse-body" id="statusBody">
+    <div class="status-grid">
+      <div class="status-item">
+        <div class="status-dot idle" id="compDot"></div>
+        <span id="compText">Compressor Off</span>
+      </div>
+      <div class="status-item">
+        <span class="status-label">Freq</span>
+        <span id="compHz">-- Hz</span>
+      </div>
+      <div class="status-item">
+        <span class="status-label">Stage</span>
+        <span id="stageVal">--</span>
+      </div>
+      <div class="status-item">
+        <span class="status-label">Sub</span>
+        <span id="subModeVal">--</span>
+      </div>
+      <div class="status-item">
+        <span class="status-label">Outside</span>
+        <span id="outsideTemp">--</span>
+      </div>
+      <div class="status-item" id="runtimeRow" style="display:none">
+        <span class="status-label">Runtime</span>
+        <span id="runtimeHrs">--</span>
+      </div>
+      <div class="status-item">
+        <span class="status-label">WiFi</span>
+        <span id="rssiVal">-- dBm</span>
+      </div>
+      <div class="status-item">
+        <span class="status-label">Uptime</span>
+        <span id="uptimeVal">--:--:--</span>
+      </div>
+      <div class="status-item">
+        <div class="status-dot idle" id="cn105Dot"></div>
+        <span id="cn105Text">CN105</span>
+      </div>
+      <div class="status-item" id="errorRow" style="display:none">
+        <span class="status-label">Error</span>
+        <span id="errorCode" style="color:var(--red)">--</span>
+      </div>
+    </div>
+    </div>
+  </div>
+
+  <!-- HomeKit (collapsible) -->
+  <div style="margin-bottom:10px">
+    <div class="collapse-header" onclick="togglePanel(this)">
+      <span class="collapse-arrow">&#9654;</span>
+      <span class="collapse-title">HomeKit</span>
+    </div>
+    <div class="collapse-body" id="homekitBody">
+      <div class="status-grid" style="margin-bottom:10px">
+        <div class="status-item">
+          <div class="status-dot idle" id="hkDot"></div>
+          <span id="hkStatusText">--</span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">Controllers</span>
+          <span id="hkControllers">--</span>
+        </div>
+      </div>
+      <div class="hk-label" id="hkLabel">
+        <div class="hk-label-top">
+          <svg class="hk-icon" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M50 8L8 42V88C8 90.2 9.8 92 12 92H88C90.2 92 92 90.2 92 88V42L50 8Z" stroke="#000" stroke-width="5" fill="none"/>
+            <path d="M50 28L24 50V78C24 79.1 24.9 80 26 80H74C75.1 80 76 79.1 76 78V50L50 28Z" stroke="#000" stroke-width="4" fill="none"/>
+            <rect x="40" y="48" width="20" height="20" rx="3" stroke="#000" stroke-width="3.5" fill="none"/>
+            <rect x="46" y="54" width="8" height="8" rx="1.5" stroke="#000" stroke-width="2.5" fill="none"/>
+          </svg>
+          <div class="hk-digits">
+            <div class="hk-digit-row">
+              <span class="hk-digit" id="hkD0">-</span>
+              <span class="hk-digit" id="hkD1">-</span>
+              <span class="hk-digit" id="hkD2">-</span>
+              <span class="hk-digit" id="hkD3">-</span>
+            </div>
+            <div class="hk-digit-row">
+              <span class="hk-digit" id="hkD4">-</span>
+              <span class="hk-digit" id="hkD5">-</span>
+              <span class="hk-digit" id="hkD6">-</span>
+              <span class="hk-digit" id="hkD7">-</span>
+            </div>
+          </div>
+        </div>
+        <canvas id="qrCanvas" width="200" height="200" style="image-rendering:pixelated"></canvas>
+      </div>
+      <div id="hkSetupCode" style="display:none"></div>
+      <button class="save-btn" style="background:var(--red);margin-top:8px" onclick="resetHomeKit()">Reset HomeKit Pairing</button>
+    </div>
+  </div>
+
+  <!-- WiFi (collapsible) -->
+  <div style="margin-bottom:10px">
+    <div class="collapse-header" onclick="togglePanel(this)">
+      <span class="collapse-arrow">&#9654;</span>
+      <span class="collapse-title">WiFi</span>
+    </div>
+    <div class="collapse-body" id="wifiBody">
+      <div class="setting-row">
+        <label>SSID</label>
+        <input type="text" id="cfgSSID" placeholder="Network name" maxlength="32">
+      </div>
+      <div class="setting-row">
+        <label>Password</label>
+        <div style="flex:1;position:relative">
+          <input type="password" id="cfgPass" placeholder="Password" maxlength="64" style="width:100%;padding-right:36px">
+          <button type="button" class="pw-toggle" onclick="togglePw('cfgPass',this)" aria-label="Show password">👁‍🗨</button>
+        </div>
+      </div>
+      <button class="save-btn" id="wifiSaveBtn" onclick="saveWifi()" disabled>Save WiFi</button>
+      <div id="wifiBanner" style="display:none;margin-top:8px;padding:10px;background:var(--surface2);border:1px solid var(--green);border-radius:6px;font-size:13px;text-align:center">
+        WiFi credentials saved. Reboot to connect to the new network.
+        <button class="save-btn" style="background:var(--orange);margin-top:8px" onclick="restartDevice()">Reboot Now</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings (collapsible) -->
+  <div style="margin-bottom:10px">
+    <div class="collapse-header" onclick="togglePanel(this)">
+      <span class="collapse-arrow">&#9654;</span>
+      <span class="collapse-title">Settings</span>
+    </div>
+    <div class="collapse-body" id="settingsBody">
+      <div class="setting-row">
+        <label>Temp Unit</label>
+        <div class="btn-group" id="unitGrp" style="flex:1">
+          <button data-v="C" class="active" onclick="setTempUnit(this)">°C</button>
+          <button data-v="F" onclick="setTempUnit(this)">°F</button>
+        </div>
+      </div>
+      <div class="setting-row">
+        <label>Vane Type</label>
+        <select id="cfgVanes">
+          <option value="0">No Vanes</option>
+          <option value="1">Vertical Only</option>
+          <option value="2" selected>Vertical + Horizontal</option>
+        </select>
+      </div>
+      <div class="setting-row">
+        <label>Log Level</label>
+        <select id="cfgLogLevel">
+          <option value="0">Error</option>
+          <option value="1">Warn</option>
+          <option value="2" selected>Info</option>
+          <option value="3">Debug</option>
+        </select>
+      </div>
+      <div class="setting-row">
+        <label>Poll Interval</label>
+        <input type="number" id="cfgPoll" min="500" max="30000" step="500" value="2000">
+        <span class="unit">ms</span>
+      </div>
+      <button class="save-btn" onclick="saveConfig()">Save Settings</button>
+      <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+        <div class="card-label">Firmware Update</div>
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+          <input type="file" id="fwFile" accept=".bin" style="flex:1;font-size:12px;color:var(--text2)">
+          <button class="save-btn" style="width:auto;padding:8px 16px;margin:0" onclick="uploadFirmware()">Upload</button>
+        </div>
+        <div id="otaProgress" style="display:none">
+          <div style="background:var(--surface2);border-radius:4px;height:6px;overflow:hidden;margin-bottom:4px">
+            <div id="otaBar" style="height:100%;background:var(--accent);width:0%;transition:width .3s"></div>
+          </div>
+          <div id="otaStatus" style="font-size:11px;color:var(--text2)"></div>
+        </div>
+        <button class="save-btn" style="background:var(--red);margin-top:8px" onclick="restartDevice()">Restart Device</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Logs (collapsible) -->
+  <div style="margin-bottom:10px">
+    <div class="collapse-header" onclick="togglePanel(this)">
+      <span class="collapse-arrow">&#9654;</span>
+      <span class="collapse-title">Logs</span>
+    </div>
+    <div class="collapse-body" id="logsBody">
+      <div class="log-toolbar">
+        <button class="clear-btn" onclick="copyLogs()">Copy</button>
+        <button class="clear-btn" onclick="clearLogs()">Clear</button>
+      </div>
+      <div class="log-box" id="logBox"></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+(function(){
+  'use strict';
+
+  // ── Theme ───────────────────────────────────────────────────────────────────
+  function initTheme(){
+    var saved=localStorage.getItem('theme');
+    var theme=saved||(window.matchMedia&&window.matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');
+    document.documentElement.setAttribute('data-theme',theme);
+  }
+
+  window.toggleTheme=function(){
+    var current=document.documentElement.getAttribute('data-theme')||'dark';
+    var next=(current==='dark')?'light':'dark';
+    localStorage.setItem('theme',next);
+    document.documentElement.setAttribute('data-theme',next);
+  };
+
+  initTheme();
+
+  // ── State ──────────────────────────────────────────────────────────────────
+  var ws = null;
+  var state = {};
+  var reconnTimer = null;
+  var sliderDragging = false;
+  var MAX_LOG_LINES = 200;
+  var lastCmdTime = 0;       // timestamp of last user command (covers in-flight stale pushes)
+  var tempUnit = 'C';        // 'C' or 'F' — display unit (protocol always Celsius)
+
+  // ── DOM refs ───────────────────────────────────────────────────────────────
+  var $=function(id){return document.getElementById(id)};
+  window.togglePw=function(id,btn){
+    var el=document.getElementById(id);
+    var show=el.type==='password';
+    el.type=show?'text':'password';
+    btn.textContent='\u{1F441}\u200D\u{1F5E8}';
+    btn.setAttribute('aria-label',show?'Hide password':'Show password');
+  };
+  var connDot=$('connDot'), powerBtn=$('powerBtn');
+  var roomTemp=$('roomTemp'), targetTemp=$('targetTemp');
+  var tempSlider=$('tempSlider'), sliderVal=$('sliderVal');
+  var compDot=$('compDot'), compText=$('compText');
+  var cn105Dot=$('cn105Dot'), cn105Text=$('cn105Text');
+  var rssiVal=$('rssiVal'), uptimeVal=$('uptimeVal');
+  var compHz=$('compHz');
+  var stageVal=$('stageVal'), subModeVal=$('subModeVal');
+  var outsideTempEl=$('outsideTemp');
+  var logBox=$('logBox');
+  var dualTemp=$('dualTemp');
+  var heatSlider=$('heatSlider'), coolSlider=$('coolSlider');
+  var heatThreshVal=$('heatThreshVal'), coolThreshVal=$('coolThreshVal');
+  var dualLocked=false;
+  var hkDot=$('hkDot'), hkStatusText=$('hkStatusText');
+  var hkControllersEl=$('hkControllers'), hkSetupCodeEl=$('hkSetupCode');
+  var qrCanvas=$('qrCanvas');
+  var hkDigits=[]; for(var i=0;i<8;i++) hkDigits.push($('hkD'+i));
+  var lastQRURI='';
+  var unitLabels=document.querySelectorAll('.temp-unit-label');
+
+  // ── Temperature unit helpers ──────────────────────────────────────────────
+  // Mitsubishi MHK1/MHK2 Fahrenheit lookup table (STANDARD mode)
+  // Maps integer °F → specific Celsius setpoints used by the heat pump
+  var F_TABLE=[
+    [61,16.0],[62,16.5],[63,17.0],[64,17.5],[65,18.0],
+    [66,18.5],[67,19.0],[68,20.0],[69,21.0],[70,21.5],
+    [71,22.0],[72,22.5],[73,23.0],[74,23.5],[75,24.0],
+    [76,24.5],[77,25.0],[78,25.5],[79,26.0],[80,26.5],
+    [81,27.0],[82,27.5],[83,28.0],[84,28.5],[85,29.0],
+    [86,29.5],[87,30.0],[88,30.5]
+  ];
+  function cToFTable(c){
+    var best=F_TABLE[0],bestD=999;
+    for(var i=0;i<F_TABLE.length;i++){
+      var d=Math.abs(F_TABLE[i][1]-c);
+      if(d<bestD){bestD=d;best=F_TABLE[i]}
+    }
+    return best[0];
+  }
+  function fToCTable(f){
+    var fi=Math.round(f);
+    if(fi<61)fi=61;if(fi>88)fi=88;
+    return F_TABLE[fi-61][1];
+  }
+  function fmtTemp(c){
+    if(c==null) return '--';
+    if(tempUnit==='F') return cToFTable(c).toString();
+    return c.toFixed(1);
+  }
+  function fmtReadingTemp(c){
+    if(c==null) return '--';
+    if(tempUnit==='F'){
+      if(c>=16.0&&c<=30.5) return cToFTable(c).toString();
+      return Math.round(c*9/5+32).toString();
+    }
+    return c.toFixed(1);
+  }
+  function unitStr(){return '\u00B0'+(tempUnit==='F'?'F':'C')}
+
+  // ── QR Code Generator (version 1-4, byte mode, EC level L) ─────────────
+  // Compact implementation for short strings like X-HM:// URIs (~20 chars)
+  function renderQR(text,canvas){
+    var mods=makeQR(text);
+    if(!mods){canvas.style.display='none';return}
+    canvas.style.display='';
+    var sz=mods.length,s=Math.floor(Math.min(canvas.width,canvas.height)/sz);
+    canvas.width=canvas.height=sz*s;
+    var ctx=canvas.getContext('2d');
+    ctx.fillStyle='#fff';ctx.fillRect(0,0,canvas.width,canvas.height);
+    ctx.fillStyle='#000';
+    for(var y=0;y<sz;y++)for(var x=0;x<sz;x++)
+      if(mods[y][x])ctx.fillRect(x*s,y*s,s,s);
+  }
+
+  function makeQR(text){
+    var data=[];for(var i=0;i<text.length;i++)data.push(text.charCodeAt(i));
+    // Pick version: need enough data capacity for byte mode
+    var caps=[[0,0],[17,10],[28,16],[44,22],[58,28]]; // [data codewords, ec codewords] per version, EC-L
+    var ver=0,dcw=0,ecw=0;
+    for(var v=1;v<=4;v++){
+      var need=data.length+3; // mode(4b)+count(8b for v1-9)+terminator → 3 byte overhead max
+      if(caps[v][0]>=Math.ceil((data.length*8+4+8+4)/8)){ver=v;dcw=caps[v][0];ecw=caps[v][1];break}
+    }
+    if(!ver)return null;
+    var sz=17+ver*4;
+
+    // Encode data: byte mode
+    var bits=[];
+    function pushBits(val,n){for(var i=n-1;i>=0;i--)bits.push((val>>i)&1)}
+    pushBits(4,4); // byte mode indicator
+    pushBits(data.length,ver<=9?8:16); // character count
+    for(var i=0;i<data.length;i++)pushBits(data[i],8);
+    pushBits(0,Math.min(4,dcw*8-bits.length)); // terminator
+    while(bits.length%8)bits.push(0); // byte-align
+    while(bits.length<dcw*8){pushBits(0xEC,8);if(bits.length<dcw*8)pushBits(0x11,8)}
+
+    // Convert bits to codewords
+    var cws=[];
+    for(var i=0;i<bits.length;i+=8)
+      cws.push((bits[i]<<7)|(bits[i+1]<<6)|(bits[i+2]<<5)|(bits[i+3]<<4)|
+               (bits[i+4]<<3)|(bits[i+5]<<2)|(bits[i+6]<<1)|bits[i+7]);
+
+    // Reed-Solomon EC
+    var ec=rsEncode(cws,ecw);
+    var allCws=cws.concat(ec);
+
+    // Build matrix
+    var grid=[],rsv=[];
+    for(var y=0;y<sz;y++){grid[y]=[];rsv[y]=[];for(var x=0;x<sz;x++){grid[y][x]=0;rsv[y][x]=false}}
+
+    // Finder patterns
+    function finder(cx,cy){
+      for(var dy=-3;dy<=3;dy++)for(var dx=-3;dx<=3;dx++){
+        var y=cy+dy,x=cx+dx;
+        if(y<0||y>=sz||x<0||x>=sz)continue;
+        var v=(Math.max(Math.abs(dx),Math.abs(dy))!==2)?1:0;
+        grid[y][x]=v;rsv[y][x]=true;
+      }
+      // Separators
+      for(var i=-4;i<=4;i++){
+        var coords=[[cy-4,cx+i],[cy+4,cx+i],[cy+i,cx-4],[cy+i,cx+4]];
+        for(var c=0;c<coords.length;c++){
+          var ry=coords[c][0],rx=coords[c][1];
+          if(ry>=0&&ry<sz&&rx>=0&&rx<sz){grid[ry][rx]=0;rsv[ry][rx]=true}
+        }
+      }
+    }
+    finder(3,3);finder(sz-4,3);finder(3,sz-4);
+
+    // Alignment pattern (version 2+)
+    var alignPos=[[],[],[6,18],[6,22],[6,26]];
+    if(ver>=2){
+      var ap=alignPos[ver];
+      for(var ai=0;ai<ap.length;ai++)for(var aj=0;aj<ap.length;aj++){
+        var ay=ap[ai],ax=ap[aj];
+        if(rsv[ay][ax])continue;
+        for(var dy=-2;dy<=2;dy++)for(var dx=-2;dx<=2;dx++){
+          var v=(Math.abs(dx)===2||Math.abs(dy)===2||(dx===0&&dy===0))?1:0;
+          grid[ay+dy][ax+dx]=v;rsv[ay+dy][ax+dx]=true;
+        }
+      }
+    }
+
+    // Timing patterns
+    for(var i=8;i<sz-8;i++){
+      if(!rsv[6][i]){grid[6][i]=(i%2===0)?1:0;rsv[6][i]=true}
+      if(!rsv[i][6]){grid[i][6]=(i%2===0)?1:0;rsv[i][6]=true}
+    }
+
+    // Dark module + reserve format/version areas
+    grid[sz-8][8]=1;rsv[sz-8][8]=true;
+    // Reserve format info areas
+    for(var i=0;i<8;i++){
+      rsv[8][i]=true;rsv[8][sz-1-i]=true;
+      rsv[i][8]=true;rsv[sz-1-i][8]=true;
+    }
+    rsv[8][8]=true;
+
+    // Place data
+    var bitIdx=0,allBits=[];
+    for(var i=0;i<allCws.length;i++)for(var b=7;b>=0;b--)allBits.push((allCws[i]>>b)&1);
+
+    var x=sz-1,upward=true;
+    while(x>=0){
+      if(x===6)x--; // skip timing column
+      for(var row=0;row<sz;row++){
+        var y=upward?(sz-1-row):row;
+        for(var dx=0;dx<=1;dx++){
+          var cx=x-dx;
+          if(cx<0||rsv[y][cx])continue;
+          grid[y][cx]=(bitIdx<allBits.length)?allBits[bitIdx]:0;
+          bitIdx++;
+        }
+      }
+      upward=!upward;
+      x-=2;
+    }
+
+    // Masking — try all 8 patterns, pick best (lowest penalty)
+    var bestMask=0,bestPen=Infinity;
+    var maskFns=[
+      function(y,x){return(y+x)%2===0},
+      function(y,x){return y%2===0},
+      function(y,x){return x%3===0},
+      function(y,x){return(y+x)%3===0},
+      function(y,x){return(Math.floor(y/2)+Math.floor(x/3))%2===0},
+      function(y,x){return(y*x)%2+(y*x)%3===0},
+      function(y,x){return((y*x)%2+(y*x)%3)%2===0},
+      function(y,x){return((y+x)%2+(y*x)%3)%2===0}
+    ];
+    for(var m=0;m<8;m++){
+      var test=[];
+      for(var y=0;y<sz;y++){test[y]=[];for(var x=0;x<sz;x++){
+        test[y][x]=rsv[y][x]?grid[y][x]:(grid[y][x]^(maskFns[m](y,x)?1:0));
+      }}
+      // Apply format info
+      applyFormat(test,sz,0,m); // EC level L = 01
+      var pen=penalty(test,sz);
+      if(pen<bestPen){bestPen=pen;bestMask=m}
+    }
+
+    // Apply best mask
+    for(var y=0;y<sz;y++)for(var x=0;x<sz;x++)
+      if(!rsv[y][x])grid[y][x]^=maskFns[bestMask](y,x)?1:0;
+    applyFormat(grid,sz,0,bestMask);
+
+    return grid;
+  }
+
+  function applyFormat(grid,sz,ecl,mask){
+    // ECL: L=1,M=0,Q=3,H=2 (for format info encoding)
+    var eclBits=[1,0,3,2];
+    var fmt=(eclBits[ecl]<<3)|mask;
+    var rem=fmt;
+    for(var i=0;i<10;i++){rem<<=1;if(rem&(1<<14))rem^=0x537}
+    var bits=(fmt<<10)|rem;
+    bits^=0x5412; // XOR mask
+    // Place format bits
+    var positions=[
+      // Around top-left finder
+      [[8,0],[8,1],[8,2],[8,3],[8,4],[8,5],[8,7],[8,8],[7,8],[5,8],[4,8],[3,8],[2,8],[1,8],[0,8]],
+      // Around other finders
+      [[sz-1,8],[sz-2,8],[sz-3,8],[sz-4,8],[sz-5,8],[sz-6,8],[sz-7,8],[8,sz-8],[8,sz-7],[8,sz-6],[8,sz-5],[8,sz-4],[8,sz-3],[8,sz-2],[8,sz-1]]
+    ];
+    for(var s=0;s<2;s++)for(var i=0;i<15;i++)
+      grid[positions[s][i][0]][positions[s][i][1]]=(bits>>(14-i))&1;
+  }
+
+  function penalty(grid,sz){
+    var pen=0;
+    // Rule 1: runs of same color
+    for(var y=0;y<sz;y++){var run=1;for(var x=1;x<sz;x++){
+      if(grid[y][x]===grid[y][x-1])run++;else run=1;
+      if(run===5)pen+=3;else if(run>5)pen++;
+    }}
+    for(var x=0;x<sz;x++){var run=1;for(var y=1;y<sz;y++){
+      if(grid[y][x]===grid[y-1][x])run++;else run=1;
+      if(run===5)pen+=3;else if(run>5)pen++;
+    }}
+    // Rule 2: 2x2 blocks
+    for(var y=0;y<sz-1;y++)for(var x=0;x<sz-1;x++){
+      var v=grid[y][x];
+      if(v===grid[y][x+1]&&v===grid[y+1][x]&&v===grid[y+1][x+1])pen+=3;
+    }
+    // Rule 3: finder-like patterns (simplified)
+    // Rule 4: proportion
+    var dark=0;for(var y=0;y<sz;y++)for(var x=0;x<sz;x++)if(grid[y][x])dark++;
+    var pct=Math.abs(dark*100/(sz*sz)-50);
+    pen+=Math.floor(pct/5)*10;
+    return pen;
+  }
+
+  function rsEncode(data,ecLen){
+    // GF(256) with polynomial 0x11D
+    var exp=[],log=[];exp[0]=1;
+    for(var i=1;i<256;i++){exp[i]=exp[i-1]<<1;if(exp[i]>=256)exp[i]^=0x11D;log[exp[i-1]]=i-1}
+    // Generator polynomial
+    var gen=[1];
+    for(var i=0;i<ecLen;i++){
+      var next=new Array(gen.length+1);
+      for(var j=0;j<next.length;j++)next[j]=0;
+      for(var j=0;j<gen.length;j++){
+        next[j]^=gen[j];
+        next[j+1]^=gfMul(gen[j],exp[i]);
+      }
+      gen=next;
+    }
+    function gfMul(a,b){if(a===0||b===0)return 0;return exp[(log[a]+log[b])%255]}
+    // Polynomial division
+    var rem=new Array(ecLen);for(var i=0;i<ecLen;i++)rem[i]=0;
+    for(var i=0;i<data.length;i++){
+      var coef=data[i]^rem[0];
+      rem.shift();rem.push(0);
+      if(coef!==0)for(var j=0;j<ecLen;j++)rem[j]^=gfMul(gen[j+1],coef);
+    }
+    return rem;
+  }
+
+  // ── WebSocket ──────────────────────────────────────────────────────────────
+  function connect(){
+    if(ws && ws.readyState<=1) return;
+    var host=location.hostname||'192.168.1.1';
+    var port=location.port||'8080';
+    ws=new WebSocket('ws://'+host+':'+port+'/ws');
+
+    ws.onopen=function(){
+      connDot.className='conn-dot ok';
+      connDot.title='Connected';
+      if(reconnTimer){clearInterval(reconnTimer);reconnTimer=null}
+    };
+
+    ws.onclose=function(){
+      connDot.className='conn-dot err';
+      connDot.title='Disconnected';
+      ws=null;
+      scheduleReconnect();
+    };
+
+    ws.onerror=function(){
+      if(ws)ws.close();
+    };
+
+    ws.onmessage=function(ev){
+      try{
+        var msg=JSON.parse(ev.data);
+        if(msg.type==='state') onState(msg);
+        else if(msg.type==='log') onLog(msg.msg);
+        else if(msg.type==='ota') onOta(msg);
+        else if(msg.type==='wifiSaved') onWifiSaved();
+        else if(msg.type==='error') alert(msg.msg);
+      }catch(e){}
+    };
+  }
+
+  function scheduleReconnect(){
+    if(reconnTimer) return;
+    reconnTimer=setInterval(function(){connect()},3000);
+  }
+
+  function send(obj){
+    if(ws&&ws.readyState===1) ws.send(JSON.stringify(obj));
+  }
+
+  // ── State handler ──────────────────────────────────────────────────────────
+  function onState(s){
+    // Skip control updates for 2s after user command — covers in-flight
+    // stale pushes that were generated before the server processed the
+    // command. Server-side wanted settings handle subsequent pushes.
+    var locked = lastCmdTime > 0 && (Date.now() - lastCmdTime) < 2000;
+
+    if(!locked){
+      state=s;
+
+      // Power
+      if(s.power){
+        powerBtn.className='power-btn on';
+        powerBtn.textContent='Power On';
+      }else{
+        powerBtn.className='power-btn off';
+        powerBtn.textContent='Power Off';
+      }
+
+      // Mode
+      setActive('modeGrp', s.mode);
+      setModeTheme(s.mode);
+
+      // Temperature target
+      targetTemp.textContent=fmtTemp(s.target);
+      if(!sliderDragging && s.target!=null){
+        if(tempUnit==='F'){
+          var tf=cToFTable(s.target);
+          tempSlider.value=tf;
+          sliderVal.textContent=tf.toString();
+        } else {
+          tempSlider.value=s.target;
+          sliderVal.textContent=s.target.toFixed(1);
+        }
+      }
+
+      // Dual setpoint: show in AUTO, hide otherwise
+      if(s.mode==='auto'){
+        dualTemp.style.display='';
+        if(!dualLocked){
+          if(tempUnit==='F'){
+            heatSlider.value=cToFTable(s.heatThresh);
+            heatThreshVal.textContent=cToFTable(s.heatThresh).toString();
+            coolSlider.value=cToFTable(s.coolThresh);
+            coolThreshVal.textContent=cToFTable(s.coolThresh).toString();
+          } else {
+            heatSlider.value=s.heatThresh;
+            heatThreshVal.textContent=s.heatThresh.toFixed(1);
+            coolSlider.value=s.coolThresh;
+            coolThreshVal.textContent=s.coolThresh.toFixed(1);
+          }
+        }
+      } else {
+        dualTemp.style.display='none';
+      }
+
+      // Fan & Vane
+      setActive('fanGrp', s.fan);
+      setActive('vaneGrp', s.vane);
+
+      // Wide vane
+      setActive('wideVaneGrp', s.wideVane);
+    }
+
+    // Always update read-only values regardless of lockout
+    roomTemp.textContent=fmtReadingTemp(s.room);
+
+    // Compressor
+    if(s.operating){
+      compDot.className='status-dot running';
+      compText.textContent='Compressor On';
+    }else{
+      compDot.className='status-dot idle';
+      compText.textContent='Compressor Off';
+    }
+
+    // Compressor frequency
+    compHz.textContent=(s.compressorHz!=null?s.compressorHz:'--')+' Hz';
+
+    // Stage & sub mode
+    stageVal.textContent=s.stage&&s.stage!='idle'?s.stage:'--';
+    subModeVal.textContent=s.subMode&&s.subMode!='normal'?s.subMode:'--';
+
+    // Auto sub mode: show in compressor text when in auto mode
+    if(s.mode==='auto'&&s.autoSubMode&&s.autoSubMode!=='off'){
+      compText.textContent='Compressor '+(s.operating?'On':'Off')+' ('+s.autoSubMode+')';
+    }
+
+    // Outside temperature
+    outsideTempEl.textContent=s.outsideTemp!=null?fmtReadingTemp(s.outsideTemp)+unitStr():'--';
+
+    // Runtime hours
+    if(s.runtime!=null){
+      $('runtimeRow').style.display='';
+      $('runtimeHrs').textContent=s.runtime.toFixed(0)+' hrs';
+    } else {
+      $('runtimeRow').style.display='none';
+    }
+
+    // Error code
+    if(s.errorCode!=null){
+      $('errorRow').style.display='';
+      $('errorCode').textContent='E'+s.errorCode.toString(16).toUpperCase();
+    } else {
+      $('errorRow').style.display='none';
+    }
+
+    // CN105 connection
+    if(s.connected){
+      cn105Dot.className='status-dot running';
+      cn105Text.textContent='CN105 OK';
+    }else{
+      cn105Dot.className='status-dot idle';
+      cn105Text.textContent='CN105 Disconnected';
+    }
+
+    // RSSI
+    rssiVal.textContent=(s.rssi!=null?s.rssi:'--')+' dBm';
+
+    // Uptime
+    uptimeVal.textContent=s.uptime!=null?fmtUptime(s.uptime):'--:--:--';
+
+    // Temp unit — guard against in-flight stale pushes just like controls
+    if(s.tempUnit && s.tempUnit!==tempUnit && !locked){
+      tempUnit=s.tempUnit;
+      setActive('unitGrp',tempUnit);
+      configureSliders();
+      var label=unitStr();
+      for(var i=0;i<unitLabels.length;i++) unitLabels[i].textContent=label;
+    }
+
+    // Config fields — only update when settings panel is closed (not being edited)
+    var settingsOpen=$('settingsBody').classList.contains('open');
+    if(!settingsOpen){
+      if(s.logLevel!=null) $('cfgLogLevel').value=s.logLevel;
+      if(s.pollInterval!=null) $('cfgPoll').value=s.pollInterval;
+      if(s.vaneConfig!=null) $('cfgVanes').value=s.vaneConfig;
+    }
+    if(s.vaneConfig!=null){
+      $('vaneCard').style.display=s.vaneConfig>=1?'':'none';
+      $('wideVaneCard').style.display=s.vaneConfig>=2?'':'none';
+    }
+
+    // HomeKit status
+    if(s.hkPaired!=null){
+      hkDot.className='status-dot '+(s.hkPaired?'running':'idle');
+      hkStatusText.textContent=s.hkStatus||'--';
+      hkControllersEl.textContent=s.hkControllers!=null?s.hkControllers+' paired':'--';
+      hkSetupCodeEl.textContent=s.hkSetupCode||'--';
+      // Populate digit grid: setup code is "XXX-XX-XXX" → strip dashes → 8 digits
+      if(s.hkSetupCode){
+        var raw=s.hkSetupCode.replace(/-/g,'');
+        for(var di=0;di<8;di++) hkDigits[di].textContent=raw[di]||'-';
+      }
+      if(s.hkSetupURI&&s.hkSetupURI!==lastQRURI){
+        lastQRURI=s.hkSetupURI;
+        renderQR(s.hkSetupURI,qrCanvas);
+      }
+    }
+  }
+
+  function setActive(grpId,val){
+    var btns=document.getElementById(grpId).children;
+    for(var i=0;i<btns.length;i++){
+      btns[i].classList.toggle('active', val!=null && btns[i].getAttribute('data-v')===val);
+    }
+  }
+
+  function setModeTheme(mode){
+    var c=document.querySelector('.container');
+    c.className='container'+(mode?' mode-'+mode:'');
+  }
+
+  function fmtUptime(sec){
+    var h=Math.floor(sec/3600);
+    var m=Math.floor((sec%3600)/60);
+    var s=sec%60;
+    return pad(h)+':'+pad(m)+':'+pad(s);
+  }
+  function pad(n){return n<10?'0'+n:''+n}
+
+  // ── Log handler ────────────────────────────────────────────────────────────
+  function onLog(msg){
+    var atBottom=logBox.scrollHeight-logBox.scrollTop-logBox.clientHeight<30;
+    var line=document.createTextNode(msg+'\n');
+    logBox.appendChild(line);
+    // Trim excess
+    while(logBox.childNodes.length>MAX_LOG_LINES){
+      logBox.removeChild(logBox.firstChild);
+    }
+    if(atBottom) logBox.scrollTop=logBox.scrollHeight;
+  }
+
+  function onWifiSaved(){
+    $('cfgSSID').value='';
+    $('cfgPass').value='';
+    $('wifiSaveBtn').disabled=true;
+    $('wifiBanner').style.display='block';
+  }
+
+  // ── Controls (optimistic UI — update immediately, server confirms later) ──
+  window.togglePower=function(){
+    lastCmdTime=Date.now();
+    var on=!state.power;
+    state.power=on;
+    powerBtn.className='power-btn '+(on?'on':'off');
+    powerBtn.textContent=on?'Power On':'Power Off';
+    send({cmd:'set',power:on});
+  };
+
+  window.setMode=function(btn){
+    lastCmdTime=Date.now();
+    var v=btn.getAttribute('data-v');
+    state.mode=v;
+    setActive('modeGrp',v);
+    setModeTheme(v);
+    send({cmd:'set',mode:v});
+  };
+
+  window.setFan=function(btn){
+    lastCmdTime=Date.now();
+    var v=btn.getAttribute('data-v');
+    state.fan=v;
+    setActive('fanGrp',v);
+    send({cmd:'set',fan:v});
+  };
+
+  window.setVane=function(btn){
+    lastCmdTime=Date.now();
+    var v=btn.getAttribute('data-v');
+    state.vane=v;
+    setActive('vaneGrp',v);
+    send({cmd:'set',vane:v});
+  };
+
+  window.setWideVane=function(btn){
+    lastCmdTime=Date.now();
+    var v=btn.getAttribute('data-v');
+    state.wideVane=v;
+    setActive('wideVaneGrp',v);
+    send({cmd:'set',wideVane:v});
+  };
+
+  // Slider reconfiguration for unit switching
+  function setSliderAttrs(el,min,max,step,val){
+    el.min=min;el.max=max;el.step=step;el.value=val;
+  }
+  function configureSliders(){
+    if(tempUnit==='F'){
+      setSliderAttrs(tempSlider,61,88,1,cToFTable(parseFloat(tempSlider.value)));
+      setSliderAttrs(heatSlider,61,88,1,cToFTable(parseFloat(heatSlider.value)));
+      setSliderAttrs(coolSlider,61,88,1,cToFTable(parseFloat(coolSlider.value)));
+    } else {
+      setSliderAttrs(tempSlider,16,31,0.5,tempSlider.min==61?fToCTable(parseFloat(tempSlider.value)):parseFloat(tempSlider.value));
+      setSliderAttrs(heatSlider,16,31,0.5,heatSlider.min==61?fToCTable(parseFloat(heatSlider.value)):parseFloat(heatSlider.value));
+      setSliderAttrs(coolSlider,16,31,0.5,coolSlider.min==61?fToCTable(parseFloat(coolSlider.value)):parseFloat(coolSlider.value));
+    }
+  }
+
+  // Slider: update display live, send only on release
+  window.onSliderInput=function(){
+    sliderDragging=true;
+    var raw=parseFloat(tempSlider.value);
+    sliderVal.textContent=(tempUnit==='F')?raw.toString():raw.toFixed(1);
+  };
+  window.onSliderChange=function(){
+    lastCmdTime=Date.now();
+    sliderDragging=false;
+    var raw=parseFloat(tempSlider.value);
+    var celsius=(tempUnit==='F')?fToCTable(raw):raw;
+    var display=(tempUnit==='F')?raw.toString():raw.toFixed(1);
+    sliderVal.textContent=display;
+    targetTemp.textContent=display;
+    send({cmd:'set',target:celsius});
+  };
+
+  heatSlider.oninput=function(){
+    var raw=parseFloat(this.value);
+    heatThreshVal.textContent=(tempUnit==='F')?raw.toString():raw.toFixed(1);
+  };
+  heatSlider.onchange=function(){
+    dualLocked=true;
+    var raw=parseFloat(this.value);
+    send({cmd:'set',heatThresh:(tempUnit==='F')?fToCTable(raw):raw});
+    setTimeout(function(){dualLocked=false},2000);
+  };
+  coolSlider.oninput=function(){
+    var raw=parseFloat(this.value);
+    coolThreshVal.textContent=(tempUnit==='F')?raw.toString():raw.toFixed(1);
+  };
+  coolSlider.onchange=function(){
+    dualLocked=true;
+    var raw=parseFloat(this.value);
+    send({cmd:'set',coolThresh:(tempUnit==='F')?fToCTable(raw):raw});
+    setTimeout(function(){dualLocked=false},2000);
+  };
+
+  window.setTempUnit=function(btn){
+    var u=btn.getAttribute('data-v');
+    tempUnit=u;
+    lastCmdTime=Date.now();
+    setActive('unitGrp',u);
+    configureSliders();
+    var label=unitStr();
+    for(var i=0;i<unitLabels.length;i++) unitLabels[i].textContent=label;
+    send({cmd:'config',tempUnit:u});
+  };
+
+  window.saveConfig=function(){
+    send({
+      cmd:'config',
+      logLevel:parseInt($('cfgLogLevel').value),
+      pollInterval:parseInt($('cfgPoll').value),
+      vaneConfig:parseInt($('cfgVanes').value)
+    });
+  };
+
+  window.saveWifi=function(){
+    var ssid=$('cfgSSID').value.trim();
+    var pass=$('cfgPass').value;
+    if(!ssid||!pass) return;
+    send({cmd:'wifi',ssid:ssid,password:pass});
+  };
+
+  // ── OTA Upload ────────────────────────────────────────────────────────────
+  function onOta(msg){
+    var prog=$('otaProgress'),bar=$('otaBar'),status=$('otaStatus');
+    prog.style.display='block';
+    if(msg.status==='starting'){
+      bar.style.width='0%';
+      status.textContent='Starting upload...';
+    }else if(msg.status==='progress'){
+      bar.style.width=msg.pct+'%';
+      status.textContent='Uploading: '+msg.pct+'%';
+    }else if(msg.status==='done'){
+      bar.style.width='100%';
+      bar.style.background='var(--green)';
+      status.textContent='Update complete! Restarting...';
+    }
+  }
+
+  window.uploadFirmware=function(){
+    var fileInput=$('fwFile');
+    if(!fileInput.files.length){alert('Select a .bin file first');return}
+    var file=fileInput.files[0];
+    if(!file.name.endsWith('.bin')){alert('Please select a .bin firmware file');return}
+    if(!confirm('Upload firmware "'+file.name+'" ('+Math.round(file.size/1024)+'KB)?')) return;
+
+    var prog=$('otaProgress'),bar=$('otaBar'),status=$('otaStatus');
+    prog.style.display='block';
+    bar.style.width='0%';
+    bar.style.background='var(--accent)';
+    status.textContent='Preparing upload...';
+
+    file.arrayBuffer().then(function(buf){
+      // crypto.subtle requires secure context (HTTPS/localhost); fall back if unavailable
+      if(window.crypto&&window.crypto.subtle){
+        status.textContent='Computing checksum...';
+        return crypto.subtle.digest('SHA-256',buf).then(function(hashBuf){
+          var arr=new Uint8Array(hashBuf);
+          var hex='';
+          for(var i=0;i<arr.length;i++) hex+=('0'+arr[i].toString(16)).slice(-2);
+          return {data:buf,hash:hex};
+        });
+      }
+      return {data:buf,hash:null};
+    }).then(function(fw){
+      status.textContent='Uploading...';
+      var xhr=new XMLHttpRequest();
+      xhr.open('POST','/upload',true);
+      xhr.setRequestHeader('Content-Type','application/octet-stream');
+      if(fw.hash) xhr.setRequestHeader('X-Firmware-SHA256',fw.hash);
+      xhr.upload.onprogress=function(e){
+        if(e.lengthComputable){
+          var pct=Math.round(e.loaded/e.total*100);
+          bar.style.width=pct+'%';
+          status.textContent='Uploading: '+pct+'%';
+        }
+      };
+      xhr.onload=function(){
+        if(xhr.status===200){
+          bar.style.width='100%';
+          bar.style.background='var(--green)';
+          status.textContent='Update complete! Restarting...';
+        }else{
+          bar.style.background='var(--red)';
+          status.textContent='Upload failed: '+xhr.responseText;
+        }
+      };
+      xhr.onerror=function(){
+        bar.style.background='var(--red)';
+        status.textContent='Upload failed: network error';
+      };
+      xhr.send(new Uint8Array(fw.data));
+    }).catch(function(err){
+      bar.style.background='var(--red)';
+      status.textContent='Checksum error: '+err.message;
+    });
+  };
+
+  window.restartDevice=function(){
+    if(confirm('Restart the device?')){send({cmd:'restart'})}
+  };
+
+  window.resetHomeKit=function(){
+    if(confirm('This will remove all HomeKit pairings. You will need to re-pair in the Home app. Continue?')){
+      send({cmd:'hkReset'});
+    }
+  };
+
+  window.copyLogs=function(){
+    var text=logBox.textContent;
+    if(!text)return;
+    var ta=document.createElement('textarea');
+    ta.value=text;
+    ta.style.position='fixed';
+    ta.style.opacity='0';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+  };
+  window.clearLogs=function(){
+    logBox.textContent='';
+  };
+
+  window.togglePanel=function(hdr){
+    hdr.classList.toggle('open');
+    var body=hdr.nextElementSibling;
+    body.classList.toggle('open');
+  };
+
+  // Enable WiFi save button only when both fields have content
+  function checkWifiFields(){
+    $('wifiSaveBtn').disabled=!($('cfgSSID').value.trim()&&$('cfgPass').value);
+  }
+  $('cfgSSID').addEventListener('input',checkWifiFields);
+  $('cfgPass').addEventListener('input',checkWifiFields);
+
+  // ── Init ───────────────────────────────────────────────────────────────────
+  connect();
+
+})();
+</script>
+</body>
+</html>
+
