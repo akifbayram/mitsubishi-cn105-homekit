@@ -362,16 +362,6 @@ body{
       <span class="collapse-title">HomeKit</span>
     </div>
     <div class="collapse-body" id="homekitBody">
-      <div class="status-grid" style="margin-bottom:10px">
-        <div class="status-item">
-          <div class="status-dot idle" id="hkDot"></div>
-          <span id="hkStatusText">--</span>
-        </div>
-        <div class="status-item">
-          <span class="status-label">Controllers</span>
-          <span id="hkControllers">--</span>
-        </div>
-      </div>
       <div class="hk-label" id="hkLabel">
         <div class="hk-label-top">
           <svg class="hk-icon" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -397,7 +387,18 @@ body{
         </div>
         <canvas id="qrCanvas" width="200" height="200" style="image-rendering:pixelated"></canvas>
       </div>
+      <div class="status-grid" style="margin-bottom:10px">
+        <div class="status-item">
+          <div class="status-dot idle" id="hkDot"></div>
+          <span id="hkStatusText">--</span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">Controllers</span>
+          <span id="hkControllers">--</span>
+        </div>
+      </div>
       <div id="hkSetupCode" style="display:none"></div>
+      <button id="hkSetupLink" href="#" class="save-btn" style="display:none;background:#E87400;margin-top:8px;text-align:center;text-decoration:none;color:#fff">Add to Home</button>
       <button class="save-btn" style="background:var(--red);margin-top:8px" onclick="resetHomeKit()">Reset HomeKit Pairing</button>
     </div>
   </div>
@@ -416,7 +417,7 @@ body{
         </div>
         <div class="status-item">
           <span class="status-label">Connected</span>
-          <span id="wifiUptimeVal">--</span>
+          <span id="wifiUptimeVal">--:--:--</span>
         </div>
       </div>
       <div class="setting-row">
@@ -990,7 +991,7 @@ body{
     // RSSI
     rssiVal.textContent=(s.rssi!=null?s.rssi:'--')+' dBm';
     // WiFi uptime
-    wifiUptimeVal.textContent=s.wifiUptime?fmtWifiUptime(s.wifiUptime):'--';
+    wifiUptimeVal.textContent=s.wifiUptime?fmtWifiUptime(s.wifiUptime):'--:--:--';
 
     // Uptime
     uptimeVal.textContent=s.uptime!=null?fmtUptime(s.uptime):'--:--:--';
@@ -1030,6 +1031,9 @@ body{
       if(s.hkSetupURI&&s.hkSetupURI!==lastQRURI){
         lastQRURI=s.hkSetupURI;
         renderQR(s.hkSetupURI,qrCanvas);
+        var link=$('hkSetupLink');
+        link.href=s.hkSetupURI;
+        link.style.display='';
       }
     }
   }
@@ -1054,14 +1058,8 @@ body{
   }
   function pad(n){return n<10?'0'+n:''+n}
   function fmtWifiUptime(sec){
-    if(!sec) return '--';
-    var d=Math.floor(sec/86400);
-    var h=Math.floor((sec%86400)/3600);
-    var m=Math.floor((sec%3600)/60);
-    var s=sec%60;
-    if(d>0) return d+'d '+h+'h '+m+'m';
-    if(h>0) return h+'h '+m+'m';
-    return m+'m '+s+'s';
+    if(!sec) return '--:--:--';
+    return fmtUptime(sec);
   }
 
   // ── Log handler ────────────────────────────────────────────────────────────
