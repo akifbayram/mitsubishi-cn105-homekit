@@ -862,6 +862,7 @@ void WebUI::pushState() {
         ",\"connected\":%s"
         ",\"uptime\":%lu"
         ",\"rssi\":%d"
+        ",\"wifiUptime\":%lu"
         ",\"subMode\":\"%s\""
         ",\"stage\":\"%s\""
         ",\"autoSubMode\":\"%s\"",
@@ -877,6 +878,7 @@ void WebUI::pushState() {
         _ctrl->isConnected() ? "true" : "false",
         (unsigned long)(millis() / 1000),
         (int)WiFi.RSSI(),
+        (unsigned long)wifiRecovery.getWifiUptimeSeconds(),
         webSubModeToStr(st.subMode),
         webStageToStr(st.stage),
         webAutoSubModeToStr(st.autoSubMode)

@@ -35,6 +35,7 @@ void WifiRecovery::loop() {
         // Just connected
         LOG_INFO("[WiFiRecovery] WiFi connected");
         _disconnectedSince = 0;
+        _wifiConnectedSince = safeMillis();
 
         if (settings.get().wifiChangePending) {
             setChangePending(false);
@@ -50,6 +51,7 @@ void WifiRecovery::loop() {
     } else if (!connected && _wasConnected) {
         // Just disconnected
         _disconnectedSince = safeMillis();
+        _wifiConnectedSince = 0;
         _apShutdownAt = 0;  // Cancel pending AP shutdown
         LOG_WARN("[WiFiRecovery] WiFi disconnected, starting recovery timer");
     } else if (!connected && _disconnectedSince > 0 && !_apActive) {
@@ -143,6 +145,11 @@ void WifiRecovery::refreshCachedSSID() {
 void WifiRecovery::getCachedSSID(char *buf, size_t bufLen) const {
     strncpy(buf, _cachedSSID, bufLen - 1);
     buf[bufLen - 1] = '\0';
+}
+
+uint32_t WifiRecovery::getWifiUptimeSeconds() const {
+    if (_wifiConnectedSince == 0) return 0;
+    return (safeMillis() - _wifiConnectedSince) / 1000;
 }
 
 void WifiRecovery::checkButton() {

@@ -21,6 +21,7 @@ public:
     void setChangePending(bool pending); // Set/clear the NVS flag
     void activateNow();                  // Immediately enable fallback AP (no timeout)
     void getCachedSSID(char *buf, size_t bufLen) const; // Return cached SSID (no NVS I/O)
+    uint32_t getWifiUptimeSeconds() const;
 
 private:
     void enableFallbackAP();
@@ -34,6 +35,7 @@ private:
     bool     _apActive = false;
     bool     _wasConnected = false;      // Track previous WiFi state
     uint32_t _disconnectedSince = 0;     // millis() when WiFi was lost (0 = connected)
+    uint32_t _wifiConnectedSince = 0;   // millis() when WiFi connected (0 = not connected)
     uint32_t _apShutdownAt = 0;          // millis() when AP should be disabled (0 = no pending shutdown)
     uint32_t _buttonPressStart = 0;      // millis() when button was first pressed (0 = not pressed)
     bool     _buttonTriggered = false;   // Prevent repeat triggers

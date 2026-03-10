@@ -340,10 +340,6 @@ body{
         <span id="runtimeHrs">--</span>
       </div>
       <div class="status-item">
-        <span class="status-label">WiFi</span>
-        <span id="rssiVal">-- dBm</span>
-      </div>
-      <div class="status-item">
         <span class="status-label">Uptime</span>
         <span id="uptimeVal">--:--:--</span>
       </div>
@@ -413,6 +409,16 @@ body{
       <span class="collapse-title">WiFi</span>
     </div>
     <div class="collapse-body" id="wifiBody">
+      <div class="status-grid" style="margin-bottom:10px">
+        <div class="status-item">
+          <span class="status-label">Signal</span>
+          <span id="rssiVal">-- dBm</span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">Connected</span>
+          <span id="wifiUptimeVal">--</span>
+        </div>
+      </div>
       <div class="setting-row">
         <label>SSID</label>
         <input type="text" id="cfgSSID" placeholder="Network name" maxlength="32">
@@ -546,7 +552,7 @@ body{
   var tempSlider=$('tempSlider'), sliderVal=$('sliderVal');
   var compDot=$('compDot'), compText=$('compText');
   var cn105Dot=$('cn105Dot'), cn105Text=$('cn105Text');
-  var rssiVal=$('rssiVal'), uptimeVal=$('uptimeVal');
+  var rssiVal=$('rssiVal'), uptimeVal=$('uptimeVal'), wifiUptimeVal=$('wifiUptimeVal');
   var compHz=$('compHz');
   var stageVal=$('stageVal'), subModeVal=$('subModeVal');
   var outsideTempEl=$('outsideTemp');
@@ -983,6 +989,8 @@ body{
 
     // RSSI
     rssiVal.textContent=(s.rssi!=null?s.rssi:'--')+' dBm';
+    // WiFi uptime
+    wifiUptimeVal.textContent=s.wifiUptime?fmtWifiUptime(s.wifiUptime):'--';
 
     // Uptime
     uptimeVal.textContent=s.uptime!=null?fmtUptime(s.uptime):'--:--:--';
@@ -1045,6 +1053,16 @@ body{
     return pad(h)+':'+pad(m)+':'+pad(s);
   }
   function pad(n){return n<10?'0'+n:''+n}
+  function fmtWifiUptime(sec){
+    if(!sec) return '--';
+    var d=Math.floor(sec/86400);
+    var h=Math.floor((sec%86400)/3600);
+    var m=Math.floor((sec%3600)/60);
+    var s=sec%60;
+    if(d>0) return d+'d '+h+'h '+m+'m';
+    if(h>0) return h+'h '+m+'m';
+    return m+'m '+s+'s';
+  }
 
   // ── Log handler ────────────────────────────────────────────────────────────
   function onLog(msg){
