@@ -11,6 +11,7 @@
 #include "wifi_recovery.h"
 #include "status_led.h"
 #include "branding.h"
+#include "ble_sensor.h"
 
 // ── Global instances ─────────────────────────────────────────────────────────
 HWCDC DebugLog;                             // USB Serial/JTAG for debug logging
@@ -138,6 +139,10 @@ void loop() {
         webUI.begin(&cn105);
         webUIStarted = true;
         webUIStartTime = millis();
+        // Initialize BLE sensor after WiFi is up
+        if (settings.get().bleEnabled) {
+            bleSensor.begin();
+        }
     }
     if (webUIStarted) {
         static bool lastAPActive = false;
@@ -147,6 +152,7 @@ void loop() {
             lastAPActive = apNow;
         }
         webUI.loop();
+        bleSensor.loop(cn105);
     }
 
     // ── Status LED priority evaluation ──────────────────────────────────

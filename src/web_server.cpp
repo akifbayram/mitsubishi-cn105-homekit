@@ -701,6 +701,17 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
             _ctrl->sendPendingChanges();
         }
 
+        // Remote temperature via API
+        float remoteTemp;
+        if (jsonGetFloat(msg, "remoteTemp", &remoteTemp)) {
+            if (remoteTemp > 0) {
+                bleSensor.setApiTemperature(remoteTemp);
+            } else {
+                bleSensor.clearApiTemperature();
+                _ctrl->sendRemoteTemperature(0);
+            }
+        }
+
         float heatT, coolT;
         bool threshChanged = false;
         if (jsonGetFloat(msg, "heatThresh", &heatT)) {
@@ -809,6 +820,55 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
         delay(500);
         ESP.restart();
 
+    } else if (strcmp(cmd, "bleScan") == 0) {
+        LOG_INFO("[WebUI] BLE discovery scan requested");
+        bleSensor.startDiscoveryScan();
+        sendWsText(httpd_req_to_sockfd(req), "{\"type\":\"bleScanStarted\"}");
+
+    } else if (strcmp(cmd, "bleScanResults") == 0) {
+        if (bleSensor.isDiscoveryRunning()) {
+            sendWsText(httpd_req_to_sockfd(req), "{\"type\":\"bleScanRunning\"}");
+        } else {
+            char rBuf[1024];
+            int rn = snprintf(rBuf, sizeof(rBuf), "{\"type\":\"bleScanResults\",\"sensors\":[");
+            for (uint8_t i = 0; i < bleSensor.getDiscoveredCount(); i++) {
+                const BLEDiscoveredSensor &s = bleSensor.getDiscoveredSensors()[i];
+                if (!s.used) continue;
+                if (i > 0) rn += snprintf(rBuf + rn, sizeof(rBuf) - rn, ",");
+                char escN[64];
+                jsonEscape(s.name, escN, sizeof(escN));
+                rn += snprintf(rBuf + rn, sizeof(rBuf) - rn,
+                    "{\"name\":\"%s\",\"addr\":\"%s\",\"rssi\":%d,\"format\":\"%s\",\"temp\":%.1f}",
+                    escN, s.addr, s.rssi, BLESensor::formatToStr(s.format), s.temperature);
+                if (rn >= (int)sizeof(rBuf) - 50) break;
+            }
+            rn += snprintf(rBuf + rn, sizeof(rBuf) - rn, "]}");
+            sendWsText(httpd_req_to_sockfd(req), rBuf);
+        }
+
+    } else if (strcmp(cmd, "bleSelect") == 0) {
+        char addr[18] = {0};
+        char name[32] = {0};
+        if (jsonGetString(msg, "addr", addr, sizeof(addr))) {
+            jsonGetString(msg, "name", name, sizeof(name));
+            bleSensor.setSensor(addr, name);
+            strncpy(settings.get().bleSensorAddr, addr, sizeof(settings.get().bleSensorAddr) - 1);
+            strncpy(settings.get().bleSensorName, name, sizeof(settings.get().bleSensorName) - 1);
+            settings.get().bleEnabled = true;
+            settings.save();
+            sendWsText(httpd_req_to_sockfd(req), "{\"type\":\"bleSelected\"}");
+            pushState();
+        }
+
+    } else if (strcmp(cmd, "bleDisable") == 0) {
+        bleSensor.clearSensor(*_ctrl);
+        settings.get().bleEnabled = false;
+        settings.get().bleSensorAddr[0] = '\0';
+        settings.get().bleSensorName[0] = '\0';
+        settings.save();
+        sendWsText(httpd_req_to_sockfd(req), "{\"type\":\"bleDisabled\"}");
+        pushState();
+
     } else {
         LOG_WARN("[WebUI] Unknown command: %s", cmd);
     }
@@ -856,7 +916,7 @@ void WebUI::pushState() {
     const CN105State st = _ctrl->getEffectiveState();
     const DeviceSettings &cfg = settings.get();
 
-    char buf[800];
+    char buf[1024];
     int n = snprintf(buf, sizeof(buf),
         "{\"type\":\"state\""
         ",\"power\":%s"
@@ -920,6 +980,27 @@ void WebUI::pushState() {
         cfg.heatingThreshold,
         cfg.coolingThreshold
     );
+
+    // BLE remote sensor status
+    if (bleSensor.isEnabled() || bleSensor.isApiMode()) {
+        char escBN[64];
+        jsonEscape(bleSensor.getSensorName(), escBN, sizeof(escBN));
+        n += snprintf(buf + n, sizeof(buf) - n,
+            ",\"bleSensor\":{\"name\":\"%s\",\"addr\":\"%s\""
+            ",\"temp\":%.1f,\"hum\":%.1f,\"bat\":%d"
+            ",\"rssi\":%d,\"active\":%s,\"stale\":%s,\"api\":%s"
+            ",\"age\":%lu}",
+            escBN, bleSensor.getSensorAddr(),
+            bleSensor.getTemperature(), bleSensor.getHumidity(),
+            bleSensor.getBattery(), bleSensor.getRSSI(),
+            bleSensor.isActive() ? "true" : "false",
+            bleSensor.isStale() ? "true" : "false",
+            bleSensor.isApiMode() ? "true" : "false",
+            bleSensor.getLastUpdate() > 0 ? (unsigned long)((millis() - bleSensor.getLastUpdate()) / 1000) : 0UL
+        );
+    } else {
+        n += snprintf(buf + n, sizeof(buf) - n, ",\"bleSensor\":null");
+    }
 
     // Count paired controllers
     int hkControllers = 0;

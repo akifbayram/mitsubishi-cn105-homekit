@@ -5,6 +5,7 @@
 #include <HomeSpan.h>
 #include "cn105_protocol.h"
 #include "settings.h"
+#include "ble_sensor.h"
 
 class WebUI {
 public:
