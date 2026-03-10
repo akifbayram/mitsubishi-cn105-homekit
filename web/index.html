@@ -49,7 +49,7 @@ body{
 .header{
   display:flex;align-items:center;justify-content:space-between;
   padding:12px 16px;background:var(--surface);border-radius:var(--radius);
-  margin-bottom:12px;
+  margin-bottom:8px;
 }
 .header-left{display:flex;flex-direction:column;gap:2px}
 .device-name{font-size:16px;font-weight:600}
@@ -74,24 +74,14 @@ body{
 /* Card */
 .card{
   background:var(--surface);border-radius:var(--radius);
-  padding:14px 16px;margin-bottom:10px;
+  padding:10px 14px;margin-bottom:6px;
 }
-.card-label{font-size:11px;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px}
-
-/* Power button */
-.power-btn{
-  display:block;width:100%;padding:14px;border:none;border-radius:var(--radius);
-  font-size:16px;font-weight:600;cursor:pointer;transition:all .2s;
-  text-transform:uppercase;letter-spacing:1px;
-}
-.power-btn.on{background:var(--mode-accent);color:#fff}
-.power-btn.off{background:var(--btn-bg);color:var(--text2)}
-.power-btn:active{transform:scale(.97)}
+.card-label{font-size:11px;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
 
 /* Button groups */
 .btn-group{display:flex;gap:6px;flex-wrap:wrap}
 .btn-group button{
-  flex:1;min-width:0;padding:12px 6px;border:none;border-radius:6px;
+  flex:1;min-width:0;padding:8px 4px;border:none;border-radius:6px;
   background:var(--btn-bg);color:var(--text2);font-size:12px;font-weight:500;
   cursor:pointer;transition:all .15s;white-space:nowrap;
 }
@@ -142,7 +132,7 @@ body{
 /* Collapsible */
 .collapse-header{
   display:flex;align-items:center;gap:8px;cursor:pointer;
-  padding:12px 16px;background:var(--surface);border-radius:var(--radius);
+  padding:10px 14px;background:var(--surface);border-radius:var(--radius);
   margin-bottom:2px;user-select:none;
 }
 .collapse-header.open{border-radius:var(--radius) var(--radius) 0 0;margin-bottom:0}
@@ -153,9 +143,9 @@ body{
 .collapse-title{font-size:13px;font-weight:500;flex:1}
 .collapse-body{
   background:var(--surface);border-radius:0 0 var(--radius) var(--radius);
-  padding:0 16px;max-height:0;overflow:hidden;transition:max-height .3s ease,padding .3s ease;
+  padding:0 14px;max-height:0;overflow:hidden;transition:max-height .3s ease,padding .3s ease;
 }
-.collapse-body.open{max-height:600px;padding:12px 16px}
+.collapse-body.open{max-height:600px;padding:10px 14px}
 
 /* Settings form */
 .setting-row{
@@ -224,7 +214,7 @@ body{
       <div class="device-name" id="devName">Serin Climate</div>
       <div class="fw-version" id="fwVer">v0.1.0</div>
     </div>
-    <div style="display:flex;align-items:center;gap:10px">
+    <div style="display:flex;align-items:center;gap:8px">
       <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="Toggle theme">
         <svg class="icon-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
         <svg class="icon-moon" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3a7 7 0 0 0 9.79 9.79z"/></svg>
@@ -233,15 +223,11 @@ body{
     </div>
   </div>
 
-  <!-- Power -->
-  <div class="card">
-    <button class="power-btn off" id="powerBtn" onclick="togglePower()">Power Off</button>
-  </div>
-
   <!-- Mode -->
   <div class="card">
     <div class="card-label">Mode</div>
     <div class="btn-group" id="modeGrp">
+      <button data-v="off" onclick="setMode(this)">Off</button>
       <button data-v="heat" onclick="setMode(this)">Heat</button>
       <button data-v="cool" onclick="setMode(this)">Cool</button>
       <button data-v="auto" onclick="setMode(this)">Auto</button>
@@ -287,7 +273,7 @@ body{
     </div>
   </div>
 
-  <!-- Fan Speed -->
+  <!-- Fan Speed & Vanes -->
   <div class="card">
     <div class="card-label">Fan Speed</div>
     <div class="btn-group" id="fanGrp">
@@ -298,33 +284,29 @@ body{
       <button data-v="3" onclick="setFan(this)">3</button>
       <button data-v="4" onclick="setFan(this)">4</button>
     </div>
-  </div>
-
-  <!-- Vane Position -->
-  <div class="card" id="vaneCard">
-    <div class="card-label">Vane Position</div>
-    <div class="btn-group" id="vaneGrp">
-      <button data-v="auto" onclick="setVane(this)">Auto</button>
-      <button data-v="1" onclick="setVane(this)">1</button>
-      <button data-v="2" onclick="setVane(this)">2</button>
-      <button data-v="3" onclick="setVane(this)">3</button>
-      <button data-v="4" onclick="setVane(this)">4</button>
-      <button data-v="5" onclick="setVane(this)">5</button>
-      <button data-v="swing" onclick="setVane(this)">Swing</button>
+    <div id="vaneSection" style="margin-top:8px">
+      <div class="card-label">Vane Position</div>
+      <div class="btn-group" id="vaneGrp">
+        <button data-v="auto" onclick="setVane(this)">Auto</button>
+        <button data-v="1" onclick="setVane(this)">1</button>
+        <button data-v="2" onclick="setVane(this)">2</button>
+        <button data-v="3" onclick="setVane(this)">3</button>
+        <button data-v="4" onclick="setVane(this)">4</button>
+        <button data-v="5" onclick="setVane(this)">5</button>
+        <button data-v="swing" onclick="setVane(this)">Swing</button>
+      </div>
     </div>
-  </div>
-
-  <!-- Wide Vane (Horizontal) -->
-  <div class="card" id="wideVaneCard">
-    <div class="card-label">Horizontal Vane</div>
-    <div class="btn-group" id="wideVaneGrp">
-      <button data-v="ll" onclick="setWideVane(this)">&laquo;</button>
-      <button data-v="l" onclick="setWideVane(this)">&lsaquo;</button>
-      <button data-v="c" onclick="setWideVane(this)">|</button>
-      <button data-v="r" onclick="setWideVane(this)">&rsaquo;</button>
-      <button data-v="rr" onclick="setWideVane(this)">&raquo;</button>
-      <button data-v="split" onclick="setWideVane(this)">&lsaquo;&rsaquo;</button>
-      <button data-v="swing" onclick="setWideVane(this)">Swing</button>
+    <div id="wideVaneSection" style="margin-top:8px">
+      <div class="card-label">Horizontal Vane</div>
+      <div class="btn-group" id="wideVaneGrp">
+        <button data-v="ll" onclick="setWideVane(this)">&laquo;</button>
+        <button data-v="l" onclick="setWideVane(this)">&lsaquo;</button>
+        <button data-v="c" onclick="setWideVane(this)">|</button>
+        <button data-v="r" onclick="setWideVane(this)">&rsaquo;</button>
+        <button data-v="rr" onclick="setWideVane(this)">&raquo;</button>
+        <button data-v="split" onclick="setWideVane(this)">&lsaquo;&rsaquo;</button>
+        <button data-v="swing" onclick="setWideVane(this)">Swing</button>
+      </div>
     </div>
   </div>
 
@@ -377,7 +359,7 @@ body{
   </div>
 
   <!-- HomeKit (collapsible) -->
-  <div style="margin-bottom:10px">
+  <div style="margin-bottom:6px">
     <div class="collapse-header" onclick="togglePanel(this)">
       <span class="collapse-arrow">&#9654;</span>
       <span class="collapse-title">HomeKit  <span class="status-dot idle" id="hkDot"></span></span>
@@ -428,7 +410,7 @@ body{
   </div>
 
   <!-- WiFi (collapsible) -->
-  <div style="margin-bottom:10px">
+  <div style="margin-bottom:6px">
     <div class="collapse-header" onclick="togglePanel(this)">
       <span class="collapse-arrow">&#9654;</span>
       <span class="collapse-title">WiFi</span>
@@ -464,7 +446,7 @@ body{
   </div>
 
   <!-- Settings (collapsible) -->
-  <div style="margin-bottom:10px">
+  <div style="margin-bottom:6px">
     <div class="collapse-header" onclick="togglePanel(this)">
       <span class="collapse-arrow">&#9654;</span>
       <span class="collapse-title">Settings</span>
@@ -518,7 +500,7 @@ body{
   </div>
 
   <!-- Logs (collapsible) -->
-  <div style="margin-bottom:10px">
+  <div style="margin-bottom:6px">
     <div class="collapse-header" onclick="togglePanel(this)">
       <span class="collapse-arrow">&#9654;</span>
       <span class="collapse-title">Logs</span>
@@ -573,7 +555,7 @@ body{
     btn.textContent='\u{1F441}\u200D\u{1F5E8}';
     btn.setAttribute('aria-label',show?'Hide password':'Show password');
   };
-  var connDot=$('connDot'), powerBtn=$('powerBtn');
+  var connDot=$('connDot');
   var roomTemp=$('roomTemp'), targetTemp=$('targetTemp');
   var tempSlider=$('tempSlider'), sliderVal=$('sliderVal');
   var compDot=$('compDot'), compText=$('compText');
@@ -941,18 +923,14 @@ body{
     if(!locked){
       state=s;
 
-      // Power
+      // Mode + power (Off is a mode in the UI)
       if(s.power){
-        powerBtn.className='power-btn on';
-        powerBtn.textContent='Power On';
+        setActive('modeGrp', s.mode);
+        setModeTheme(s.mode);
       }else{
-        powerBtn.className='power-btn off';
-        powerBtn.textContent='Power Off';
+        setActive('modeGrp', 'off');
+        setModeTheme(null);
       }
-
-      // Mode
-      setActive('modeGrp', s.mode);
-      setModeTheme(s.mode);
 
       // Temperature target
       targetTemp.textContent=fmtTemp(s.target);
@@ -1072,8 +1050,8 @@ body{
       if(s.vaneConfig!=null) $('cfgVanes').value=s.vaneConfig;
     }
     if(s.vaneConfig!=null){
-      $('vaneCard').style.display=s.vaneConfig>=1?'':'none';
-      $('wideVaneCard').style.display=s.vaneConfig>=2?'':'none';
+      $('vaneSection').style.display=s.vaneConfig>=1?'':'none';
+      $('wideVaneSection').style.display=s.vaneConfig>=2?'':'none';
     }
 
     // HomeKit status
@@ -1141,22 +1119,21 @@ body{
   }
 
   // ── Controls (optimistic UI — update immediately, server confirms later) ──
-  window.togglePower=function(){
-    lastCmdTime=Date.now();
-    var on=!state.power;
-    state.power=on;
-    powerBtn.className='power-btn '+(on?'on':'off');
-    powerBtn.textContent=on?'Power On':'Power Off';
-    send({cmd:'set',power:on});
-  };
-
   window.setMode=function(btn){
     lastCmdTime=Date.now();
     var v=btn.getAttribute('data-v');
-    state.mode=v;
-    setActive('modeGrp',v);
-    setModeTheme(v);
-    send({cmd:'set',mode:v});
+    if(v==='off'){
+      state.power=false;
+      setActive('modeGrp','off');
+      setModeTheme(null);
+      send({cmd:'set',power:false});
+    }else{
+      state.power=true;
+      state.mode=v;
+      setActive('modeGrp',v);
+      setModeTheme(v);
+      send({cmd:'set',power:true,mode:v});
+    }
   };
 
   window.setFan=function(btn){
