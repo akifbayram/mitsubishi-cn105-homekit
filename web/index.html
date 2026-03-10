@@ -4,6 +4,10 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="{{BRAND_THEME_COLOR}}">
+<link rel="manifest" href="/manifest.json">
+<link rel="apple-touch-icon" href="/icon-192.png">
 <title>Serin Climate</title>
 <link rel="icon" type="image/png" href="data:image/png;base64,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">
 <style>
@@ -121,7 +125,7 @@ body{
   display:flex;align-items:center;gap:6px;
   padding:8px 10px;background:var(--surface2);border-radius:6px;font-size:13px;
 }
-.status-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.status-dot{display:inline-block;width:8px;height:8px;border-radius:50%;flex-shrink:0;margin-left:4px;}
 .status-dot.running{background:var(--green)}
 .status-dot.idle{background:var(--text2)}
 .status-label{color:var(--text2);margin-right:auto}
@@ -311,7 +315,7 @@ body{
   <div class="card" style="padding:0">
     <div class="collapse-header" onclick="togglePanel(this)">
       <span class="collapse-arrow">&#9654;</span>
-      <span class="collapse-title">Status</span>
+      <span class="collapse-title">CN105  <span class="status-dot idle" id="cn105Dot"></span></span>
     </div>
     <div class="collapse-body" id="statusBody">
     <div class="status-grid">
@@ -359,7 +363,7 @@ body{
   <div style="margin-bottom:10px">
     <div class="collapse-header" onclick="togglePanel(this)">
       <span class="collapse-arrow">&#9654;</span>
-      <span class="collapse-title">HomeKit</span>
+      <span class="collapse-title">HomeKit  <span class="status-dot idle" id="hkDot"></span></span>
     </div>
     <div class="collapse-body" id="homekitBody">
       <div class="hk-label" id="hkLabel">
@@ -389,7 +393,7 @@ body{
       </div>
       <div class="status-grid" style="margin-bottom:10px">
         <div class="status-item">
-          <div class="status-dot idle" id="hkDot"></div>
+          <div class="status-dot idle" id="hkDotBody"></div>
           <span id="hkStatusText">--</span>
         </div>
         <div class="status-item">
@@ -562,7 +566,7 @@ body{
   var heatSlider=$('heatSlider'), coolSlider=$('coolSlider');
   var heatThreshVal=$('heatThreshVal'), coolThreshVal=$('coolThreshVal');
   var dualLocked=false;
-  var hkDot=$('hkDot'), hkStatusText=$('hkStatusText');
+  var hkDot=$('hkDot'), hkDotBody=$('hkDotBody'), hkStatusText=$('hkStatusText');
   var hkControllersEl=$('hkControllers'), hkSetupCodeEl=$('hkSetupCode');
   var qrCanvas=$('qrCanvas');
   var hkDigits=[]; for(var i=0;i<8;i++) hkDigits.push($('hkD'+i));
@@ -1019,7 +1023,9 @@ body{
 
     // HomeKit status
     if(s.hkPaired!=null){
-      hkDot.className='status-dot '+(s.hkPaired?'running':'idle');
+      var hkCls='status-dot '+(s.hkPaired?'running':'idle');
+      hkDot.className=hkCls;
+      hkDotBody.className=hkCls;
       hkStatusText.textContent=s.hkStatus||'--';
       hkControllersEl.textContent=s.hkControllers!=null?s.hkControllers+' paired':'--';
       hkSetupCodeEl.textContent=s.hkSetupCode||'--';

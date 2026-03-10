@@ -21,6 +21,7 @@ brand_vars = {
     "BRAND_MANUFACTURER": "Mitsubishi Electric",
     "BRAND_MODEL": "CN105",
     "BRAND_QR_ID": "MCAC",
+    "BRAND_THEME_COLOR": "#f48120",
 }
 # Override with any -DBRAND_* build flags
 for flag in env.get("BUILD_FLAGS", []):
@@ -66,3 +67,32 @@ for html_src, html_hdr in html_files:
     # Remember which brand vars were used so we regenerate on env switch
     with open(brand_hash_file, "w") as f:
         f.write(brand_json)
+
+# ── Icon embedding (PNG → PROGMEM, no gzip) ─────────────────────────────
+embed_binary_script = os.path.join(project_dir, "scripts", "embed_binary.py")
+
+icon_files = [
+    (os.path.join(project_dir, "web", "icon-192.png"),
+     os.path.join(project_dir, "include", "icon_192_png.h")),
+    (os.path.join(project_dir, "web", "icon-512.png"),
+     os.path.join(project_dir, "include", "icon_512_png.h")),
+]
+
+for icon_src, icon_hdr in icon_files:
+    if not os.path.isfile(icon_src):
+        continue
+    # Skip if header is newer than source
+    if (os.path.isfile(icon_hdr)
+            and os.path.getmtime(icon_hdr) >= os.path.getmtime(icon_src)):
+        continue
+    name = os.path.basename(icon_src)
+    print(f"Pre-build: Embedding {name}...")
+    result = subprocess.run(
+        [sys.executable, embed_binary_script, icon_src, icon_hdr],
+        capture_output=True, text=True, cwd=project_dir
+    )
+    if result.stdout:
+        print(result.stdout.strip())
+    if result.returncode != 0:
+        print(f"ERROR: embed_binary.py failed for {name}:\n{result.stderr}", file=sys.stderr)
+        env.Exit(1)

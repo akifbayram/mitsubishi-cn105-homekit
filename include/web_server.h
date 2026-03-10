@@ -36,6 +36,9 @@ private:
     static esp_err_t handleWifiSetup(httpd_req_t *req);
     static esp_err_t handleOtaUpload(httpd_req_t *req);
     static esp_err_t handleWebSocket(httpd_req_t *req);
+    static esp_err_t handleManifest(httpd_req_t *req);
+    static esp_err_t handleIcon192(httpd_req_t *req);
+    static esp_err_t handleIcon512(httpd_req_t *req);
     void handleWsMessage(httpd_req_t *req, const char *msg);
     void pushState();
     void sendWsText(int fd, const char *text);

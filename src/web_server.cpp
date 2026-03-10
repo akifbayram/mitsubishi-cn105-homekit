@@ -1,6 +1,9 @@
 #include "web_server.h"
 #include "web_ui_html.h"
 #include "wifi_recovery_html.h"
+#include "icon_192_png.h"
+#include "icon_512_png.h"
+#include "branding.h"
 #include "wifi_recovery.h"
 #include <WiFi.h>
 #include <cstring>
@@ -1007,6 +1010,40 @@ void WebUI::updateCachedSetupInfo() {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
+// PWA manifest and icon handlers
+// ══════════════════════════════════════════════════════════════════════════════
+
+static const char MANIFEST_JSON[] =
+    "{\"name\":\"" BRAND_NAME "\""
+    ",\"short_name\":\"" BRAND_NAME "\""
+    ",\"start_url\":\"/\""
+    ",\"display\":\"standalone\""
+    ",\"background_color\":\"#121220\""
+    ",\"theme_color\":\"" BRAND_THEME_COLOR "\""
+    ",\"icons\":["
+    "{\"src\":\"/icon-192.png\",\"sizes\":\"192x192\",\"type\":\"image/png\"}"
+    ",{\"src\":\"/icon-512.png\",\"sizes\":\"512x512\",\"type\":\"image/png\"}"
+    "]}";
+
+esp_err_t WebUI::handleManifest(httpd_req_t *req) {
+    httpd_resp_set_type(req, "application/manifest+json");
+    httpd_resp_sendstr(req, MANIFEST_JSON);
+    return ESP_OK;
+}
+
+esp_err_t WebUI::handleIcon192(httpd_req_t *req) {
+    httpd_resp_set_type(req, "image/png");
+    httpd_resp_send(req, (const char *)ICON_192_PNG, ICON_192_PNG_LEN);
+    return ESP_OK;
+}
+
+esp_err_t WebUI::handleIcon512(httpd_req_t *req) {
+    httpd_resp_set_type(req, "image/png");
+    httpd_resp_send(req, (const char *)ICON_512_PNG, ICON_512_PNG_LEN);
+    return ESP_OK;
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
 // begin() — start HTTP server on port 8080
 // ══════════════════════════════════════════════════════════════════════════════
 
@@ -1087,6 +1124,28 @@ void WebUI::begin(CN105Controller *ctrl) {
         .supported_subprotocol = NULL
     };
     httpd_register_uri_handler(_server, &wifiSetupUri);
+
+    // Register PWA manifest and icon handlers
+    const httpd_uri_t manifestUri = {
+        .uri = "/manifest.json", .method = HTTP_GET, .handler = handleManifest,
+        .user_ctx = this, .is_websocket = false,
+        .handle_ws_control_frames = false, .supported_subprotocol = NULL
+    };
+    httpd_register_uri_handler(_server, &manifestUri);
+
+    const httpd_uri_t icon192Uri = {
+        .uri = "/icon-192.png", .method = HTTP_GET, .handler = handleIcon192,
+        .user_ctx = this, .is_websocket = false,
+        .handle_ws_control_frames = false, .supported_subprotocol = NULL
+    };
+    httpd_register_uri_handler(_server, &icon192Uri);
+
+    const httpd_uri_t icon512Uri = {
+        .uri = "/icon-512.png", .method = HTTP_GET, .handler = handleIcon512,
+        .user_ctx = this, .is_websocket = false,
+        .handle_ws_control_frames = false, .supported_subprotocol = NULL
+    };
+    httpd_register_uri_handler(_server, &icon512Uri);
 
     LOG_INFO("[WebUI] HTTP server started, WebSocket endpoint at /ws");
 

@@ -26,3 +26,7 @@
 #ifndef BRAND_QR_ID
 #define BRAND_QR_ID "MCAC"
 #endif
+
+#ifndef BRAND_THEME_COLOR
+#define BRAND_THEME_COLOR "#f48120"
+#endif

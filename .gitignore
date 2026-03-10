@@ -34,3 +34,5 @@ platformio_override.ini
 # Auto-generated (regenerate via scripts/embed_html.py)
 include/web_ui_html.h
 include/wifi_recovery_html.h
+include/icon_192_png.h
+include/icon_512_png.h
