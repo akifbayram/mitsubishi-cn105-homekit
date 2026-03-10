@@ -35,6 +35,9 @@ constexpr uint8_t CN105_FLAG_VANE      = 0x10;
 // ── Set Command Flags (byte[7] bitmask — second control byte) ────────────
 constexpr uint8_t CN105_FLAG2_WVANE    = 0x01;
 
+// ── Remote Temperature Command ──────────────────────────────────────────────
+constexpr uint8_t CN105_CMD_REMOTE_TEMP = 0x07;
+
 // ── Power Values ────────────────────────────────────────────────────────────
 constexpr uint8_t CN105_POWER_OFF      = 0x00;
 constexpr uint8_t CN105_POWER_ON       = 0x01;
@@ -187,6 +190,10 @@ public:
     void setFanSpeed(uint8_t speed);
     void setVane(uint8_t position);
     void setWideVane(uint8_t position);
+
+    /// Send remote temperature to heat pump (0x07 command).
+    /// Positive value = use this temperature; 0 or negative = revert to internal sensor.
+    void sendRemoteTemperature(float tempC);
 
     /// Send all pending changes in a single set packet
     void sendPendingChanges();

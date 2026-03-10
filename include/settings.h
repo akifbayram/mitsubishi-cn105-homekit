@@ -13,6 +13,10 @@ struct DeviceSettings {
     char     setupCode[9] = "";        // HomeKit pairing code (8 digits)
     bool     wifiChangePending = false; // True after WiFi creds changed via web UI (shorter fallback timeout)
     uint8_t  vaneConfig = 2;          // 0=no vanes, 1=vertical only, 2=vertical+horizontal
+    // BLE remote temperature sensor
+    bool     bleEnabled = false;
+    char     bleSensorAddr[18] = "";   // "AA:BB:CC:DD:EE:FF"
+    char     bleSensorName[32] = "";   // Display name from scan
 };
 
 class SettingsStore {

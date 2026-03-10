@@ -477,6 +477,46 @@ void CN105Controller::sendSetPacket() {
     _wanted.hasBeenSent = true;
 }
 
+void CN105Controller::sendRemoteTemperature(float tempC) {
+    if (!_state.connected) return;
+
+    // Don't send during an active poll cycle
+    if (_cycleRunning) {
+        LOG_DEBUG("[CN105] Deferring remote temp (cycle running)");
+        return;
+    }
+
+    uint8_t pkt[22];
+    memset(pkt, 0, sizeof(pkt));
+    buildHeader(pkt, CN105_PKT_SET, CN105_DATA_LEN);
+
+    pkt[5] = CN105_CMD_REMOTE_TEMP;
+
+    if (tempC > 0.0f) {
+        pkt[6] = 0x01;  // flag: providing remote temperature
+        float rounded = roundf(tempC * 2.0f) / 2.0f;  // round to 0.5°C
+        pkt[7] = (uint8_t)(rounded * 2.0f - 16.0f);   // legacy encoding
+        pkt[8] = (uint8_t)(rounded * 2.0f + 128.0f);   // enhanced encoding
+        LOG_INFO("[CN105] Sending remote temp: %.1f°C (legacy=0x%02X enhanced=0x%02X)",
+                 rounded, pkt[7], pkt[8]);
+    } else {
+        pkt[6] = 0x00;  // flag: revert to internal sensor
+        pkt[8] = 0x80;  // 128 = 0°C in enhanced encoding
+        LOG_INFO("[CN105] Reverting to internal temperature sensor");
+    }
+
+    pkt[21] = calcChecksum(pkt, 21);
+
+    if (currentLogLevel >= LOG_LEVEL_DEBUG) {
+        DebugLog.printf("[CN105] TX REMOTE_TEMP (%d bytes): ", 22);
+        logHex(pkt, 22);
+    }
+
+    uart_write_bytes(_uartNum, pkt, 22);
+    uart_wait_tx_done(_uartNum, pdMS_TO_TICKS(200));
+    _lastCycleEnd = millis() + CN105_DEFER_DELAY;
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 // Packet Reception & Parsing
 // ════════════════════════════════════════════════════════════════════════════

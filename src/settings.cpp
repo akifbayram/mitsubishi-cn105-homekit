@@ -21,6 +21,9 @@ void SettingsStore::begin() {
     _prefs.getString("setupCode", _settings.setupCode, sizeof(_settings.setupCode));
     _settings.wifiChangePending = _prefs.getBool("wifiChgPend", false);
     _settings.vaneConfig = _prefs.getUChar("vaneConfig", 2);
+    _settings.bleEnabled = _prefs.getBool("bleOn", false);
+    _prefs.getString("bleAddr", _settings.bleSensorAddr, sizeof(_settings.bleSensorAddr));
+    _prefs.getString("bleName", _settings.bleSensorName, sizeof(_settings.bleSensorName));
 
     LOG_INFO("[Settings] Loaded: logLevel=%d poll=%lums name=%s unit=%s",
              _settings.logLevel, _settings.pollMs, _settings.deviceName,
@@ -37,6 +40,9 @@ void SettingsStore::save() {
     _prefs.putString("setupCode", _settings.setupCode);
     _prefs.putBool("wifiChgPend", _settings.wifiChangePending);
     _prefs.putUChar("vaneConfig", _settings.vaneConfig);
+    _prefs.putBool("bleOn", _settings.bleEnabled);
+    _prefs.putString("bleAddr", _settings.bleSensorAddr);
+    _prefs.putString("bleName", _settings.bleSensorName);
     LOG_INFO("[Settings] Saved: logLevel=%d poll=%lums name=%s unit=%s",
              _settings.logLevel, _settings.pollMs, _settings.deviceName,
              _settings.useFahrenheit ? "F" : "C");
