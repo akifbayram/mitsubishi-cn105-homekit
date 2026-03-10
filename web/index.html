@@ -101,23 +101,32 @@ body{
 
 /* Temperature */
 .temp-display{
-  display:flex;justify-content:space-between;align-items:flex-end;
-  margin-bottom:12px;
+  display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px;
 }
-.temp-room{font-size:42px;font-weight:300;letter-spacing:-1px;color:var(--mode-accent);transition:color .3s}
-.temp-val{font-size:24px;font-weight:600}
-.temp-display small{display:block;font-size:11px;color:var(--text2);margin-top:2px}
-.slider-row{display:flex;align-items:center;gap:10px}
+.temp-reading,.temp-setting{display:flex;align-items:baseline;gap:2px}
+.temp-lbl{font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-right:4px}
+.temp-room{font-size:22px;font-weight:400;color:var(--text);transition:color .3s}
+.temp-val{font-size:28px;font-weight:600;color:var(--mode-accent);transition:color .3s}
+.temp-display .temp-unit-label{font-size:12px}
+.slider-row{display:flex;align-items:center;gap:8px}
 .slider-row input[type=range]{flex:1;-webkit-appearance:none;appearance:none;height:6px;border-radius:3px;background:var(--surface2);outline:none}
 .slider-row input[type=range]::-webkit-slider-thumb{
-  -webkit-appearance:none;width:24px;height:24px;border-radius:50%;
+  -webkit-appearance:none;width:28px;height:28px;border-radius:50%;
   background:var(--mode-accent);cursor:pointer;border:2px solid var(--bg);
 }
 .slider-row input[type=range]::-moz-range-thumb{
-  width:24px;height:24px;border-radius:50%;
+  width:28px;height:28px;border-radius:50%;
   background:var(--mode-accent);cursor:pointer;border:2px solid var(--bg);
 }
-.slider-val{font-size:18px;font-weight:600;min-width:52px;text-align:right}
+.temp-step{
+  width:32px;height:32px;border:none;border-radius:50%;
+  background:var(--surface2);color:var(--text);font-size:18px;font-weight:500;
+  cursor:pointer;display:flex;align-items:center;justify-content:center;
+  transition:all .15s;flex-shrink:0;user-select:none;-webkit-user-select:none;
+}
+.temp-step:hover{background:var(--btn-hover)}
+.temp-step:active{transform:scale(.9);background:var(--mode-accent);color:#fff}
+.slider-val{display:none}
 
 /* Status row */
 .status-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
@@ -245,14 +254,22 @@ body{
   <div class="card">
     <div class="card-label">Temperature</div>
     <div class="temp-display">
-      <div><span class="temp-room" id="roomTemp">--</span><small><span class="temp-unit-label">&deg;C</span> room</small></div>
-      <div><span class="temp-val" id="targetTemp">--</span><small><span class="temp-unit-label">&deg;C</span> target</small></div>
+      <div class="temp-reading">
+        <span class="temp-lbl">Room</span>
+        <span class="temp-room" id="roomTemp">--</span><span class="temp-unit-label">&deg;C</span>
+      </div>
+      <div class="temp-setting">
+        <span class="temp-lbl">Set</span>
+        <span class="temp-val" id="targetTemp">--</span><span class="temp-unit-label">&deg;C</span>
+      </div>
     </div>
     <div class="slider-row">
+      <button class="temp-step" onclick="stepTemp(-1)" aria-label="Decrease temperature">&minus;</button>
       <input type="range" id="tempSlider" min="16" max="31" step="0.5" value="22"
              oninput="onSliderInput()" onchange="onSliderChange()">
-      <div class="slider-val" id="sliderVal">22.0</div>
+      <button class="temp-step" onclick="stepTemp(1)" aria-label="Increase temperature">+</button>
     </div>
+    <div class="slider-val" id="sliderVal">22.0</div>
     <!-- Dual setpoint for AUTO mode -->
     <div id="dualTemp" style="display:none;margin-top:12px">
       <div style="display:flex;justify-content:space-between;margin-bottom:6px">
@@ -1182,11 +1199,24 @@ body{
     }
   }
 
+  // Step temperature +/- via buttons
+  window.stepTemp=function(dir){
+    var s=parseFloat(tempSlider.step),v=parseFloat(tempSlider.value);
+    var nv=v+(dir*s);
+    var mn=parseFloat(tempSlider.min),mx=parseFloat(tempSlider.max);
+    if(nv<mn)nv=mn; if(nv>mx)nv=mx;
+    tempSlider.value=nv;
+    onSliderInput();
+    onSliderChange();
+  };
+
   // Slider: update display live, send only on release
   window.onSliderInput=function(){
     sliderDragging=true;
     var raw=parseFloat(tempSlider.value);
-    sliderVal.textContent=(tempUnit==='F')?raw.toString():raw.toFixed(1);
+    var display=(tempUnit==='F')?raw.toString():raw.toFixed(1);
+    sliderVal.textContent=display;
+    targetTemp.textContent=display;
   };
   window.onSliderChange=function(){
     lastCmdTime=Date.now();
