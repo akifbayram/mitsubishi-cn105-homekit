@@ -1,4 +1,5 @@
 #include "cn105_protocol.h"
+#include "cn105_strings.h"
 #include <cmath>
 
 // ── Connect packet payload (fixed) ─────────────────────────────────────────
@@ -12,88 +13,6 @@ static void logHex(const uint8_t *buf, uint8_t len) {
         DebugLog.printf("%02X ", buf[i]);
     }
     DebugLog.println();
-}
-
-static const char* modeToStr(uint8_t mode) {
-    switch (mode) {
-        case CN105_MODE_HEAT: return "HEAT";
-        case 0x02:            return "DRY";
-        case CN105_MODE_COOL: return "COOL";
-        case 0x07:            return "FAN";
-        case CN105_MODE_AUTO: return "AUTO";
-        default:              return "UNKNOWN";
-    }
-}
-
-static const char* fanToStr(uint8_t fan) {
-    switch (fan) {
-        case CN105_FAN_AUTO:  return "AUTO";
-        case CN105_FAN_QUIET: return "QUIET";
-        case CN105_FAN_1:     return "1";
-        case CN105_FAN_2:     return "2";
-        case CN105_FAN_3:     return "3";
-        case CN105_FAN_4:     return "4";
-        default: return "UNKNOWN";
-    }
-}
-
-static const char* vaneToStr(uint8_t vane) {
-    switch (vane) {
-        case CN105_VANE_AUTO:  return "AUTO";
-        case CN105_VANE_1:     return "1";
-        case CN105_VANE_2:     return "2";
-        case CN105_VANE_3:     return "3";
-        case CN105_VANE_4:     return "4";
-        case CN105_VANE_5:     return "5";
-        case CN105_VANE_SWING: return "SWING";
-        default:               return "UNKNOWN";
-    }
-}
-
-static const char* wideVaneToStr(uint8_t wv) {
-    switch (wv) {
-        case CN105_WVANE_LEFT_LEFT:   return "<<";
-        case CN105_WVANE_LEFT:        return "<";
-        case CN105_WVANE_CENTER:      return "|";
-        case CN105_WVANE_RIGHT:       return ">";
-        case CN105_WVANE_RIGHT_RIGHT: return ">>";
-        case CN105_WVANE_SPLIT:       return "<>";
-        case CN105_WVANE_SWING:       return "SWING";
-        default:                      return "?";
-    }
-}
-
-static const char* subModeToStr(uint8_t sm) {
-    switch (sm) {
-        case 0x00: return "NORMAL";
-        case 0x02: return "DEFROST";
-        case 0x04: return "PREHEAT";
-        case 0x08: return "STANDBY";
-        default:   return "?";
-    }
-}
-
-static const char* stageToStr(uint8_t st) {
-    switch (st) {
-        case 0x00: return "IDLE";
-        case 0x01: return "LOW";
-        case 0x02: return "GENTLE";
-        case 0x03: return "MEDIUM";
-        case 0x04: return "MODERATE";
-        case 0x05: return "HIGH";
-        case 0x06: return "DIFFUSE";
-        default:   return "?";
-    }
-}
-
-static const char* autoSubModeToStr(uint8_t asm_) {
-    switch (asm_) {
-        case 0x00: return "OFF";
-        case 0x01: return "COOL";
-        case 0x02: return "HEAT";
-        case 0x03: return "LEADER";
-        default:   return "?";
-    }
 }
 
 // ── Poll phase ordering (single definition, used by loop + processPacket) ──
@@ -289,7 +208,7 @@ void CN105Controller::setPower(bool on) {
 }
 
 void CN105Controller::setMode(uint8_t mode) {
-    LOG_INFO("[CN105] CMD: setMode(%s / 0x%02X)", modeToStr(mode), mode);
+    LOG_INFO("[CN105] CMD: setMode(%s / 0x%02X)", modeToLogStr(mode), mode);
     _setFlags1 |= CN105_FLAG_MODE;
     _pendingMode = mode;
     _wanted.hasMode = true;
@@ -312,7 +231,7 @@ void CN105Controller::setTargetTemp(float tempC) {
 }
 
 void CN105Controller::setFanSpeed(uint8_t speed) {
-    LOG_INFO("[CN105] CMD: setFanSpeed(%s / 0x%02X)", fanToStr(speed), speed);
+    LOG_INFO("[CN105] CMD: setFanSpeed(%s / 0x%02X)", fanToLogStr(speed), speed);
     _setFlags1 |= CN105_FLAG_FAN;
     _pendingFan = speed;
     _wanted.hasFan = true;
@@ -323,7 +242,7 @@ void CN105Controller::setFanSpeed(uint8_t speed) {
 }
 
 void CN105Controller::setVane(uint8_t position) {
-    LOG_INFO("[CN105] CMD: setVane(%s / 0x%02X)", vaneToStr(position), position);
+    LOG_INFO("[CN105] CMD: setVane(%s / 0x%02X)", vaneToLogStr(position), position);
     _setFlags1 |= CN105_FLAG_VANE;
     _pendingVane = position;
     _wanted.hasVane = true;
@@ -334,7 +253,7 @@ void CN105Controller::setVane(uint8_t position) {
 }
 
 void CN105Controller::setWideVane(uint8_t position) {
-    LOG_INFO("[CN105] CMD: setWideVane(%s / 0x%02X)", wideVaneToStr(position), position);
+    LOG_INFO("[CN105] CMD: setWideVane(%s / 0x%02X)", wideVaneToLogStr(position), position);
     _setFlags2 |= CN105_FLAG2_WVANE;
     _pendingWideVane = position;
     _wanted.hasWideVane = true;
@@ -433,7 +352,7 @@ void CN105Controller::sendSetPacket() {
 
     if (_setFlags1 & CN105_FLAG_MODE) {
         pkt[9] = _pendingMode;
-        LOG_INFO("[CN105] SET mode=%s (0x%02X)", modeToStr(_pendingMode), _pendingMode);
+        LOG_INFO("[CN105] SET mode=%s (0x%02X)", modeToLogStr(_pendingMode), _pendingMode);
     }
 
     if (_setFlags1 & CN105_FLAG_TEMP) {
@@ -452,19 +371,19 @@ void CN105Controller::sendSetPacket() {
 
     if (_setFlags1 & CN105_FLAG_FAN) {
         pkt[11] = _pendingFan;
-        LOG_INFO("[CN105] SET fan=%s (0x%02X)", fanToStr(_pendingFan), _pendingFan);
+        LOG_INFO("[CN105] SET fan=%s (0x%02X)", fanToLogStr(_pendingFan), _pendingFan);
     }
 
     if (_setFlags1 & CN105_FLAG_VANE) {
         pkt[12] = _pendingVane;
-        LOG_INFO("[CN105] SET vane=%s (0x%02X)", vaneToStr(_pendingVane), _pendingVane);
+        LOG_INFO("[CN105] SET vane=%s (0x%02X)", vaneToLogStr(_pendingVane), _pendingVane);
     }
 
     // Wide vane (horizontal) — uses second control flag byte (packet[7])
     pkt[7] = _setFlags2;
     if (_setFlags2 & CN105_FLAG2_WVANE) {
         pkt[18] = _pendingWideVane;
-        LOG_INFO("[CN105] SET wideVane=%s (0x%02X)", wideVaneToStr(_pendingWideVane), _pendingWideVane);
+        LOG_INFO("[CN105] SET wideVane=%s (0x%02X)", wideVaneToLogStr(_pendingWideVane), _pendingWideVane);
     }
 
     pkt[21] = calcChecksum(pkt, 21);
@@ -627,9 +546,9 @@ void CN105Controller::handleInfoResponse(const uint8_t *data, uint8_t dataLen) {
                     _state.targetTemp = 31.0f - (float)data[5];
                 }
                 LOG_DEBUG("[CN105] SETTINGS: power=%s mode=%s fan=%s vane=%s wvane=%s target=%.1f%sC",
-                          _state.power ? "ON" : "OFF", modeToStr(_state.mode),
-                          fanToStr(_state.fanSpeed), vaneToStr(_state.vane),
-                          wideVaneToStr(_state.wideVane), _state.targetTemp, "\xC2\xB0");
+                          _state.power ? "ON" : "OFF", modeToLogStr(_state.mode),
+                          fanToLogStr(_state.fanSpeed), vaneToLogStr(_state.vane),
+                          wideVaneToLogStr(_state.wideVane), _state.targetTemp, "\xC2\xB0");
 
                 // ── Clear wanted flags when heat pump confirms matching values ──
                 // Only check after the command has been sent (echavet pattern)
@@ -696,9 +615,9 @@ void CN105Controller::handleInfoResponse(const uint8_t *data, uint8_t dataLen) {
                 _state.stage = data[4];
                 _state.autoSubMode = data[5];
                 LOG_DEBUG("[CN105] STANDBY: subMode=%s stage=%s autoSub=%s",
-                          subModeToStr(_state.subMode),
-                          stageToStr(_state.stage),
-                          autoSubModeToStr(_state.autoSubMode));
+                          subModeToLogStr(_state.subMode),
+                          stageToLogStr(_state.stage),
+                          autoSubModeToLogStr(_state.autoSubMode));
             }
             break;
 

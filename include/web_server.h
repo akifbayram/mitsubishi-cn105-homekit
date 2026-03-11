@@ -46,16 +46,6 @@ private:
     bool applyWifiCredentials(const char *json, const char **outError); // Shared WiFi cred logic
 
     static esp_err_t sendGzipPage(httpd_req_t *req, const uint8_t *data, size_t len);
-
-    // String conversion helpers
-    static const char *modeToStr(uint8_t mode);
-    static const char *fanToStr(uint8_t fan);
-    static const char *vaneToStr(uint8_t vane);
-    static uint8_t     strToMode(const char *s);
-    static uint8_t     strToFan(const char *s);
-    static uint8_t     strToVane(const char *s);
-    static const char *wideVaneToStr(uint8_t wv);
-    static uint8_t     strToWideVane(const char *s);
 };
 
 extern WebUI webUI;
