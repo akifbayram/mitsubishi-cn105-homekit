@@ -6,194 +6,240 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="{{BRAND_THEME_COLOR}}">
-<link rel="manifest" href="/manifest.json">
-<link rel="apple-touch-icon" href="/icon-192.png">
 <title>Serin Climate</title>
-<link rel="icon" type="image/png" href="data:image/png;base64,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">
+<link rel="icon" type="image/png" href="data:image/png;base64,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">
 <style>
+/* ── Design System ─────────────────────────────────────────────────────── */
 :root{
-  --bg:#121220;--surface:#1a1a2e;--surface2:#242442;--border:#2d2d50;
-  --text:#e0e0f0;--text2:#8888aa;--accent:#4a9eff;--accent-dim:#2a5e9f;
-  --red:#ff4466;--green:#44cc66;--orange:#ffaa33;--yellow:#ffe066;
-  --btn-bg:#2a2a48;--btn-active:#4a9eff;--btn-hover:#33335a;
-  --mode-accent:#4a9eff;--mode-accent-dim:#2a5e9f;
-  --radius:8px;
+  --bg:#000;--surface:#1C1C1E;--surface2:#2C2C2E;--surface3:#3A3A3C;
+  --border:#38383A;--text:#fff;--text2:#8E8E93;--text3:#636366;
+  --seg-bg:rgba(118,118,128,0.24);--seg-active:#636366;
+  --accent:#007AFF;--accent-dim:#0055CC;
+  --red:#FF3B30;--green:#34C759;--orange:#FF9500;--yellow:#FFD60A;
+  --purple:#BF5AF2;--teal:#64D2FF;
+
+  --mode-accent:#007AFF;--mode-accent-dim:#0055CC;
+  --radius:16px;--radius-sm:10px;
+  --shadow:0 1px 3px rgba(0,0,0,0.3);
+  --shadow-seg:0 1px 4px rgba(0,0,0,0.4),0 0 1px rgba(0,0,0,0.2);
 }
-.mode-heat{--mode-accent:#ff6b35;--mode-accent-dim:#9f4020;--btn-active:#ff6b35}
-.mode-cool{--mode-accent:#4a9eff;--mode-accent-dim:#2a5e9f;--btn-active:#4a9eff}
-.mode-auto{--mode-accent:#a855f7;--mode-accent-dim:#6b21a8;--btn-active:#a855f7}
-.mode-dry{--mode-accent:#f59e0b;--mode-accent-dim:#92400e;--btn-active:#f59e0b}
-.mode-fan{--mode-accent:#22d3ee;--mode-accent-dim:#155e75;--btn-active:#22d3ee}
 [data-theme="light"]{
-  --bg:#f0f1f6;--surface:#fff;--surface2:#e6e7ee;--border:#d0d1da;
-  --text:#1c1c2e;--text2:#6b6b85;--accent:#3a7fdb;--accent-dim:#2a5fa5;
-  --red:#e84060;--green:#2db55a;--orange:#e8922a;--yellow:#d9a020;
-  --btn-bg:#e2e3ec;--btn-active:#3a7fdb;--btn-hover:#d4d5e0;
-  --mode-accent:#3a7fdb;--mode-accent-dim:#2a5fa5;
+  --bg:#F2F2F7;--surface:#fff;--surface2:#E5E5EA;--surface3:#D1D1D6;
+  --border:#C6C6C8;--text:#000;--text2:#8E8E93;--text3:#AEAEB2;
+  --seg-bg:rgba(118,118,128,0.12);--seg-active:#fff;
+  --accent:#007AFF;--accent-dim:#0055CC;
+  --red:#FF3B30;--green:#34C759;--orange:#FF9500;--yellow:#FFD60A;
+  --purple:#AF52DE;--teal:#5AC8FA;
+
+  --shadow:0 1px 3px rgba(0,0,0,0.08);
+  --shadow-seg:0 1px 3px rgba(0,0,0,0.12),0 0 1px rgba(0,0,0,0.04);
 }
-[data-theme="light"] .mode-heat{--mode-accent:#e85a2a;--mode-accent-dim:#b84520;--btn-active:#e85a2a}
-[data-theme="light"] .mode-cool{--mode-accent:#3a7fdb;--mode-accent-dim:#2a5fa5;--btn-active:#3a7fdb}
-[data-theme="light"] .mode-auto{--mode-accent:#9333ea;--mode-accent-dim:#7e22ce;--btn-active:#9333ea}
-[data-theme="light"] .mode-dry{--mode-accent:#d97706;--mode-accent-dim:#b45309;--btn-active:#d97706}
-[data-theme="light"] .mode-fan{--mode-accent:#0891b2;--mode-accent-dim:#0e7490;--btn-active:#0891b2}
+.mode-heat{--mode-accent:#FF9500;--mode-accent-dim:#CC7700}
+.mode-cool{--mode-accent:#007AFF;--mode-accent-dim:#0055CC}
+.mode-auto{--mode-accent:#BF5AF2;--mode-accent-dim:#9B30D9}
+.mode-dry{--mode-accent:#FF9500;--mode-accent-dim:#CC7700}
+.mode-fan{--mode-accent:#64D2FF;--mode-accent-dim:#32A5D6}
+[data-theme="light"] .mode-heat{--mode-accent:#FF9500;--mode-accent-dim:#CC7700}
+[data-theme="light"] .mode-cool{--mode-accent:#007AFF;--mode-accent-dim:#0055CC}
+[data-theme="light"] .mode-auto{--mode-accent:#AF52DE;--mode-accent-dim:#9333EA}
+[data-theme="light"] .mode-dry{--mode-accent:#FF9500;--mode-accent-dim:#CC7700}
+[data-theme="light"] .mode-fan{--mode-accent:#5AC8FA;--mode-accent-dim:#32A5D6}
+
+/* ── Base ──────────────────────────────────────────────────────────────── */
 *{box-sizing:border-box;margin:0;padding:0}
 body{
-  font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display','SF Pro Text',system-ui,sans-serif;
   background:var(--bg);color:var(--text);
-  min-height:100vh;padding:12px;
+  min-height:100vh;min-height:100dvh;
   -webkit-tap-highlight-color:transparent;
+  -webkit-font-smoothing:antialiased;
 }
-.container{max-width:420px;margin:0 auto}
+.container{max-width:420px;margin:0 auto;padding:0 16px 24px}
 
-/* Header */
+/* ── Header ────────────────────────────────────────────────────────────── */
 .header{
+  position:sticky;top:0;z-index:100;
   display:flex;align-items:center;justify-content:space-between;
-  padding:12px 16px;background:var(--surface);border-radius:var(--radius);
-  margin-bottom:8px;
+  padding:12px 16px;margin:0 -16px 12px;
+  background:var(--bg);
 }
-.header-left{display:flex;flex-direction:column;gap:2px}
-.device-name{font-size:16px;font-weight:600}
-.fw-version{font-size:11px;color:var(--text2)}
+.header-left{display:flex;align-items:baseline;gap:6px}
+.device-name{font-size:17px;font-weight:600;letter-spacing:-0.2px}
+.fw-version{font-size:12px;color:var(--text2)}
+.header-right{display:flex;align-items:center;gap:10px}
 .conn-dot{
-  width:32px;height:32px;border-radius:50%;flex-shrink:0;
-  transition:background .3s;
+  width:12px;height:12px;border-radius:50%;flex-shrink:0;
+  transition:background .3s,box-shadow .3s;
 }
-.conn-dot.ok{background:var(--green)}
+.conn-dot.ok{background:var(--green);box-shadow:0 0 6px var(--green)}
 .conn-dot.err{background:var(--red)}
 .theme-toggle{
-  width:32px;height:32px;border:none;border-radius:50%;
-  background:var(--surface2);cursor:pointer;display:flex;
+  width:34px;height:34px;border:none;border-radius:50%;
+  background:var(--seg-bg);cursor:pointer;display:flex;
   align-items:center;justify-content:center;color:var(--text2);padding:0;
+  transition:transform .15s;
 }
-.theme-toggle:active{transform:scale(.9)}
+.theme-toggle:active{transform:scale(.88)}
 .theme-toggle svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 .icon-moon{display:none}
 [data-theme="light"] .icon-sun{display:none}
 [data-theme="light"] .icon-moon{display:block}
 
-/* Card */
+/* ── Cards ─────────────────────────────────────────────────────────────── */
 .card{
   background:var(--surface);border-radius:var(--radius);
-  padding:10px 14px;margin-bottom:6px;
+  padding:14px 16px;margin-bottom:10px;
 }
-.card-label{font-size:11px;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
-
-/* Button groups */
-.btn-group{display:flex;gap:6px;flex-wrap:wrap}
-.btn-group button{
-  flex:1;min-width:0;padding:8px 4px;border:none;border-radius:6px;
-  background:var(--btn-bg);color:var(--text2);font-size:12px;font-weight:500;
-  cursor:pointer;transition:all .15s;white-space:nowrap;
+.card-label{
+  font-size:13px;font-weight:500;color:var(--text2);
+  text-transform:uppercase;letter-spacing:0.3px;margin-bottom:8px;
 }
-.btn-group button.active{background:var(--btn-active);color:#fff}
-.btn-group button:not(.active):hover{background:var(--btn-hover)}
-.btn-group button:active{transform:scale(.95)}
 
-/* Temperature */
+/* ── Segmented Control ────────────────────────────────────────────────── */
+.seg{
+  display:flex;position:relative;
+  background:var(--seg-bg);border-radius:9px;padding:2px;
+}
+.seg button{
+  flex:1;min-width:0;padding:7px 2px;border:none;background:transparent;
+  color:var(--text);font-size:13px;font-weight:500;
+  border-radius:7px;cursor:pointer;position:relative;z-index:1;
+  transition:color .2s,font-weight .2s;white-space:nowrap;
+  font-family:inherit;
+}
+.seg button.active{font-weight:600}
+.seg button:active{opacity:.6}
+.seg .seg-bg{
+  position:absolute;top:2px;height:calc(100% - 4px);
+  background:var(--seg-active);border-radius:7px;
+  box-shadow:var(--shadow-seg);
+  transition:left .28s cubic-bezier(.4,0,.2,1),width .28s cubic-bezier(.4,0,.2,1),opacity .2s;
+  z-index:0;opacity:0;pointer-events:none;
+}
+
+/* ── Temperature ───────────────────────────────────────────────────────── */
 .temp-display{
   display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px;
 }
 .temp-reading,.temp-setting{display:flex;align-items:baseline;gap:2px}
-.temp-lbl{font-size:10px;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-right:4px}
+.temp-lbl{font-size:11px;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-right:4px}
 .temp-room{font-size:22px;font-weight:400;color:var(--text);transition:color .3s}
 .temp-val{font-size:28px;font-weight:600;color:var(--mode-accent);transition:color .3s}
 .temp-display .temp-unit-label{font-size:12px}
 .slider-row{display:flex;align-items:center;gap:8px}
-.slider-row input[type=range]{flex:1;-webkit-appearance:none;appearance:none;height:6px;border-radius:3px;background:var(--surface2);outline:none}
-.slider-row input[type=range]::-webkit-slider-thumb{
+.slider-row input[type=range]{flex:1}
+.temp-step{
+  width:36px;height:36px;border:none;border-radius:50%;
+  background:var(--seg-bg);color:var(--text);font-size:18px;font-weight:400;
+  cursor:pointer;display:flex;align-items:center;justify-content:center;
+  transition:all .15s;flex-shrink:0;user-select:none;-webkit-user-select:none;
+  font-family:inherit;
+}
+.temp-step:hover{background:var(--surface2)}
+.temp-step:active{transform:scale(.9);background:var(--mode-accent);color:#fff}
+.slider-val{display:none}
+.dual-wrap{width:100%;margin-top:12px}
+.dual-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:4px}
+.dual-label{font-size:13px;font-weight:500}
+.dual-label.heat-label{color:var(--orange)}
+.dual-label.cool-label{color:var(--accent)}
+input[type=range]{
+  -webkit-appearance:none;appearance:none;width:100%;height:4px;
+  border-radius:2px;background:var(--surface2);outline:none;margin:8px 0;
+}
+input[type=range]::-webkit-slider-thumb{
   -webkit-appearance:none;width:28px;height:28px;border-radius:50%;
   background:var(--mode-accent);cursor:pointer;border:2px solid var(--bg);
 }
-.slider-row input[type=range]::-moz-range-thumb{
-  width:28px;height:28px;border-radius:50%;
-  background:var(--mode-accent);cursor:pointer;border:2px solid var(--bg);
+input[type=range]::-moz-range-thumb{
+  width:28px;height:28px;border-radius:50%;border:2px solid var(--bg);
+  background:var(--mode-accent);cursor:pointer;
 }
-.temp-step{
-  width:32px;height:32px;border:none;border-radius:50%;
-  background:var(--surface2);color:var(--text);font-size:18px;font-weight:500;
-  cursor:pointer;display:flex;align-items:center;justify-content:center;
-  transition:all .15s;flex-shrink:0;user-select:none;-webkit-user-select:none;
-}
-.temp-step:hover{background:var(--btn-hover)}
-.temp-step:active{transform:scale(.9);background:var(--mode-accent);color:#fff}
-.slider-val{display:none}
 
-/* Status row */
-.status-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-.status-item{
-  display:flex;align-items:center;gap:6px;
-  padding:8px 10px;background:var(--surface2);border-radius:6px;font-size:13px;
-}
-.status-dot{display:inline-block;width:8px;height:8px;border-radius:50%;flex-shrink:0;margin-left:4px;}
-.status-dot.running{background:var(--green)}
-.status-dot.idle{background:var(--text2)}
-.status-label{color:var(--text2);margin-right:auto}
-
-/* Collapsible */
+/* ── Collapsible Sections ──────────────────────────────────────────────── */
 .collapse-header{
-  display:flex;align-items:center;gap:8px;cursor:pointer;
-  padding:10px 14px;background:var(--surface);border-radius:var(--radius);
+  display:flex;align-items:center;gap:10px;cursor:pointer;
+  padding:12px 16px;background:var(--surface);border-radius:var(--radius);
   margin-bottom:2px;user-select:none;
 }
 .collapse-header.open{border-radius:var(--radius) var(--radius) 0 0;margin-bottom:0}
-.collapse-arrow{
-  font-size:10px;transition:transform .2s;color:var(--text2);
+.collapse-title{font-size:15px;font-weight:500;flex:1}
+.collapse-chevron{
+  font-size:16px;color:var(--text3);transition:transform .3s cubic-bezier(.4,0,.2,1);
+  font-weight:300;
 }
-.collapse-header.open .collapse-arrow{transform:rotate(90deg)}
-.collapse-title{font-size:13px;font-weight:500;flex:1}
+.collapse-header.open .collapse-chevron{transform:rotate(90deg)}
 .collapse-body{
   background:var(--surface);border-radius:0 0 var(--radius) var(--radius);
-  padding:0 14px;max-height:0;overflow:hidden;transition:max-height .3s ease,padding .3s ease;
+  padding:0 16px;max-height:0;overflow:hidden;
+  transition:max-height .35s cubic-bezier(.4,0,.2,1),padding .35s cubic-bezier(.4,0,.2,1);
 }
-.collapse-body.open{max-height:600px;padding:10px 14px}
+.collapse-body.open{max-height:700px;padding:12px 16px 16px}
 
-/* Settings form */
+/* ── Status Grid ───────────────────────────────────────────────────────── */
+.status-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.status-item{
+  display:flex;align-items:center;gap:8px;
+  padding:10px 12px;background:var(--seg-bg);border-radius:var(--radius-sm);font-size:13px;
+}
+.status-dot{display:inline-block;width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.status-dot.running{background:var(--green)}
+.status-dot.idle{background:var(--text3)}
+.status-label{color:var(--text2);margin-right:auto}
+
+/* ── Settings & Forms ──────────────────────────────────────────────────── */
 .setting-row{
-  display:flex;align-items:center;gap:10px;margin-bottom:10px;
+  display:flex;align-items:center;gap:12px;
+  padding:10px 0;border-bottom:0.5px solid var(--border);
 }
-.setting-row label{font-size:13px;color:var(--text2);min-width:80px}
-.setting-row select,.setting-row input{
-  flex:1;padding:8px;border:1px solid var(--border);border-radius:6px;
-  background:var(--surface2);color:var(--text);font-size:13px;
+.setting-row:last-of-type{border-bottom:none}
+.setting-row label{font-size:15px;color:var(--text);min-width:90px}
+.setting-row select,.setting-row input[type=text],.setting-row input[type=password],.setting-row input[type=number]{
+  flex:1;padding:8px 12px;border:none;border-radius:var(--radius-sm);
+  background:var(--seg-bg);color:var(--text);font-size:15px;
+  font-family:inherit;
 }
-.setting-row .unit{font-size:12px;color:var(--text2);min-width:20px}
-.pw-toggle{position:absolute;right:6px;top:50%;transform:translateY(-50%);
+.setting-row select{-webkit-appearance:none;appearance:none;padding-right:28px;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 5l3 3 3-3' fill='none' stroke='%238E8E93' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:right 10px center;
+}
+.setting-row .unit{font-size:13px;color:var(--text2);min-width:20px}
+.pw-wrap{flex:1;position:relative}
+.pw-wrap input{width:100%;padding-right:40px}
+.pw-toggle{position:absolute;right:8px;top:50%;transform:translateY(-50%);
   background:none;border:none;color:var(--text2);cursor:pointer;font-size:14px;
   padding:4px;line-height:1}
 .save-btn{
-  width:100%;padding:10px;border:none;border-radius:6px;
-  background:var(--accent);color:#fff;font-size:13px;font-weight:600;
-  cursor:pointer;margin-top:4px;
+  width:100%;padding:12px;border:none;border-radius:var(--radius-sm);
+  background:var(--accent);color:#fff;font-size:15px;font-weight:600;
+  cursor:pointer;margin-top:8px;font-family:inherit;
+  transition:transform .15s,opacity .15s;
 }
-.save-btn:active{transform:scale(.97)}
+.save-btn:active{transform:scale(.97);opacity:.8}
+.save-btn:disabled{opacity:.4;cursor:default}
 
-/* Log panel */
-.log-toolbar{display:flex;justify-content:flex-end;gap:8px;margin-bottom:6px}
-.clear-btn{
-  padding:4px 12px;border:1px solid var(--border);border-radius:4px;
-  background:transparent;color:var(--text2);font-size:11px;cursor:pointer;
+/* ── Log Panel ─────────────────────────────────────────────────────────── */
+.log-toolbar{display:flex;justify-content:flex-end;gap:8px;margin-bottom:8px}
+.log-btn{
+  padding:6px 14px;border:none;border-radius:8px;
+  background:var(--seg-bg);color:var(--text2);font-size:13px;cursor:pointer;
+  font-family:inherit;
 }
+.log-btn:active{opacity:.6}
 .log-box{
-  background:var(--bg);border:1px solid var(--border);border-radius:6px;
-  padding:8px;height:200px;overflow-y:auto;
-  font-family:'SF Mono',Monaco,Consolas,monospace;font-size:11px;
-  line-height:1.5;color:var(--text2);white-space:pre-wrap;word-break:break-all;
+  background:var(--bg);border:0.5px solid var(--border);border-radius:var(--radius-sm);
+  padding:10px;height:200px;overflow-y:auto;
+  font-family:'SF Mono',Menlo,Monaco,Consolas,monospace;font-size:11px;
+  line-height:1.6;color:var(--text2);white-space:pre-wrap;word-break:break-all;
 }
 
-/* Scrollbar */
-::-webkit-scrollbar{width:4px}
-::-webkit-scrollbar-track{background:transparent}
-::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
-
-/* HomeKit QR Label */
+/* ── HomeKit Label ─────────────────────────────────────────────────────── */
 .hk-label{
   background:#fff;border:2.5px solid #000;border-radius:12px;
   padding:14px 14px 10px;margin:10px auto;max-width:220px;
   display:flex;flex-direction:column;align-items:center;gap:10px;
 }
-.hk-label-top{
-  display:flex;align-items:center;gap:10px;width:100%;
-}
+.hk-label-top{display:flex;align-items:center;gap:10px;width:100%}
 .hk-icon{width:52px;height:52px;flex-shrink:0}
 .hk-digits{display:flex;flex-direction:column;gap:3px;flex:1}
 .hk-digit-row{display:flex;gap:6px;justify-content:center}
@@ -203,6 +249,21 @@ body{
   width:24px;text-align:center;line-height:1.1;
 }
 .hk-label canvas{width:100%;aspect-ratio:1;display:block}
+
+/* ── OTA ───────────────────────────────────────────────────────────────── */
+.ota-bar-wrap{background:var(--surface2);border-radius:4px;height:6px;overflow:hidden;margin-bottom:6px}
+.ota-bar{height:100%;background:var(--accent);width:0%;transition:width .3s;border-radius:4px}
+.ota-status{font-size:12px;color:var(--text2)}
+
+/* ── Scrollbar ─────────────────────────────────────────────────────────── */
+::-webkit-scrollbar{width:4px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+
+/* ── Firmware section ──────────────────────────────────────────────────── */
+.fw-section{margin-top:16px;padding-top:16px;border-top:0.5px solid var(--border)}
+.fw-row{display:flex;gap:8px;align-items:center;margin-bottom:10px}
+.fw-row input[type=file]{flex:1;font-size:13px;color:var(--text2)}
 </style>
 </head>
 <body>
@@ -214,7 +275,7 @@ body{
       <div class="device-name" id="devName">Serin Climate</div>
       <div class="fw-version" id="fwVer">v0.1.0</div>
     </div>
-    <div style="display:flex;align-items:center;gap:8px">
+    <div class="header-right">
       <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="Toggle theme">
         <svg class="icon-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
         <svg class="icon-moon" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3a7 7 0 0 0 9.79 9.79z"/></svg>
@@ -226,7 +287,8 @@ body{
   <!-- Mode -->
   <div class="card">
     <div class="card-label">Mode</div>
-    <div class="btn-group" id="modeGrp">
+    <div class="seg" id="modeGrp">
+      <div class="seg-bg"></div>
       <button data-v="off" onclick="setMode(this)">Off</button>
       <button data-v="heat" onclick="setMode(this)">Heat</button>
       <button data-v="cool" onclick="setMode(this)">Cool</button>
@@ -257,26 +319,23 @@ body{
     </div>
     <div class="slider-val" id="sliderVal">22.0</div>
     <!-- Dual setpoint for AUTO mode -->
-    <div id="dualTemp" style="display:none;margin-top:12px">
-      <div style="display:flex;justify-content:space-between;margin-bottom:6px">
-        <span style="color:var(--red);font-size:13px">Heat: <span id="heatThreshVal">20.0</span><span class="temp-unit-label">&deg;C</span></span>
-        <span style="color:var(--accent);font-size:13px">Cool: <span id="coolThreshVal">25.0</span><span class="temp-unit-label">&deg;C</span></span>
+    <div id="dualTemp" class="dual-wrap" style="display:none">
+      <div class="dual-row">
+        <span class="dual-label heat-label">Heat: <span id="heatThreshVal">20.0</span><span class="temp-unit-label">&deg;C</span></span>
+        <span class="dual-label cool-label">Cool: <span id="coolThreshVal">25.0</span><span class="temp-unit-label">&deg;C</span></span>
       </div>
-      <div style="margin-bottom:6px">
-        <input type="range" id="heatSlider" min="16" max="31" step="0.5" value="20"
-          style="width:100%;accent-color:var(--red)">
-      </div>
-      <div>
-        <input type="range" id="coolSlider" min="16" max="31" step="0.5" value="25"
-          style="width:100%;accent-color:var(--accent)">
-      </div>
+      <input type="range" id="heatSlider" min="16" max="31" step="0.5" value="20"
+        style="accent-color:var(--orange)">
+      <input type="range" id="coolSlider" min="16" max="31" step="0.5" value="25"
+        style="accent-color:var(--accent)">
     </div>
   </div>
 
   <!-- Fan Speed & Vanes -->
   <div class="card">
     <div class="card-label">Fan Speed</div>
-    <div class="btn-group" id="fanGrp">
+    <div class="seg" id="fanGrp">
+      <div class="seg-bg"></div>
       <button data-v="auto" onclick="setFan(this)">Auto</button>
       <button data-v="quiet" onclick="setFan(this)">Quiet</button>
       <button data-v="1" onclick="setFan(this)">1</button>
@@ -284,9 +343,10 @@ body{
       <button data-v="3" onclick="setFan(this)">3</button>
       <button data-v="4" onclick="setFan(this)">4</button>
     </div>
-    <div id="vaneSection" style="margin-top:8px">
+    <div id="vaneSection" style="margin-top:12px">
       <div class="card-label">Vane Position</div>
-      <div class="btn-group" id="vaneGrp">
+      <div class="seg" id="vaneGrp">
+        <div class="seg-bg"></div>
         <button data-v="auto" onclick="setVane(this)">Auto</button>
         <button data-v="1" onclick="setVane(this)">1</button>
         <button data-v="2" onclick="setVane(this)">2</button>
@@ -296,9 +356,10 @@ body{
         <button data-v="swing" onclick="setVane(this)">Swing</button>
       </div>
     </div>
-    <div id="wideVaneSection" style="margin-top:8px">
+    <div id="wideVaneSection" style="margin-top:12px">
       <div class="card-label">Horizontal Vane</div>
-      <div class="btn-group" id="wideVaneGrp">
+      <div class="seg" id="wideVaneGrp">
+        <div class="seg-bg"></div>
         <button data-v="ll" onclick="setWideVane(this)">&laquo;</button>
         <button data-v="l" onclick="setWideVane(this)">&lsaquo;</button>
         <button data-v="c" onclick="setWideVane(this)">|</button>
@@ -310,59 +371,61 @@ body{
     </div>
   </div>
 
-  <!-- Status (collapsible) -->
+  <!-- CN105 Status -->
   <div class="card" style="padding:0">
     <div class="collapse-header" onclick="togglePanel(this)">
-      <span class="collapse-arrow">&#9654;</span>
-      <span class="collapse-title">CN105  <span class="status-dot idle" id="cn105Dot"></span></span>
+      <span class="collapse-title">CN105</span>
+      <span class="status-dot idle" id="cn105Dot"></span>
+      <span class="collapse-chevron">&#8250;</span>
     </div>
     <div class="collapse-body" id="statusBody">
-    <div class="status-grid">
-      <div class="status-item">
-        <div class="status-dot idle" id="compDot"></div>
-        <span id="compText">Compressor Off</span>
+      <div class="status-grid">
+        <div class="status-item">
+          <div class="status-dot idle" id="compDot"></div>
+          <span id="compText">Compressor Off</span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">Freq</span>
+          <span id="compHz">-- Hz</span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">Stage</span>
+          <span id="stageVal">--</span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">Sub</span>
+          <span id="subModeVal">--</span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">Outside</span>
+          <span id="outsideTemp">--</span>
+        </div>
+        <div class="status-item" id="runtimeRow" style="display:none">
+          <span class="status-label">Runtime</span>
+          <span id="runtimeHrs">--</span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">Uptime</span>
+          <span id="uptimeVal">--:--:--</span>
+        </div>
+        <div class="status-item">
+          <div class="status-dot idle" id="cn105Dot"></div>
+          <span id="cn105Text">CN105</span>
+        </div>
+        <div class="status-item" id="errorRow" style="display:none">
+          <span class="status-label">Error</span>
+          <span id="errorCode" style="color:var(--red)">--</span>
+        </div>
       </div>
-      <div class="status-item">
-        <span class="status-label">Freq</span>
-        <span id="compHz">-- Hz</span>
-      </div>
-      <div class="status-item">
-        <span class="status-label">Stage</span>
-        <span id="stageVal">--</span>
-      </div>
-      <div class="status-item">
-        <span class="status-label">Sub</span>
-        <span id="subModeVal">--</span>
-      </div>
-      <div class="status-item">
-        <span class="status-label">Outside</span>
-        <span id="outsideTemp">--</span>
-      </div>
-      <div class="status-item" id="runtimeRow" style="display:none">
-        <span class="status-label">Runtime</span>
-        <span id="runtimeHrs">--</span>
-      </div>
-      <div class="status-item">
-        <span class="status-label">Uptime</span>
-        <span id="uptimeVal">--:--:--</span>
-      </div>
-      <div class="status-item">
-        <div class="status-dot idle" id="cn105Dot"></div>
-        <span id="cn105Text">CN105</span>
-      </div>
-      <div class="status-item" id="errorRow" style="display:none">
-        <span class="status-label">Error</span>
-        <span id="errorCode" style="color:var(--red)">--</span>
-      </div>
-    </div>
     </div>
   </div>
 
-  <!-- HomeKit (collapsible) -->
-  <div style="margin-bottom:6px">
+  <!-- HomeKit -->
+  <div class="card" style="padding:0">
     <div class="collapse-header" onclick="togglePanel(this)">
-      <span class="collapse-arrow">&#9654;</span>
-      <span class="collapse-title">HomeKit  <span class="status-dot idle" id="hkDot"></span></span>
+      <span class="collapse-title">HomeKit</span>
+      <span class="status-dot idle" id="hkDot"></span>
+      <span class="collapse-chevron">&#8250;</span>
     </div>
     <div class="collapse-body" id="homekitBody">
       <div class="hk-label" id="hkLabel">
@@ -401,22 +464,22 @@ body{
         </div>
       </div>
       <div id="hkSetupCode" style="display:none"></div>
-      <div id="hkButtons" style="display:none;gap:8px;margin-top:8px;">
+      <div id="hkButtons" style="display:none;gap:8px;margin-top:8px">
         <a id="hkSetupLink" href="com.apple.home://" class="save-btn" style="flex:1;background:#E87400;text-align:center;text-decoration:none;color:#fff;margin:0">Open Home App</a>
-        <button id="hkCopyBtn" class="save-btn" style="flex:1;background:#333;margin:0" onclick="copySetupCode()">Copy Code</button>
+        <button id="hkCopyBtn" class="save-btn" style="flex:1;background:var(--surface3);margin:0" onclick="copySetupCode()">Copy Code</button>
       </div>
       <button class="save-btn" style="background:var(--red);margin-top:8px" onclick="resetHomeKit()">Reset HomeKit Pairing</button>
     </div>
   </div>
 
-  <!-- WiFi (collapsible) -->
-  <div style="margin-bottom:6px">
+  <!-- WiFi -->
+  <div class="card" style="padding:0">
     <div class="collapse-header" onclick="togglePanel(this)">
-      <span class="collapse-arrow">&#9654;</span>
       <span class="collapse-title">WiFi</span>
+      <span class="collapse-chevron">&#8250;</span>
     </div>
     <div class="collapse-body" id="wifiBody">
-      <div class="status-grid" style="margin-bottom:10px">
+      <div class="status-grid" style="margin-bottom:12px">
         <div class="status-item">
           <span class="status-label">Signal</span>
           <span id="rssiVal">-- dBm</span>
@@ -432,31 +495,32 @@ body{
       </div>
       <div class="setting-row">
         <label>Password</label>
-        <div style="flex:1;position:relative">
-          <input type="password" id="cfgPass" placeholder="Password" maxlength="64" style="width:100%;padding-right:36px">
-          <button type="button" class="pw-toggle" onclick="togglePw('cfgPass',this)" aria-label="Show password">👁‍🗨</button>
+        <div class="pw-wrap">
+          <input type="password" id="cfgPass" placeholder="Password" maxlength="64">
+          <button type="button" class="pw-toggle" onclick="togglePw('cfgPass',this)" aria-label="Show password">&#x1F441;&#x200D;&#x1F5E8;</button>
         </div>
       </div>
       <button class="save-btn" id="wifiSaveBtn" onclick="saveWifi()" disabled>Save WiFi</button>
-      <div id="wifiBanner" style="display:none;margin-top:8px;padding:10px;background:var(--surface2);border:1px solid var(--green);border-radius:6px;font-size:13px;text-align:center">
+      <div id="wifiBanner" style="display:none;margin-top:10px;padding:12px;background:var(--seg-bg);border:1px solid var(--green);border-radius:var(--radius-sm);font-size:14px;text-align:center">
         WiFi credentials saved. Reboot to connect to the new network.
         <button class="save-btn" style="background:var(--orange);margin-top:8px" onclick="restartDevice()">Reboot Now</button>
       </div>
     </div>
   </div>
 
-  <!-- Settings (collapsible) -->
-  <div style="margin-bottom:6px">
+  <!-- Settings -->
+  <div class="card" style="padding:0">
     <div class="collapse-header" onclick="togglePanel(this)">
-      <span class="collapse-arrow">&#9654;</span>
       <span class="collapse-title">Settings</span>
+      <span class="collapse-chevron">&#8250;</span>
     </div>
     <div class="collapse-body" id="settingsBody">
       <div class="setting-row">
         <label>Temp Unit</label>
-        <div class="btn-group" id="unitGrp" style="flex:1">
-          <button data-v="C" class="active" onclick="setTempUnit(this)">°C</button>
-          <button data-v="F" onclick="setTempUnit(this)">°F</button>
+        <div class="seg" id="unitGrp" style="flex:1">
+          <div class="seg-bg"></div>
+          <button data-v="C" class="active" onclick="setTempUnit(this)">&deg;C</button>
+          <button data-v="F" onclick="setTempUnit(this)">&deg;F</button>
         </div>
       </div>
       <div class="setting-row">
@@ -482,33 +546,31 @@ body{
         <span class="unit">ms</span>
       </div>
       <button class="save-btn" onclick="saveConfig()">Save Settings</button>
-      <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+      <div class="fw-section">
         <div class="card-label">Firmware Update</div>
-        <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
-          <input type="file" id="fwFile" accept=".bin" style="flex:1;font-size:12px;color:var(--text2)">
-          <button class="save-btn" style="width:auto;padding:8px 16px;margin:0" onclick="uploadFirmware()">Upload</button>
+        <div class="fw-row">
+          <input type="file" id="fwFile" accept=".bin">
+          <button class="save-btn" style="width:auto;padding:10px 20px;margin:0" onclick="uploadFirmware()">Upload</button>
         </div>
         <div id="otaProgress" style="display:none">
-          <div style="background:var(--surface2);border-radius:4px;height:6px;overflow:hidden;margin-bottom:4px">
-            <div id="otaBar" style="height:100%;background:var(--accent);width:0%;transition:width .3s"></div>
-          </div>
-          <div id="otaStatus" style="font-size:11px;color:var(--text2)"></div>
+          <div class="ota-bar-wrap"><div class="ota-bar" id="otaBar"></div></div>
+          <div class="ota-status" id="otaStatus"></div>
         </div>
-        <button class="save-btn" style="background:var(--red);margin-top:8px" onclick="restartDevice()">Restart Device</button>
+        <button class="save-btn" style="background:var(--red);margin-top:10px" onclick="restartDevice()">Restart Device</button>
       </div>
     </div>
   </div>
 
-  <!-- Logs (collapsible) -->
-  <div style="margin-bottom:6px">
+  <!-- Logs -->
+  <div class="card" style="padding:0">
     <div class="collapse-header" onclick="togglePanel(this)">
-      <span class="collapse-arrow">&#9654;</span>
       <span class="collapse-title">Logs</span>
+      <span class="collapse-chevron">&#8250;</span>
     </div>
     <div class="collapse-body" id="logsBody">
       <div class="log-toolbar">
-        <button class="clear-btn" onclick="copyLogs()">Copy</button>
-        <button class="clear-btn" onclick="clearLogs()">Clear</button>
+        <button class="log-btn" onclick="copyLogs()">Copy</button>
+        <button class="log-btn" onclick="clearLogs()">Clear</button>
       </div>
       <div class="log-box" id="logBox"></div>
     </div>
@@ -542,9 +604,9 @@ body{
   var reconnTimer = null;
   var sliderDragging = false;
   var MAX_LOG_LINES = 200;
-  var lastCmdTime = 0;       // timestamp of last user command (covers in-flight stale pushes)
-  var lastMsgTime = 0;       // timestamp of last received WS message (staleness detection)
-  var tempUnit = 'C';        // 'C' or 'F' — display unit (protocol always Celsius)
+  var lastCmdTime = 0;
+  var lastMsgTime = 0;
+  var tempUnit = 'C';
 
   // ── DOM refs ───────────────────────────────────────────────────────────────
   var $=function(id){return document.getElementById(id)};
@@ -576,9 +638,24 @@ body{
   var lastQRURI='';
   var unitLabels=document.querySelectorAll('.temp-unit-label');
 
+  // ── Segment indicator positioning ──────────────────────────────────────────
+  function updateSegBg(grpId){
+    var grp=document.getElementById(grpId);
+    if(!grp) return;
+    var bg=grp.querySelector('.seg-bg');
+    if(!bg) return;
+    var active=grp.querySelector('button.active');
+    if(!active){bg.style.opacity='0';return}
+    requestAnimationFrame(function(){
+      bg.style.opacity='1';
+      bg.style.left=active.offsetLeft+'px';
+      bg.style.width=active.offsetWidth+'px';
+    });
+  }
+  var segGroups=['modeGrp','fanGrp','vaneGrp','wideVaneGrp','unitGrp'];
+  window.addEventListener('resize',function(){segGroups.forEach(updateSegBg)});
+
   // ── Temperature unit helpers ──────────────────────────────────────────────
-  // Mitsubishi MHK1/MHK2 Fahrenheit lookup table (STANDARD mode)
-  // Maps integer °F → specific Celsius setpoints used by the heat pump
   var F_TABLE=[
     [61,16.0],[62,16.5],[63,17.0],[64,17.5],[65,18.0],
     [66,18.5],[67,19.0],[68,20.0],[69,21.0],[70,21.5],
@@ -616,7 +693,6 @@ body{
   function unitStr(){return '\u00B0'+(tempUnit==='F'?'F':'C')}
 
   // ── QR Code Generator (version 1-4, byte mode, EC level L) ─────────────
-  // Compact implementation for short strings like X-HM:// URIs (~20 chars)
   function renderQR(text,canvas){
     var mods=makeQR(text);
     if(!mods){canvas.style.display='none';return}
@@ -632,41 +708,29 @@ body{
 
   function makeQR(text){
     var data=[];for(var i=0;i<text.length;i++)data.push(text.charCodeAt(i));
-    // Pick version: need enough data capacity for byte mode
-    var caps=[[0,0],[17,10],[28,16],[44,22],[58,28]]; // [data codewords, ec codewords] per version, EC-L
+    var caps=[[0,0],[17,10],[28,16],[44,22],[58,28]];
     var ver=0,dcw=0,ecw=0;
     for(var v=1;v<=4;v++){
-      var need=data.length+3; // mode(4b)+count(8b for v1-9)+terminator → 3 byte overhead max
       if(caps[v][0]>=Math.ceil((data.length*8+4+8+4)/8)){ver=v;dcw=caps[v][0];ecw=caps[v][1];break}
     }
     if(!ver)return null;
     var sz=17+ver*4;
-
-    // Encode data: byte mode
     var bits=[];
     function pushBits(val,n){for(var i=n-1;i>=0;i--)bits.push((val>>i)&1)}
-    pushBits(4,4); // byte mode indicator
-    pushBits(data.length,ver<=9?8:16); // character count
+    pushBits(4,4);
+    pushBits(data.length,ver<=9?8:16);
     for(var i=0;i<data.length;i++)pushBits(data[i],8);
-    pushBits(0,Math.min(4,dcw*8-bits.length)); // terminator
-    while(bits.length%8)bits.push(0); // byte-align
+    pushBits(0,Math.min(4,dcw*8-bits.length));
+    while(bits.length%8)bits.push(0);
     while(bits.length<dcw*8){pushBits(0xEC,8);if(bits.length<dcw*8)pushBits(0x11,8)}
-
-    // Convert bits to codewords
     var cws=[];
     for(var i=0;i<bits.length;i+=8)
       cws.push((bits[i]<<7)|(bits[i+1]<<6)|(bits[i+2]<<5)|(bits[i+3]<<4)|
                (bits[i+4]<<3)|(bits[i+5]<<2)|(bits[i+6]<<1)|bits[i+7]);
-
-    // Reed-Solomon EC
     var ec=rsEncode(cws,ecw);
     var allCws=cws.concat(ec);
-
-    // Build matrix
     var grid=[],rsv=[];
     for(var y=0;y<sz;y++){grid[y]=[];rsv[y]=[];for(var x=0;x<sz;x++){grid[y][x]=0;rsv[y][x]=false}}
-
-    // Finder patterns
     function finder(cx,cy){
       for(var dy=-3;dy<=3;dy++)for(var dx=-3;dx<=3;dx++){
         var y=cy+dy,x=cx+dx;
@@ -674,7 +738,6 @@ body{
         var v=(Math.max(Math.abs(dx),Math.abs(dy))!==2)?1:0;
         grid[y][x]=v;rsv[y][x]=true;
       }
-      // Separators
       for(var i=-4;i<=4;i++){
         var coords=[[cy-4,cx+i],[cy+4,cx+i],[cy+i,cx-4],[cy+i,cx+4]];
         for(var c=0;c<coords.length;c++){
@@ -684,8 +747,6 @@ body{
       }
     }
     finder(3,3);finder(sz-4,3);finder(3,sz-4);
-
-    // Alignment pattern (version 2+)
     var alignPos=[[],[],[6,18],[6,22],[6,26]];
     if(ver>=2){
       var ap=alignPos[ver];
@@ -698,29 +759,21 @@ body{
         }
       }
     }
-
-    // Timing patterns
     for(var i=8;i<sz-8;i++){
       if(!rsv[6][i]){grid[6][i]=(i%2===0)?1:0;rsv[6][i]=true}
       if(!rsv[i][6]){grid[i][6]=(i%2===0)?1:0;rsv[i][6]=true}
     }
-
-    // Dark module + reserve format/version areas
     grid[sz-8][8]=1;rsv[sz-8][8]=true;
-    // Reserve format info areas
     for(var i=0;i<8;i++){
       rsv[8][i]=true;rsv[8][sz-1-i]=true;
       rsv[i][8]=true;rsv[sz-1-i][8]=true;
     }
     rsv[8][8]=true;
-
-    // Place data
     var bitIdx=0,allBits=[];
     for(var i=0;i<allCws.length;i++)for(var b=7;b>=0;b--)allBits.push((allCws[i]>>b)&1);
-
     var x=sz-1,upward=true;
     while(x>=0){
-      if(x===6)x--; // skip timing column
+      if(x===6)x--;
       for(var row=0;row<sz;row++){
         var y=upward?(sz-1-row):row;
         for(var dx=0;dx<=1;dx++){
@@ -733,8 +786,6 @@ body{
       upward=!upward;
       x-=2;
     }
-
-    // Masking — try all 8 patterns, pick best (lowest penalty)
     var bestMask=0,bestPen=Infinity;
     var maskFns=[
       function(y,x){return(y+x)%2===0},
@@ -751,33 +802,25 @@ body{
       for(var y=0;y<sz;y++){test[y]=[];for(var x=0;x<sz;x++){
         test[y][x]=rsv[y][x]?grid[y][x]:(grid[y][x]^(maskFns[m](y,x)?1:0));
       }}
-      // Apply format info
-      applyFormat(test,sz,0,m); // EC level L = 01
+      applyFormat(test,sz,0,m);
       var pen=penalty(test,sz);
       if(pen<bestPen){bestPen=pen;bestMask=m}
     }
-
-    // Apply best mask
     for(var y=0;y<sz;y++)for(var x=0;x<sz;x++)
       if(!rsv[y][x])grid[y][x]^=maskFns[bestMask](y,x)?1:0;
     applyFormat(grid,sz,0,bestMask);
-
     return grid;
   }
 
   function applyFormat(grid,sz,ecl,mask){
-    // ECL: L=1,M=0,Q=3,H=2 (for format info encoding)
     var eclBits=[1,0,3,2];
     var fmt=(eclBits[ecl]<<3)|mask;
     var rem=fmt;
     for(var i=0;i<10;i++){rem<<=1;if(rem&(1<<14))rem^=0x537}
     var bits=(fmt<<10)|rem;
-    bits^=0x5412; // XOR mask
-    // Place format bits
+    bits^=0x5412;
     var positions=[
-      // Around top-left finder
       [[8,0],[8,1],[8,2],[8,3],[8,4],[8,5],[8,7],[8,8],[7,8],[5,8],[4,8],[3,8],[2,8],[1,8],[0,8]],
-      // Around other finders
       [[sz-1,8],[sz-2,8],[sz-3,8],[sz-4,8],[sz-5,8],[sz-6,8],[sz-7,8],[8,sz-8],[8,sz-7],[8,sz-6],[8,sz-5],[8,sz-4],[8,sz-3],[8,sz-2],[8,sz-1]]
     ];
     for(var s=0;s<2;s++)for(var i=0;i<15;i++)
@@ -786,7 +829,6 @@ body{
 
   function penalty(grid,sz){
     var pen=0;
-    // Rule 1: runs of same color
     for(var y=0;y<sz;y++){var run=1;for(var x=1;x<sz;x++){
       if(grid[y][x]===grid[y][x-1])run++;else run=1;
       if(run===5)pen+=3;else if(run>5)pen++;
@@ -795,13 +837,10 @@ body{
       if(grid[y][x]===grid[y-1][x])run++;else run=1;
       if(run===5)pen+=3;else if(run>5)pen++;
     }}
-    // Rule 2: 2x2 blocks
     for(var y=0;y<sz-1;y++)for(var x=0;x<sz-1;x++){
       var v=grid[y][x];
       if(v===grid[y][x+1]&&v===grid[y+1][x]&&v===grid[y+1][x+1])pen+=3;
     }
-    // Rule 3: finder-like patterns (simplified)
-    // Rule 4: proportion
     var dark=0;for(var y=0;y<sz;y++)for(var x=0;x<sz;x++)if(grid[y][x])dark++;
     var pct=Math.abs(dark*100/(sz*sz)-50);
     pen+=Math.floor(pct/5)*10;
@@ -809,10 +848,8 @@ body{
   }
 
   function rsEncode(data,ecLen){
-    // GF(256) with polynomial 0x11D
     var exp=[],log=[];exp[0]=1;
     for(var i=1;i<256;i++){exp[i]=exp[i-1]<<1;if(exp[i]>=256)exp[i]^=0x11D;log[exp[i-1]]=i-1}
-    // Generator polynomial
     var gen=[1];
     for(var i=0;i<ecLen;i++){
       var next=new Array(gen.length+1);
@@ -824,7 +861,6 @@ body{
       gen=next;
     }
     function gfMul(a,b){if(a===0||b===0)return 0;return exp[(log[a]+log[b])%255]}
-    // Polynomial division
     var rem=new Array(ecLen);for(var i=0;i<ecLen;i++)rem[i]=0;
     for(var i=0;i<data.length;i++){
       var coef=data[i]^rem[0];
@@ -881,15 +917,11 @@ body{
 
   // ── State handler ──────────────────────────────────────────────────────────
   function onState(s){
-    // Skip control updates for 2s after user command — covers in-flight
-    // stale pushes that were generated before the server processed the
-    // command. Server-side wanted settings handle subsequent pushes.
     var locked = lastCmdTime > 0 && (Date.now() - lastCmdTime) < 2000;
 
     if(!locked){
       state=s;
 
-      // Mode + power (Off is a mode in the UI)
       if(s.power){
         setActive('modeGrp', s.mode);
         setModeTheme(s.mode);
@@ -898,7 +930,6 @@ body{
         setModeTheme(null);
       }
 
-      // Temperature target
       targetTemp.textContent=fmtTemp(s.target);
       if(!sliderDragging && s.target!=null){
         if(tempUnit==='F'){
@@ -909,9 +940,9 @@ body{
           tempSlider.value=s.target;
           sliderVal.textContent=s.target.toFixed(1);
         }
+
       }
 
-      // Dual setpoint: show in AUTO, hide otherwise
       if(s.mode==='auto'){
         dualTemp.style.display='';
         if(!dualLocked){
@@ -931,18 +962,13 @@ body{
         dualTemp.style.display='none';
       }
 
-      // Fan & Vane
       setActive('fanGrp', s.fan);
       setActive('vaneGrp', s.vane);
-
-      // Wide vane
       setActive('wideVaneGrp', s.wideVane);
     }
 
-    // Always update read-only values regardless of lockout
     roomTemp.textContent=fmtReadingTemp(s.room);
 
-    // Compressor
     if(s.operating){
       compDot.className='status-dot running';
       compText.textContent='Compressor On';
@@ -951,22 +977,16 @@ body{
       compText.textContent='Compressor Off';
     }
 
-    // Compressor frequency
     compHz.textContent=(s.compressorHz!=null?s.compressorHz:'--')+' Hz';
-
-    // Stage & sub mode
     stageVal.textContent=s.stage&&s.stage!='idle'?s.stage:'--';
     subModeVal.textContent=s.subMode&&s.subMode!='normal'?s.subMode:'--';
 
-    // Auto sub mode: show in compressor text when in auto mode
     if(s.mode==='auto'&&s.autoSubMode&&s.autoSubMode!=='off'){
       compText.textContent='Compressor '+(s.operating?'On':'Off')+' ('+s.autoSubMode+')';
     }
 
-    // Outside temperature
     outsideTempEl.textContent=s.outsideTemp!=null?fmtReadingTemp(s.outsideTemp)+unitStr():'--';
 
-    // Runtime hours
     if(s.runtime!=null){
       $('runtimeRow').style.display='';
       $('runtimeHrs').textContent=s.runtime.toFixed(0)+' hrs';
@@ -974,7 +994,6 @@ body{
       $('runtimeRow').style.display='none';
     }
 
-    // Error code
     if(s.errorCode!=null){
       $('errorRow').style.display='';
       $('errorCode').textContent='E'+s.errorCode.toString(16).toUpperCase();
@@ -982,7 +1001,6 @@ body{
       $('errorRow').style.display='none';
     }
 
-    // CN105 connection
     if(s.connected){
       cn105Dot.className='status-dot running';
       cn105Text.textContent='CN105 OK';
@@ -991,24 +1009,19 @@ body{
       cn105Text.textContent='CN105 Disconnected';
     }
 
-    // RSSI
     rssiVal.textContent=(s.rssi!=null?s.rssi:'--')+' dBm';
-    // WiFi uptime
     wifiUptimeVal.textContent=s.wifiUptime?fmtWifiUptime(s.wifiUptime):'--:--:--';
-
-    // Uptime
     uptimeVal.textContent=s.uptime!=null?fmtUptime(s.uptime):'--:--:--';
 
-    // Temp unit — guard against in-flight stale pushes just like controls
     if(s.tempUnit && s.tempUnit!==tempUnit && !locked){
       tempUnit=s.tempUnit;
       setActive('unitGrp',tempUnit);
       configureSliders();
       var label=unitStr();
       for(var i=0;i<unitLabels.length;i++) unitLabels[i].textContent=label;
+  
     }
 
-    // Config fields — only update when settings panel is closed (not being edited)
     var settingsOpen=$('settingsBody').classList.contains('open');
     if(!settingsOpen){
       if(s.logLevel!=null) $('cfgLogLevel').value=s.logLevel;
@@ -1020,7 +1033,6 @@ body{
       $('wideVaneSection').style.display=s.vaneConfig>=2?'':'none';
     }
 
-    // HomeKit status
     if(s.hkPaired!=null){
       var hkCls='status-dot '+(s.hkPaired?'running':'idle');
       hkDot.className=hkCls;
@@ -1028,7 +1040,6 @@ body{
       hkStatusText.textContent=s.hkStatus||'--';
       hkControllersEl.textContent=s.hkControllers!=null?s.hkControllers+' paired':'--';
       hkSetupCodeEl.textContent=s.hkSetupCode||'--';
-      // Populate digit grid: setup code is "XXX-XX-XXX" → strip dashes → 8 digits
       if(s.hkSetupCode){
         var raw=s.hkSetupCode.replace(/-/g,'');
         for(var di=0;di<8;di++) hkDigits[di].textContent=raw[di]||'-';
@@ -1042,10 +1053,12 @@ body{
   }
 
   function setActive(grpId,val){
-    var btns=document.getElementById(grpId).children;
+    var grp=document.getElementById(grpId);
+    var btns=grp.querySelectorAll('button[data-v]');
     for(var i=0;i<btns.length;i++){
       btns[i].classList.toggle('active', val!=null && btns[i].getAttribute('data-v')===val);
     }
+    updateSegBg(grpId);
   }
 
   function setModeTheme(mode){
@@ -1070,7 +1083,6 @@ body{
     var atBottom=logBox.scrollHeight-logBox.scrollTop-logBox.clientHeight<30;
     var line=document.createTextNode(msg+'\n');
     logBox.appendChild(line);
-    // Trim excess
     while(logBox.childNodes.length>MAX_LOG_LINES){
       logBox.removeChild(logBox.firstChild);
     }
@@ -1084,7 +1096,7 @@ body{
     $('wifiBanner').style.display='block';
   }
 
-  // ── Controls (optimistic UI — update immediately, server confirms later) ──
+  // ── Controls ───────────────────────────────────────────────────────────────
   window.setMode=function(btn){
     lastCmdTime=Date.now();
     var v=btn.getAttribute('data-v');
@@ -1126,7 +1138,6 @@ body{
     send({cmd:'set',wideVane:v});
   };
 
-  // Slider reconfiguration for unit switching
   function setSliderAttrs(el,min,max,step,val){
     el.min=min;el.max=max;el.step=step;el.value=val;
   }
@@ -1140,9 +1151,9 @@ body{
       setSliderAttrs(heatSlider,16,31,0.5,heatSlider.min==61?fToCTable(parseFloat(heatSlider.value)):parseFloat(heatSlider.value));
       setSliderAttrs(coolSlider,16,31,0.5,coolSlider.min==61?fToCTable(parseFloat(coolSlider.value)):parseFloat(coolSlider.value));
     }
+
   }
 
-  // Step temperature +/- via buttons
   window.stepTemp=function(dir){
     var s=parseFloat(tempSlider.step),v=parseFloat(tempSlider.value);
     var nv=v+(dir*s);
@@ -1151,9 +1162,9 @@ body{
     tempSlider.value=nv;
     onSliderInput();
     onSliderChange();
+
   };
 
-  // Slider: update display live, send only on release
   window.onSliderInput=function(){
     sliderDragging=true;
     var raw=parseFloat(tempSlider.value);
@@ -1170,6 +1181,7 @@ body{
     sliderVal.textContent=display;
     targetTemp.textContent=display;
     send({cmd:'set',target:celsius});
+
   };
 
   heatSlider.oninput=function(){
@@ -1251,7 +1263,6 @@ body{
     status.textContent='Preparing upload...';
 
     file.arrayBuffer().then(function(buf){
-      // crypto.subtle requires secure context (HTTPS/localhost); fall back if unavailable
       if(window.crypto&&window.crypto.subtle){
         status.textContent='Computing checksum...';
         return crypto.subtle.digest('SHA-256',buf).then(function(hashBuf){
@@ -1344,7 +1355,6 @@ body{
     body.classList.toggle('open');
   };
 
-  // Enable WiFi save button only when both fields have content
   function checkWifiFields(){
     $('wifiSaveBtn').disabled=!($('cfgSSID').value.trim()&&$('cfgPass').value);
   }
@@ -1353,9 +1363,10 @@ body{
 
   // ── Init ───────────────────────────────────────────────────────────────────
   connect();
+  // Initialize segment indicators after layout
+  setTimeout(function(){segGroups.forEach(updateSegBg)},50);
 
 })();
 </script>
 </body>
 </html>
-
