@@ -230,7 +230,6 @@ static bool jsonGetBool(const char *json, const char *key, bool *out) {
 esp_err_t WebUI::sendGzipPage(httpd_req_t *req, const uint8_t *data, size_t len) {
     httpd_resp_set_type(req, "text/html");
     httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
-    httpd_resp_set_hdr(req, "Connection", "close");
     httpd_resp_send(req, (const char *)data, len);
     return ESP_OK;
 }
@@ -571,11 +570,6 @@ esp_err_t WebUI::handleWebSocket(httpd_req_t *req) {
     // On first call (handshake), req->method == HTTP_GET
     if (req->method == HTTP_GET) {
         int fd = httpd_req_to_sockfd(req);
-        // Close previous WebSocket connection to free the socket
-        if (webUI._wsClientFd >= 0 && webUI._wsClientFd != fd) {
-            LOG_INFO("[WebUI] Closing old WS client (fd=%d)", webUI._wsClientFd);
-            httpd_sess_trigger_close(webUI._server, webUI._wsClientFd);
-        }
         LOG_INFO("[WebUI] WebSocket client connected (fd=%d)", fd);
         webUI._wsClientFd = fd;
         // Push initial state immediately after connection
@@ -1060,7 +1054,7 @@ void WebUI::begin(CN105Controller *ctrl) {
     config.server_port    = 8080;
     config.ctrl_port      = 32769;  // Different from default to avoid conflict
     config.stack_size     = 8192;   // Default 4096 too small for WS handlers + log buffers
-    config.max_open_sockets = 7;
+    config.max_open_sockets = 4;
     config.lru_purge_enable = true;
 
     LOG_INFO("[WebUI] Starting HTTP server on port %d", config.server_port);
