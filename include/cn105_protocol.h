@@ -4,6 +4,10 @@
 #include <driver/uart.h>
 #include <driver/gpio.h>
 #include "logging.h"
+#include "uart_interface.h"
+#ifndef UNIT_TEST
+#include "hardware_uart.h"
+#endif
 
 // ── CN105 Packet Constants ──────────────────────────────────────────────────
 constexpr uint8_t CN105_SYNC           = 0xFC;
@@ -152,6 +156,9 @@ public:
     /// Initialize UART via ESP-IDF driver (call once in setup)
     void begin(uart_port_t uartNum, int rxPin, int txPin);
 
+    /// Initialize with an injected UART (for testing)
+    void begin(UartInterface *uart);
+
     /// Must be called frequently from loop()
     void loop();
 
@@ -191,12 +198,18 @@ public:
     /// Send all pending changes in a single set packet
     void sendPendingChanges();
 
+    static uint8_t calcChecksum(const uint8_t *pkt, uint8_t len);
+    static void    buildHeader(uint8_t *buf, uint8_t pktType, uint8_t dataLen);
+
     /// Runtime-configurable update interval (poll period)
     void setUpdateInterval(uint32_t ms) { _updateInterval = ms; }
     uint32_t getUpdateInterval() const { return _updateInterval; }
 
 private:
-    uart_port_t _uartNum = UART_NUM_1;
+    UartInterface* _uart = nullptr;
+#ifndef UNIT_TEST
+    HardwareUart* _hwUart = nullptr;  // Owned, created by begin(uart_port_t,...)
+#endif
     CN105State      _state;
 
     // ── Connection state ────────────────────────────────────────────────────
@@ -253,7 +266,4 @@ private:
     void processPacket(const uint8_t *pkt, uint8_t len);
     void handleInfoResponse(const uint8_t *data, uint8_t dataLen);
     void readSerial();
-
-    static uint8_t calcChecksum(const uint8_t *pkt, uint8_t len);
-    static void    buildHeader(uint8_t *buf, uint8_t pktType, uint8_t dataLen);
 };

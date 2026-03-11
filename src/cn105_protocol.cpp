@@ -1,5 +1,6 @@
 #include "cn105_protocol.h"
 #include "cn105_strings.h"
+#include "board_profile.h"
 #include <cmath>
 
 // ── Connect packet payload (fixed) ─────────────────────────────────────────
@@ -8,11 +9,12 @@ static const uint8_t CONNECT_PKT[] = {
 };
 
 // ── Debug logging helper ────────────────────────────────────────────────────
-static void logHex(const uint8_t *buf, uint8_t len) {
-    for (uint8_t i = 0; i < len; i++) {
-        DebugLog.printf("%02X ", buf[i]);
+static void logHex(char *out, size_t outLen, const uint8_t *buf, uint8_t len) {
+    size_t pos = 0;
+    for (uint8_t i = 0; i < len && pos + 3 < outLen; i++) {
+        pos += snprintf(out + pos, outLen - pos, "%02X ", buf[i]);
     }
-    DebugLog.println();
+    if (pos > 0 && out[pos-1] == ' ') out[pos-1] = '\0';
 }
 
 // ── Poll phase ordering (single definition, used by loop + processPacket) ──
@@ -27,44 +29,15 @@ static const uint8_t POLL_TYPES[CN105_POLL_PHASE_COUNT] = {
 CN105Controller::CN105Controller() {}
 
 void CN105Controller::begin(uart_port_t uartNum, int rxPin, int txPin) {
-    _uartNum = uartNum;
+#ifndef UNIT_TEST
+    _hwUart = new HardwareUart(uartNum, rxPin, txPin, CN105_BAUD_RATE);
+    begin(_hwUart);
+#endif
+}
 
-    // ── Configure UART using ESP-IDF driver ───────────────────────────────
-    uart_config_t uart_config = {};
-    uart_config.baud_rate = CN105_BAUD_RATE;
-    uart_config.data_bits = UART_DATA_8_BITS;
-    uart_config.parity    = UART_PARITY_EVEN;
-    uart_config.stop_bits = UART_STOP_BITS_1;
-    uart_config.flow_ctrl = UART_HW_FLOWCTRL_DISABLE;
-    uart_config.source_clk = UART_SCLK_XTAL;  // Use crystal for precise low baud
-
-    esp_err_t err;
-    err = uart_param_config(_uartNum, &uart_config);
-    LOG_INFO("[CN105] uart_param_config: %s", esp_err_to_name(err));
-
-    err = uart_set_pin(_uartNum, txPin, rxPin, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
-    LOG_INFO("[CN105] uart_set_pin(TX=%d, RX=%d): %s", txPin, rxPin, esp_err_to_name(err));
-
-    err = uart_driver_install(_uartNum, 256, 256, 0, NULL, 0);
-    LOG_INFO("[CN105] uart_driver_install: %s", esp_err_to_name(err));
-
-    // ── CRITICAL: Enable pull-up on RX pin ────────────────────────────────
-    // ESP32-C6 GPIOs float by default. Without pull-up, the UART RX line
-    // reads as LOW (= continuous start bits), producing streams of 0x00.
-    gpio_set_pull_mode((gpio_num_t)rxPin, GPIO_PULLUP_ONLY);
-
-    // Verify config
-    uint32_t baud;
-    uart_get_baudrate(_uartNum, &baud);
-    uart_word_length_t data_bits;
-    uart_get_word_length(_uartNum, &data_bits);
-    uart_parity_t parity;
-    uart_get_parity(_uartNum, &parity);
-    LOG_INFO("[CN105] Verified: baud=%lu, data_bits=%d, parity=%d", baud, data_bits, parity);
-
-    // Flush any stale bytes
-    uart_flush_input(_uartNum);
-
+void CN105Controller::begin(UartInterface *uart) {
+    _uart = uart;
+    _uart->flush();
     _state.connected = false;
     _initialConnectDone = false;
     _connectRetries = 0;
@@ -303,15 +276,14 @@ uint8_t CN105Controller::calcChecksum(const uint8_t *pkt, uint8_t len) {
 }
 
 void CN105Controller::sendConnectPacket() {
-    uart_flush_input(_uartNum);
+    _uart->flush();
     _rxLen = 0;
 
     if (currentLogLevel >= LOG_LEVEL_DEBUG) {
-        DebugLog.printf("[CN105] TX CONNECT (%d bytes): ", (int)sizeof(CONNECT_PKT));
-        logHex(CONNECT_PKT, sizeof(CONNECT_PKT));
+        char hex[64]; logHex(hex, sizeof(hex), CONNECT_PKT, sizeof(CONNECT_PKT));
+        LOG_DEBUG("[CN105] TX CONNECT (%d bytes): %s", (int)sizeof(CONNECT_PKT), hex);
     }
-    uart_write_bytes(_uartNum, CONNECT_PKT, sizeof(CONNECT_PKT));
-    uart_wait_tx_done(_uartNum, pdMS_TO_TICKS(100));
+    _uart->write(CONNECT_PKT, sizeof(CONNECT_PKT));
 }
 
 void CN105Controller::sendInfoRequest(uint8_t infoType) {
@@ -328,13 +300,11 @@ void CN105Controller::sendInfoRequest(uint8_t infoType) {
         else if (infoType == CN105_INFO_STATUS) typeStr = "STATUS";
         else if (infoType == CN105_INFO_STANDBY) typeStr = "STANDBY";
         else if (infoType == CN105_INFO_ERRORCODE) typeStr = "ERRORCODE";
-        DebugLog.printf("[CN105] TX INFO_REQ type=%s phase=%d/%d (%d bytes): ",
-                        typeStr, _pollPhase + 1, CN105_POLL_PHASE_COUNT, 22);
-        logHex(pkt, 22);
+        char hex[128]; logHex(hex, sizeof(hex), pkt, 22);
+        LOG_DEBUG("[CN105] TX INFO_REQ type=%s phase=%d/%d (%d bytes): %s",
+                  typeStr, _pollPhase + 1, CN105_POLL_PHASE_COUNT, 22, hex);
     }
-
-    uart_write_bytes(_uartNum, pkt, 22);
-    uart_wait_tx_done(_uartNum, pdMS_TO_TICKS(200));
+    _uart->write(pkt, 22);
 }
 
 void CN105Controller::sendSetPacket() {
@@ -388,11 +358,10 @@ void CN105Controller::sendSetPacket() {
 
     pkt[21] = calcChecksum(pkt, 21);
     if (currentLogLevel >= LOG_LEVEL_DEBUG) {
-        DebugLog.printf("[CN105] TX SET (%d bytes): ", 22);
-        logHex(pkt, 22);
+        char hex[128]; logHex(hex, sizeof(hex), pkt, 22);
+        LOG_DEBUG("[CN105] TX SET (%d bytes): %s", 22, hex);
     }
-    uart_write_bytes(_uartNum, pkt, 22);
-    uart_wait_tx_done(_uartNum, pdMS_TO_TICKS(200));
+    _uart->write(pkt, 22);
     _wanted.hasBeenSent = true;
 }
 
@@ -403,14 +372,13 @@ void CN105Controller::sendSetPacket() {
 void CN105Controller::readSerial() {
     uint32_t now = millis();
 
-    // Non-blocking bulk read from ESP-IDF UART
-    size_t available = 0;
-    uart_get_buffered_data_len(_uartNum, &available);
+    // Non-blocking bulk read via UART interface
+    size_t available = _uart->available();
 
     if (available > 0) {
         uint8_t tmpBuf[128];
         int toRead = (available > sizeof(tmpBuf)) ? sizeof(tmpBuf) : available;
-        int bytesRead = uart_read_bytes(_uartNum, tmpBuf, toRead, 0);
+        int bytesRead = _uart->read(tmpBuf, toRead);
 
         if (bytesRead > 0) {
             _rxLastByte = now;
@@ -432,8 +400,8 @@ void CN105Controller::readSerial() {
                         uint8_t chk = calcChecksum(_rxBuf, expectedLen - 1);
                         if (chk == _rxBuf[expectedLen - 1]) {
                             if (currentLogLevel >= LOG_LEVEL_DEBUG) {
-                                DebugLog.printf("[CN105] RX VALID (%d bytes): ", expectedLen);
-                                logHex(_rxBuf, expectedLen);
+                                char hex[128]; logHex(hex, sizeof(hex), _rxBuf, expectedLen);
+                                LOG_DEBUG("[CN105] RX VALID (%d bytes): %s", expectedLen, hex);
                             }
                             processPacket(_rxBuf, expectedLen);
                         } else {
