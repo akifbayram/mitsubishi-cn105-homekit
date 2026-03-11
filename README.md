@@ -2,7 +2,7 @@
 
 Controls Mitsubishi mini split heat pumps via the CN105 serial connector, compatible with Apple Home through the HomeKit Accessory Protocol (HAP). No cloud, no bridge, no Home Assistant required.
 
-Built for the [M5Stack NanoC6](https://shop.m5stack.com/products/m5stack-nanoc6-dev-kit) (ESP32-C6).
+Default hardware: [M5Stack NanoC6](https://shop.m5stack.com/products/m5stack-nanoc6-dev-kit) (ESP32-C6). Also supports ESP32, ESP32-S3, ESP32-C3, and M5Stack AtomS3 Lite via compile-time [board profiles](#supported-boards).
 
 > [!CAUTION]
 > **Use at your own risk.** This is an unofficial, community-driven implementation based on the reverse-engineered CN105 serial protocol. It is not developed, endorsed, or supported by Mitsubishi Electric or Apple. Connecting third-party hardware to your heat pump may void its warranty. Not all units support every feature, and behavior may vary by model. The authors and contributors provide this software as-is, with no warranty or guarantee of any kind. 
@@ -20,16 +20,92 @@ Built for the [M5Stack NanoC6](https://shop.m5stack.com/products/m5stack-nanoc6-
 
 | Component | Details |
 |-----------|---------|
-| **Microcontroller** | [M5Stack NanoC6](https://shop.m5stack.com/products/m5stack-nanoc6-dev-kit) (ESP32-C6) |
-| **Connector** | Grove (HY2.0-4P) to CN105 cable |
+| **Microcontroller** | Any [supported board](#supported-boards) (default: M5Stack NanoC6) |
+| **Connector** | Grove (HY2.0-4P) to CN105 cable (NanoC6) or dupont wires |
 | **Heat pump** | Mitsubishi mini split with CN105 connector |
 
-Most Mitsubishi ductless and ducted units manufactured after 2010 have a CN105 connector on the indoor unit's control board. 
+Most Mitsubishi ductless and ducted units manufactured after 2010 have a CN105 connector on the indoor unit's control board. For a list of known-compatible models, see the [MitsubishiCN105ESPHome supported units list](https://github.com/echavet/MitsubishiCN105ESPHome?tab=readme-ov-file#supported-mitsubishi-climate-units). Not all units support every feature (e.g., outside temperature, half-degree precision, wide vane control) — behavior varies by model.
 
 ### Software
 
 - [PlatformIO](https://platformio.org/) (build system)
 - Python 3 (for HTML embedding script)
+
+### Supported Boards
+
+| Board | PlatformIO env | Build command |
+|-------|---------------|---------------|
+| M5Stack NanoC6 (ESP32-C6) | `nanoc6` | `pio run -e nanoc6` |
+| Generic ESP32 DevKit v1 | `esp32-devkit` | `pio run -e esp32-devkit` |
+| ESP32-S3-DevKitC-1 | `esp32s3-devkit` | `pio run -e esp32s3-devkit` |
+| ESP32-C3 SuperMini / XIAO | `esp32c3-mini` | `pio run -e esp32c3-mini` |
+| M5Stack AtomS3 Lite | `m5atoms3-lite` | `pio run -e m5atoms3-lite` |
+
+Board profiles define GPIO pins, LED, button, UART clock source, and debug output for each target. See `include/boards/` for details.
+
+#### Adding a Custom Board
+
+**Option A — Profile header** (recommended for reuse):
+
+1. Create `include/boards/board_myboard.h`:
+
+```c
+#pragma once
+
+#define BOARD_NAME              "My Board"
+
+// CN105 UART — set to your RX/TX GPIOs
+#define PIN_CN105_RX            16
+#define PIN_CN105_TX            17
+#define CN105_UART_NUM          UART_NUM_2   // UART_NUM_1 or UART_NUM_2
+
+// Status LED — set to -1 to disable
+#define PIN_LED_DATA            -1
+#define PIN_LED_ENABLE          -1
+#define HAS_NEOPIXEL            0
+
+// Button — set to -1 to disable
+#define PIN_BUTTON              0
+#define BUTTON_ACTIVE_LOW       1
+
+// Platform quirks
+#define USE_HWCDC_DEBUG         0   // 1 for ESP32-C6/S3 native USB
+#define UART_NEEDS_RX_PULLUP    0   // 1 for ESP32-C6/C3 (floating GPIOs)
+#define UART_USE_XTAL_CLK       0   // 1 for ESP32-C6/C3 (precise 2400 baud)
+```
+
+2. Add to `include/board_profile.h`:
+
+```c
+#elif defined(BOARD_PROFILE_MYBOARD)
+    #include "boards/board_myboard.h"
+```
+
+3. Add to `platformio.ini`:
+
+```ini
+[env:myboard]
+platform = <your platform URL>
+board = <your PlatformIO board ID>
+extends = common
+build_flags =
+    -DBOARD_PROFILE_MYBOARD
+```
+
+**Option B — Inline overrides** (quick, no header file):
+
+```ini
+[env:myboard]
+platform = <your platform URL>
+board = <your PlatformIO board ID>
+extends = common
+build_flags =
+    -DBOARD_PROFILE_CUSTOM
+    -DPIN_CN105_RX=16
+    -DPIN_CN105_TX=17
+```
+
+Any macros not set fall back to safe defaults (LED and button disabled, `UART_NUM_1`). See `include/board_profile.h` for the full list.
 
 ## Wiring
 
@@ -58,8 +134,11 @@ Clone the repository and flash the firmware:
 git clone https://github.com/akifbayram/mitsubishi-cn105-homekit.git
 cd mitsubishi-cn105-homekit
 
-# Build (web UI HTML is embedded automatically via pre-build script)
+# Build for default board (NanoC6)
 pio run
+
+# Or build for a specific board
+pio run -e esp32-devkit
 
 # Flash via USB
 pio run -t upload --upload-port /dev/ttyACM0
@@ -74,16 +153,24 @@ On first boot, the device creates a WiFi access point:
 3. The device saves credentials to flash and reboots
 4. A unique 8-digit HomeKit setup code is auto-generated on first boot
 
-**WiFi Recovery:** If the device loses WiFi connectivity, it automatically enables a fallback AP (Serin-XXXX) after 5 minutes, running concurrently with station mode. Connect to reconfigure credentials. The AP disables automatically when WiFi reconnects. GPIO9 long-press (10s) erases stored credentials.
+### 3. WiFi Recovery
 
-### 3. HomeKit Pairing
+If the device loses WiFi connectivity, it automatically enables a fallback AP (**Serin-XXXX**) after 5 minutes, running concurrently with station mode so it continues attempting to reconnect. Three recovery layers are available:
+
+| Layer | Method | Details |
+|-------|--------|---------|
+| **Auto AP** | Automatic | Fallback AP activates after 5 min disconnect (2 min after a credential change). Disables automatically when WiFi reconnects. |
+| **Recovery page** | Web browser | Connect to the AP and navigate to `192.168.4.1:8080` to enter new WiFi credentials. |
+| **Button reset** | Physical | 10-second long-press on the board button (e.g., GPIO9 on NanoC6) erases stored WiFi credentials. Only available on boards with a button. |
+
+### 4. HomeKit Pairing
 
 Once connected to WiFi:
 
 1. Open the **Home** app on your iPhone or iPad
 2. Tap **+** > **Add Accessory**
 3. Select **Mitsubishi Mini Split**
-4. Enter the setup code you chose during provisioning
+4. Enter the setup code shown in the web UI at `http://<device-ip>:8080` (HomeKit panel > Setup Code)
 
 ## OTA Updates
 
@@ -181,20 +268,34 @@ The following data is available from the heat pump but not exposed as HomeKit se
 src/
   main.cpp                  # Setup, HomeSpan config, accessory tree, LED priority
   cn105_protocol.cpp        # UART driver, packet TX/RX/parsing
-  homekit_services.cpp      # Thermostat, Fan, FanAutoSwitch, FAN/DRY switches
-  web_server.cpp            # HTTP server, WebSocket, OTA upload
+  homekit_thermostat.cpp    # HomeKit Thermostat service
+  homekit_fan.cpp           # HomeKit Fan + Fan Auto switch services
+  homekit_switches.cpp      # HomeKit FAN mode + DRY mode switch services
+  web_server.cpp            # HTTP server setup and request routing
+  web_ws.cpp                # WebSocket handler, state push, command dispatch
+  web_ota.cpp               # OTA firmware upload and verification
   settings.cpp              # NVS persistent settings
   status_led.cpp            # RGB LED state machine and patterns
-  wifi_recovery.cpp         # WiFi fallback AP manager, GPIO9 button handler
+  wifi_recovery.cpp         # WiFi fallback AP manager, button handler
 
 include/
   cn105_protocol.h          # Protocol constants, state structures
+  cn105_strings.h           # Shared enum↔string conversions (log + web + parsers)
   homekit_services.h        # HomeKit service classes
   web_server.h              # Web server interface
+  json_utils.h              # Lightweight JSON builder for WebSocket responses
   settings.h                # Settings store
   status_led.h              # LED state enum, StatusLED class
   wifi_recovery.h           # WiFi fallback AP manager
-  logging.h                 # Log level macros
+  logging.h                 # Log level macros (conditional HWCDC/Serial)
+  board_profile.h           # Board profile selector + defaults
+  boards/                   # Per-board hardware definitions
+    board_nanoc6.h          #   M5Stack NanoC6 (ESP32-C6)
+    board_esp32_devkit.h    #   Generic ESP32 DevKit v1
+    board_esp32s3_devkit.h  #   ESP32-S3-DevKitC-1
+    board_esp32c3_mini.h    #   ESP32-C3 SuperMini / XIAO
+    board_m5atoms3_lite.h   #   M5Stack AtomS3 Lite
+  branding.h                # Build-time branding defaults
   web_ui_html.h             # Auto-generated — do not edit
   wifi_recovery_html.h      # Auto-generated — do not edit
 
@@ -212,7 +313,7 @@ partitions.csv                # Custom partition table (dual OTA, no SPIFFS)
 
 ## CN105 Protocol
 
-The CN105 connector uses a serial protocol at 2400 baud with 8E1 (even parity):
+The CN105 connector uses a serial protocol at 2400 baud with 8E1 (even parity). For detailed protocol documentation, see the [muart-group wiki](https://muart-group.github.io/).
 
 | Byte | Field |
 |------|-------|
