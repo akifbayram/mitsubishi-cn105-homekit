@@ -2,17 +2,11 @@
 
 Controls Mitsubishi mini split heat pumps via the CN105 serial connector, compatible with Apple Home through the HomeKit Accessory Protocol (HAP). No cloud, no bridge, no Home Assistant required.
 
-Default hardware: [M5Stack NanoC6](https://shop.m5stack.com/products/m5stack-nanoc6-dev-kit) (ESP32-C6). Also supports ESP32, ESP32-S3, ESP32-C3, and M5Stack AtomS3 Lite via compile-time [board profiles](#supported-boards).
+<video src="media/homekit.mov" width=300 />
+<img src="media/webui.png" width=300>
 
 > [!CAUTION]
-> **Use at your own risk.** This is an unofficial, community-driven implementation based on the reverse-engineered CN105 serial protocol. It is not developed, endorsed, or supported by Mitsubishi Electric or Apple. Connecting third-party hardware to your heat pump may void its warranty. Not all units support every feature, and behavior may vary by model. The authors and contributors provide this software as-is, with no warranty or guarantee of any kind. 
-
-## Features
-
-- **HomeKit** — Heat, Cool, Auto, Off, FAN mode, DRY mode, fan speed, dual setpoint, half-degree precision
-- **[Web UI](#web-ui)** — full thermostat controls, diagnostics, vane control, HomeKit pairing, settings, OTA updates, live logs (port 8080)
-- **Status LED** — RGB LED for boot sequence, WiFi/CN105 status, error codes, OTA indication
-- **[CN105 Protocol](#cn105-protocol)** — direct serial at 2400 baud 8E1, 5-phase polling, anti-flicker pattern
+> **Use at your own risk.** This is an unofficial implementation based on the reverse-engineered CN105 serial protocol. It is not developed, endorsed, or supported by Mitsubishi Electric or Apple. Connecting third-party hardware to your heat pump may void its warranty. Not all units support every feature, and behavior may vary by model. The authors and contributors provide this software as-is, with no warranty or guarantee of any kind. 
 
 ## Requirements
 
@@ -21,25 +15,30 @@ Default hardware: [M5Stack NanoC6](https://shop.m5stack.com/products/m5stack-nan
 | Component | Details |
 |-----------|---------|
 | **Microcontroller** | Any [supported board](#supported-boards) (default: M5Stack NanoC6) |
-| **Connector** | Grove (HY2.0-4P) to CN105 cable (NanoC6) or dupont wires |
+| **Connector** | Grove (HY2.0-4P) to CN105 cable (NanoC6) |
 | **Heat pump** | Mitsubishi mini split with CN105 connector |
 
-Most Mitsubishi ductless and ducted units manufactured after 2010 have a CN105 connector on the indoor unit's control board. For a list of known-compatible models, see the [MitsubishiCN105ESPHome supported units list](https://github.com/echavet/MitsubishiCN105ESPHome?tab=readme-ov-file#supported-mitsubishi-climate-units). Not all units support every feature (e.g., outside temperature, half-degree precision, wide vane control) — behavior varies by model.
+> **Note:** Most Mitsubishi ductless and ducted units manufactured after 2010 have a CN105 connector on the indoor unit's control board. For a list of known-compatible models, see the [MitsubishiCN105ESPHome supported units list](https://github.com/echavet/MitsubishiCN105ESPHome?tab=readme-ov-file#supported-mitsubishi-climate-units). Not all units support every feature (e.g., outside temperature, half-degree precision, wide vane control) — behavior varies by model.
 
 ### Software
 
 - [PlatformIO](https://platformio.org/) (build system)
 - Python 3 (for HTML embedding script)
 
-### Supported Boards
+### Tested Boards
 
 | Board | PlatformIO env | Build command |
 |-------|---------------|---------------|
 | M5Stack NanoC6 (ESP32-C6) | `nanoc6` | `pio run -e nanoc6` |
+| M5Stack AtomS3/AtomS3 Lite | `m5atoms3-lite` | `pio run -e m5atoms3-lite` |
+
+### Untested but Compatible Boards
+
+| Board | PlatformIO env | Build command |
+|-------|---------------|---------------|
 | Generic ESP32 DevKit v1 | `esp32-devkit` | `pio run -e esp32-devkit` |
 | ESP32-S3-DevKitC-1 | `esp32s3-devkit` | `pio run -e esp32s3-devkit` |
 | ESP32-C3 SuperMini / XIAO | `esp32c3-mini` | `pio run -e esp32c3-mini` |
-| M5Stack AtomS3 Lite | `m5atoms3-lite` | `pio run -e m5atoms3-lite` |
 
 Board profiles define GPIO pins, LED, button, UART clock source, and debug output for each target. See `include/boards/` for details.
 
@@ -111,6 +110,8 @@ Any macros not set fall back to safe defaults (LED and button disabled, `UART_NU
 
 Connect the M5Stack NanoC6 to the CN105 connector on the indoor unit's control board using the Grove port:
 
+<img src="media/wiring.png" width=300>
+
 ```
 CN105 Connector          M5Stack NanoC6 (Grove)
 ┌──────────────┐         ┌──────────────────────┐
@@ -122,7 +123,7 @@ CN105 Connector          M5Stack NanoC6 (Grove)
 └──────────────┘         └──────────────────────┘
 ```
 
-> **Note:** The CN105 connector is typically located on the right side of ductless indoor unit's control board behind the front panel. Power is provided by the unit through pins 2 and 3 — no separate power supply is needed.
+> **Note:** The CN105 connector is typically located on the right side of ductless indoor unit's control board behind the front panel. Power is provided by the unit through pins 2 and 3 — no separate power supply is needed. If your board doesn't have a Grove port, you can connect directly to the appropriate GPIO pins for RX/TX, GND, and 5V (see [board profiles](#supported-boards)).
 
 ## Setup
 
@@ -153,6 +154,9 @@ On first boot, the device creates a WiFi access point:
 3. The device saves credentials to flash and reboots
 4. A unique 8-digit HomeKit setup code is auto-generated on first boot
 
+<img src="media/recovery.png" width=300>
+<img src="media/homekit.png" width=255>
+
 ### 3. WiFi Recovery
 
 If the device loses WiFi connectivity, it automatically enables a fallback AP (**Serin-XXXX**) after 5 minutes, running concurrently with station mode so it continues attempting to reconnect. Three recovery layers are available:
@@ -167,10 +171,20 @@ If the device loses WiFi connectivity, it automatically enables a fallback AP (*
 
 Once connected to WiFi:
 
+**Option A — Scan QR Code (recommended):**
+
 1. Open the **Home** app on your iPhone or iPad
 2. Tap **+** > **Add Accessory**
-3. Select **Mitsubishi Mini Split**
-4. Enter the setup code shown in the web UI at `http://<device-ip>:8080` (HomeKit panel > Setup Code)
+3. Scan the QR code shown in the web UI at `http://<device-ip>:8080` (HomeKit panel)
+
+**Option B — Manual setup code:**
+
+1. Open the **Home** app on your iPhone or iPad
+2. Tap **+** > **Add Accessory**
+3. Select **Mitsubishi Mini Split** (or tap **More options…** if it doesn't appear)
+4. Enter the setup code shown in the web UI (HomeKit panel > Setup Code)
+
+<img src="media/homekit.png" width=300>
 
 ## OTA Updates
 
@@ -193,6 +207,9 @@ curl --data-binary @.pio/build/nanoc6/firmware.bin \
 
 Access the web interface at `http://<device-ip>:8080`.
 
+<!-- TODO: Add Web UI screenshot or animated GIF — show the main controls page with mode selector, temperature, fan/vane card visible. A GIF cycling through mode changes or temperature adjustments would be ideal.
+![Web UI](docs/images/web-ui-full.png) -->
+
 The single-page interface provides:
 
 - **Mode** — Off/Heat/Cool/Auto/Dry/Fan mode selector (power integrated as Off mode)
@@ -207,6 +224,9 @@ The single-page interface provides:
 - **OTA** — firmware upload with integrity verification (see [OTA Updates](#ota-updates))
 
 ## HomeKit Details
+
+<!-- TODO: Add Apple Home screenshot — show the accessory detail view with thermostat, fan, and mode switches visible.
+![HomeKit accessory](docs/images/homekit-detail.png) -->
 
 Apple's HomeKit Thermostat service only supports Heat, Cool, Auto, and Off. This section covers the mappings and workarounds for features that don't fit natively.
 
