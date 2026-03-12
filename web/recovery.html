@@ -4,63 +4,193 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>{{BRAND_NAME}} - WiFi Setup</title>
 <style>
-:root{--bg:#f0f1f6;--surface:#fff;--surface2:#e6e7ee;--border:#d0d1da;
-  --text:#1c1c2e;--text2:#6b6b85;--accent:#3a7fdb;--red:#e84060;--green:#2db55a;
-  --orange:#e8922a;--radius:8px}
+/* ── Design System (shared with main UI) ─────────────────────────────── */
+:root{
+  --bg:#000;--surface:#1C1C1E;--surface2:#2C2C2E;--surface3:#3A3A3C;
+  --border:#38383A;--text:#fff;--text2:#8E8E93;--text3:#636366;
+  --seg-bg:rgba(118,118,128,0.24);--seg-active:#636366;
+  --accent:#007AFF;--accent-dim:#0055CC;
+  --red:#FF3B30;--green:#34C759;--orange:#FF9500;
+  --radius:16px;--radius-sm:10px;
+  --shadow:0 1px 3px rgba(0,0,0,0.3);
+}
+[data-theme="light"]{
+  --bg:#F2F2F7;--surface:#fff;--surface2:#E5E5EA;--surface3:#D1D1D6;
+  --border:#C6C6C8;--text:#000;--text2:#8E8E93;--text3:#AEAEB2;
+  --seg-bg:rgba(118,118,128,0.12);--seg-active:#fff;
+  --shadow:0 1px 3px rgba(0,0,0,0.08);
+}
+
+/* ── Base ─────────────────────────────────────────────────────────────── */
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
-  background:var(--bg);color:var(--text);min-height:100vh;padding:16px;
-  display:flex;align-items:center;justify-content:center}
-.container{max-width:380px;width:100%}
-.card{background:var(--surface);border-radius:var(--radius);padding:20px;margin-bottom:12px}
-h1{font-size:20px;font-weight:600;margin-bottom:4px}
-.subtitle{font-size:13px;color:var(--text2);margin-bottom:16px}
-.status{padding:10px;border-radius:6px;font-size:13px;margin-bottom:16px;text-align:center}
-.status.err{background:rgba(255,68,102,.15);border:1px solid var(--red);color:var(--red)}
-.status.ok{background:rgba(68,204,102,.15);border:1px solid var(--green);color:var(--green)}
-.status.warn{background:rgba(255,170,51,.15);border:1px solid var(--orange);color:var(--orange)}
-.field{margin-bottom:12px}
-.field label{display:block;font-size:12px;color:var(--text2);margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px}
-.field input{width:100%;padding:10px;border:1px solid var(--border);border-radius:6px;
-  background:var(--surface2);color:var(--text);font-size:14px;outline:none}
-.field input:focus{border-color:var(--accent)}
-.pw-toggle{position:absolute;right:6px;top:50%;transform:translateY(-50%);
+body{
+  font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display','SF Pro Text',system-ui,sans-serif;
+  background:var(--bg);color:var(--text);
+  min-height:100vh;min-height:100dvh;
+  -webkit-tap-highlight-color:transparent;
+  -webkit-font-smoothing:antialiased;
+}
+.container{max-width:420px;margin:0 auto;padding:0 16px 24px}
+
+/* ── Header ───────────────────────────────────────────────────────────── */
+.header{
+  position:sticky;top:0;z-index:100;
+  display:flex;align-items:center;justify-content:space-between;
+  padding:12px 16px;margin:0 -16px 0;
+  background:var(--bg);
+}
+.header-left{display:flex;align-items:baseline;gap:6px}
+.device-name{font-size:17px;font-weight:600;letter-spacing:-0.2px}
+.header-right{display:flex;align-items:center;gap:10px}
+.conn-dot{
+  width:12px;height:12px;border-radius:50%;flex-shrink:0;
+  transition:background .3s,box-shadow .3s;
+}
+.conn-dot.ok{background:var(--green);box-shadow:0 0 6px var(--green)}
+.conn-dot.err{background:var(--red)}
+.theme-toggle{
+  width:34px;height:34px;border:none;border-radius:50%;
+  background:var(--seg-bg);cursor:pointer;display:flex;
+  align-items:center;justify-content:center;color:var(--text2);padding:0;
+  transition:transform .15s;
+}
+.theme-toggle:active{transform:scale(.88)}
+.theme-toggle svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.icon-moon{display:none}
+[data-theme="light"] .icon-sun{display:none}
+[data-theme="light"] .icon-moon{display:block}
+
+/* ── Cards ─────────────────────────────────────────────────────────────── */
+.card{
+  background:var(--surface);border-radius:var(--radius);
+  padding:14px 16px;margin-bottom:10px;
+}
+.card-label{
+  font-size:13px;font-weight:500;color:var(--text2);
+  text-transform:uppercase;letter-spacing:0.3px;margin-bottom:8px;
+}
+
+/* ── Status Banner ────────────────────────────────────────────────────── */
+.status{
+  padding:10px 12px;border-radius:var(--radius-sm);font-size:13px;
+  margin-bottom:12px;text-align:center;font-weight:500;
+  transition:all .3s;
+}
+.status.err{background:rgba(255,59,48,0.15);color:var(--red)}
+.status.ok{background:rgba(52,199,89,0.15);color:var(--green)}
+.status.warn{background:rgba(255,149,0,0.15);color:var(--orange)}
+
+/* ── Form ─────────────────────────────────────────────────────────────── */
+.setting-row{
+  display:flex;align-items:center;gap:12px;
+  padding:10px 0;border-bottom:0.5px solid var(--border);
+}
+.setting-row:last-of-type{border-bottom:none}
+.setting-row label{font-size:15px;color:var(--text);min-width:70px}
+.setting-row input[type=text],.setting-row input[type=password]{
+  flex:1;padding:8px 12px;border:none;border-radius:var(--radius-sm);
+  background:var(--seg-bg);color:var(--text);font-size:15px;
+  font-family:inherit;outline:none;
+}
+.setting-row input::placeholder{color:var(--text3)}
+.pw-wrap{flex:1;position:relative}
+.pw-wrap input{width:100%;padding-right:40px}
+.pw-toggle{position:absolute;right:8px;top:50%;transform:translateY(-50%);
   background:none;border:none;color:var(--text2);cursor:pointer;font-size:14px;
   padding:4px;line-height:1}
-.current-ssid{font-size:13px;color:var(--text2);margin-bottom:16px}
+.help-text{font-size:13px;color:var(--text2);line-height:1.5;margin-bottom:10px}
+.current-ssid{font-size:13px;color:var(--text2);margin-bottom:0}
 .current-ssid strong{color:var(--text)}
-.btn{width:100%;padding:12px;border:none;border-radius:6px;font-size:14px;font-weight:600;
-  cursor:pointer;transition:all .2s}
-.btn:active{transform:scale(.97)}
-.btn-primary{background:var(--accent);color:#fff}
-.btn-primary:disabled{background:var(--surface2);color:var(--text2);cursor:not-allowed}
+.steps{font-size:13px;color:var(--text2);line-height:1.7;padding-left:20px}
+.steps li{margin-bottom:4px}
+.steps li::marker{color:var(--accent)}
+
+/* ── Button ───────────────────────────────────────────────────────────── */
+.save-btn{
+  width:100%;padding:12px;border:none;border-radius:var(--radius-sm);
+  background:var(--accent);color:#fff;font-size:15px;font-weight:600;
+  cursor:pointer;margin-top:8px;font-family:inherit;
+  transition:transform .15s,opacity .15s;
+}
+.save-btn:active{transform:scale(.97);opacity:.8}
+.save-btn:disabled{opacity:.4;cursor:default}
+
+/* ── Scrollbar ────────────────────────────────────────────────────────── */
+::-webkit-scrollbar{width:4px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
 </style>
 </head>
 <body>
 <div class="container">
-  <div class="card">
-    <h1 id="devName">{{BRAND_NAME}}</h1>
-    <div class="subtitle">WiFi Recovery</div>
-    <div class="status err" id="statusBox">Not connected to WiFi</div>
-    <div class="current-ssid" id="currentSSID"></div>
-    <div class="field">
-      <label>WiFi Network (SSID)</label>
-      <input type="text" id="ssid" placeholder="Enter network name" maxlength="32" autocomplete="off">
+
+  <!-- Header -->
+  <div class="header">
+    <div class="header-left">
+      <div class="device-name" id="devName">{{BRAND_NAME}}</div>
     </div>
-    <div class="field">
+    <div class="header-right">
+      <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="Toggle theme">
+        <svg class="icon-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+        <svg class="icon-moon" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3a7 7 0 0 0 9.79 9.79z"/></svg>
+      </button>
+      <div class="conn-dot err" id="connDot" title="Disconnected"></div>
+    </div>
+  </div>
+
+  <!-- Guidance -->
+  <div class="card">
+    <div class="card-label">WiFi Recovery</div>
+    <div class="status err" id="statusBox">Not connected to WiFi</div>
+    <p class="help-text" id="helpText">This device could not connect to your WiFi network and has started its own temporary hotspot. Enter your WiFi credentials below to reconnect it.</p>
+    <div class="current-ssid" id="currentSSID"></div>
+  </div>
+
+  <!-- WiFi Setup -->
+  <div class="card">
+    <div class="card-label">Network Credentials</div>
+    <div class="setting-row">
+      <label>SSID</label>
+      <input type="text" id="ssid" placeholder="Network name" maxlength="32" autocomplete="off">
+    </div>
+    <div class="setting-row" style="border-bottom:none">
       <label>Password</label>
-      <div style="position:relative">
-        <input type="password" id="pass" placeholder="Enter password" maxlength="64" style="padding-right:36px">
-        <button type="button" class="pw-toggle" onclick="togglePw('pass',this)" aria-label="Show password">👁‍🗨</button>
+      <div class="pw-wrap">
+        <input type="password" id="pass" placeholder="Password" maxlength="64">
+        <button type="button" class="pw-toggle" onclick="togglePw('pass',this)" aria-label="Show password">&#x1F441;&#x200D;&#x1F5E8;</button>
       </div>
     </div>
-    <button class="btn btn-primary" id="saveBtn" onclick="saveWifi()" disabled>Save & Connect</button>
+    <button class="save-btn" id="saveBtn" onclick="saveWifi()" disabled>Save &amp; Connect</button>
   </div>
+
+  <!-- Help -->
+  <div class="card" id="helpCard">
+    <div class="card-label">What to expect</div>
+    <ol class="steps">
+      <li>Enter your home WiFi network name and password above</li>
+      <li>The device will attempt to connect to your network</li>
+      <li>If successful, this hotspot will turn off and the device will reboot</li>
+      <li>Reconnect your phone to your home WiFi to continue using the device</li>
+    </ol>
+    <p class="help-text" style="margin-top:10px">If the connection fails, the hotspot will remain active so you can try again. Make sure the SSID and password are correct and that the network is within range.</p>
+  </div>
+
 </div>
 <script>
 (function(){
+  /* ── Theme ─────────────────────────────────────────────────────────── */
+  function applyTheme(t){document.documentElement.setAttribute('data-theme',t);localStorage.setItem('theme',t)}
+  var saved=localStorage.getItem('theme');
+  if(saved)applyTheme(saved);
+  window.toggleTheme=function(){
+    var cur=document.documentElement.getAttribute('data-theme');
+    applyTheme(cur==='light'?'dark':'dark'===cur?'light':'light');
+  };
+
+  /* ── Password toggle ───────────────────────────────────────────────── */
   window.togglePw=function(id,btn){
     var el=document.getElementById(id);
     var show=el.type==='password';
@@ -68,12 +198,15 @@ h1{font-size:20px;font-weight:600;margin-bottom:4px}
     btn.textContent='\u{1F441}\u200D\u{1F5E8}';
     btn.setAttribute('aria-label',show?'Hide password':'Show password');
   };
+
   var ssidEl=document.getElementById('ssid');
   var passEl=document.getElementById('pass');
   var saveBtn=document.getElementById('saveBtn');
   var statusBox=document.getElementById('statusBox');
+  var helpText=document.getElementById('helpText');
   var currentSSID=document.getElementById('currentSSID');
   var devName=document.getElementById('devName');
+  var connDot=document.getElementById('connDot');
 
   function checkFields(){
     saveBtn.disabled=!(ssidEl.value.trim()&&passEl.value);
@@ -81,7 +214,7 @@ h1{font-size:20px;font-weight:600;margin-bottom:4px}
   ssidEl.addEventListener('input',checkFields);
   passEl.addEventListener('input',checkFields);
 
-  // Load current WiFi status
+  /* ── Load current WiFi status ──────────────────────────────────────── */
   fetch('/wifi-status').then(function(r){return r.json()}).then(function(d){
     if(d.deviceName) devName.textContent=d.deviceName;
     if(d.ssid){
@@ -95,9 +228,13 @@ h1{font-size:20px;font-weight:600;margin-bottom:4px}
     if(d.connected){
       statusBox.className='status ok';
       statusBox.textContent='Connected to WiFi';
+      helpText.textContent='The device is connected to WiFi. You can update the network credentials below if needed, or reconnect to your home WiFi.';
+      connDot.className='conn-dot ok';
+      connDot.title='Connected';
     }
   }).catch(function(){});
 
+  /* ── Save WiFi ─────────────────────────────────────────────────────── */
   window.saveWifi=function(){
     var ssid=ssidEl.value.trim();
     var pass=passEl.value;
@@ -114,16 +251,17 @@ h1{font-size:20px;font-weight:600;margin-bottom:4px}
       statusBox.className='status warn';
       statusBox.textContent='Credentials saved. Connecting to '+ssid+'...';
       saveBtn.textContent='Saved';
-      // Poll for connection status
       var attempts=0;
       var poll=setInterval(function(){
         attempts++;
-        if(attempts>30){clearInterval(poll);statusBox.textContent='Connection timeout. Try again or check credentials.';saveBtn.disabled=false;saveBtn.textContent='Save & Connect';return}
+        if(attempts>30){clearInterval(poll);statusBox.className='status err';statusBox.textContent='Connection timeout. Try again or check credentials.';saveBtn.disabled=false;saveBtn.textContent='Save & Connect';return}
         fetch('/wifi-status').then(function(r){return r.json()}).then(function(s){
           if(s.connected){
             clearInterval(poll);
             statusBox.className='status ok';
             statusBox.textContent='Connected! The device is now on your network. Rebooting...';
+            connDot.className='conn-dot ok';
+            connDot.title='Connected';
           }
         }).catch(function(){});
       },3000);
