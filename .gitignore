@@ -11,7 +11,7 @@
 .claude/
 .agents/
 skills-lock.json
-docs/
+docs/*/
 CLAUDE.md
 reports/
 

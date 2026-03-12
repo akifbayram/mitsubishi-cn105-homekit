@@ -38,7 +38,7 @@ Controls Mitsubishi mini split heat pumps via the CN105 serial connector, compat
 | **Connector** | Grove (HY2.0-4P) to CN105 cable (NanoC6) |
 | **Heat pump** | Mitsubishi mini split with CN105 connector |
 
-> **Note:** Most Mitsubishi ductless and ducted units manufactured after 2010 have a CN105 connector on the indoor unit's control board. For a list of known-compatible models, see the [MitsubishiCN105ESPHome supported units list](https://github.com/echavet/MitsubishiCN105ESPHome?tab=readme-ov-file#supported-mitsubishi-climate-units). Not all units support every feature (e.g., outside temperature, half-degree precision, wide vane control) — behavior varies by model.
+Most Mitsubishi ductless and ducted units manufactured after 2010 have a CN105 connector on the indoor unit's control board. For a list of known-compatible models, see the [MitsubishiCN105ESPHome supported units list](https://github.com/echavet/MitsubishiCN105ESPHome?tab=readme-ov-file#supported-mitsubishi-climate-units). Not all units support every feature (e.g., outside temperature, half-degree precision, wide vane control) — behavior varies by model.
 
 ### Software
 
@@ -59,67 +59,7 @@ Board profiles define GPIO pins, LED, button, UART clock source, and debug outpu
 
 ### Adding a Custom Board
 
-**Option A — Profile header** (recommended for reuse):
-
-1. Create `include/boards/board_myboard.h`:
-
-```c
-#pragma once
-
-#define BOARD_NAME              "My Board"
-
-// CN105 UART — set to your RX/TX GPIOs
-#define PIN_CN105_RX            16
-#define PIN_CN105_TX            17
-#define CN105_UART_NUM          UART_NUM_2   // UART_NUM_1 or UART_NUM_2
-
-// Status LED — set to -1 to disable
-#define PIN_LED_DATA            -1
-#define PIN_LED_ENABLE          -1
-#define HAS_NEOPIXEL            0
-
-// Button — set to -1 to disable
-#define PIN_BUTTON              0
-#define BUTTON_ACTIVE_LOW       1
-
-// Platform quirks
-#define USE_HWCDC_DEBUG         0   // 1 for ESP32-C6/S3 native USB
-#define UART_NEEDS_RX_PULLUP    0   // 1 for ESP32-C6/C3 (floating GPIOs)
-#define UART_USE_XTAL_CLK       0   // 1 for ESP32-C6/C3 (precise 2400 baud)
-```
-
-2. Add to `include/board_profile.h`:
-
-```c
-#elif defined(BOARD_PROFILE_MYBOARD)
-    #include "boards/board_myboard.h"
-```
-
-3. Add to `platformio.ini`:
-
-```ini
-[env:myboard]
-platform = <your platform URL>
-board = <your PlatformIO board ID>
-extends = common
-build_flags =
-    -DBOARD_PROFILE_MYBOARD
-```
-
-**Option B — Inline overrides** (quick, no header file):
-
-```ini
-[env:myboard]
-platform = <your platform URL>
-board = <your PlatformIO board ID>
-extends = common
-build_flags =
-    -DBOARD_PROFILE_CUSTOM
-    -DPIN_CN105_RX=16
-    -DPIN_CN105_TX=17
-```
-
-Any macros not set fall back to safe defaults (LED and button disabled, `UART_NUM_1`). See `include/board_profile.h` for the full list.
+Create a board profile header or use inline build flag overrides. See the [Custom Board Guide](docs/custom-boards.md) for full instructions.
 
 ## Wiring
 
@@ -234,131 +174,15 @@ The single-page interface provides:
 
 ## HomeKit Details
 
-Apple's HomeKit Thermostat service only supports Heat, Cool, Auto, and Off. This section covers the mappings and workarounds for features that don't fit natively.
-
-### Thermostat
-| HomeKit Mode | CN105 Mode | Behavior |
-|-------------|------------|----------|
-| Off | Power Off | Unit off |
-| Heat | 0x01 HEAT | Heat to target temperature |
-| Cool | 0x03 COOL | Cool to target temperature |
-| Auto | 0x08 AUTO | Dual setpoint — heats below heating threshold, cools above cooling threshold |
-
-### FAN & DRY Mode Switches
-
-The Thermostat service has no representation for **FAN** (circulation-only) or **DRY** (dehumidification) modes. These are exposed as separate switches — turning one on powers the unit in that mode, turning it off powers the unit off. Only one mode can be active at a time; switching modes via the thermostat automatically reflects in the switches.
-
-### Fan Speed
-
-HomeKit's Fan service uses a 0–100% rotation speed slider, mapped to discrete speed levels:
-
-| HomeKit % | Speed |
-|-----------|-------|
-| 0% | Off (powers off unit) |
-| 1–20% | Quiet |
-| 21–40% | Speed 1 |
-| 41–60% | Speed 2 |
-| 61–80% | Speed 3 |
-| 81–100% | Speed 4 |
-
-Setting the slider to 0% or deactivating the fan service powers the unit off. Auto fan speed is controlled exclusively via the **Fan Auto** switch.
-
-### Dual Setpoint (Auto Mode)
-
-The HomeKit Thermostat service supports independent heating and cooling thresholds, but the CN105 protocol only accepts a **single target temperature**. The controller tracks which side is active via `autoSubMode` from the heat pump's status response and sends the appropriate threshold. A 2°C minimum gap is enforced between thresholds.
-
-### Vane Control
-
-Vane positions (including swing mode) are controlled exclusively through the [web UI](#web-ui).
-
-### Temperature
-
-The heat pump supports 16–31°C. The web UI offers a °C/°F display toggle, but the protocol always operates in Celsius. Half-degree precision is supported when the unit's enhanced temperature encoding is detected.
-
-### Web UI–Only Diagnostics
-
-The following data is available from the heat pump but not exposed as HomeKit services:
-
-| Sensor | Source |
-|--------|--------|
-| Compressor frequency (Hz) | 0x06 status response |
-| Outside air temperature | 0x03 temp response |
-| Runtime hours | 0x03 temp response |
-| Error code | 0x04 error response |
-| Sub mode (Normal/Defrost/Preheat/Standby) | 0x09 standby response |
-| Operating stage (Idle/Diffuse) | 0x09 standby response |
+Covers thermostat mode mappings (Heat/Cool/Auto/Off), FAN & DRY mode switches, fan speed percentages, dual setpoint behavior, vane control, and diagnostics. See [HomeKit Details](docs/homekit.md).
 
 ## Project Structure
 
-```
-src/
-  main.cpp                  # Setup, HomeSpan config, accessory tree, LED priority
-  cn105_protocol.cpp        # UART driver, packet TX/RX/parsing
-  homekit_thermostat.cpp    # HomeKit Thermostat service
-  homekit_fan.cpp           # HomeKit Fan + Fan Auto switch services
-  homekit_switches.cpp      # HomeKit FAN mode + DRY mode switch services
-  web_server.cpp            # HTTP server setup and request routing
-  web_ws.cpp                # WebSocket handler, state push, command dispatch
-  web_ota.cpp               # OTA firmware upload and verification
-  settings.cpp              # NVS persistent settings
-  status_led.cpp            # RGB LED state machine and patterns
-  wifi_recovery.cpp         # WiFi fallback AP manager, button handler
-
-include/
-  cn105_protocol.h          # Protocol constants, state structures
-  cn105_strings.h           # Shared enum↔string conversions (log + web + parsers)
-  homekit_services.h        # HomeKit service classes
-  web_server.h              # Web server interface
-  json_utils.h              # Lightweight JSON builder for WebSocket responses
-  settings.h                # Settings store
-  status_led.h              # LED state enum, StatusLED class
-  wifi_recovery.h           # WiFi fallback AP manager
-  logging.h                 # Log level macros (conditional HWCDC/Serial)
-  board_profile.h           # Board profile selector + defaults
-  boards/                   # Per-board hardware definitions
-    board_nanoc6.h          #   M5Stack NanoC6 (ESP32-C6)
-    board_esp32_devkit.h    #   Generic ESP32 DevKit v1
-    board_esp32s3_devkit.h  #   ESP32-S3-DevKitC-1
-    board_esp32c3_mini.h    #   ESP32-C3 SuperMini / XIAO
-    board_m5atoms3_lite.h   #   M5Stack AtomS3 Lite
-  branding.h                # Build-time branding defaults
-  web_ui_html.h             # Auto-generated — do not edit
-  wifi_recovery_html.h      # Auto-generated — do not edit
-
-web/
-  index.html                # Web UI source (edit this)
-  recovery.html             # WiFi recovery page source (edit this)
-
-scripts/
-  embed_html.py             # Gzips HTML → generates web_ui_html.h
-  pre_build.py              # PlatformIO pre-build: auto-runs embed_html.py
-  provision.sh              # Per-unit provisioning: flash, read MAC, generate QR label
-
-partitions.csv                # Custom partition table (dual OTA, no SPIFFS)
-```
+See [Project Structure](docs/project-structure.md) for the full source tree with descriptions of each file.
 
 ## CN105 Protocol
 
-The CN105 connector uses a serial protocol at 2400 baud with 8E1 (even parity). For detailed protocol documentation, see the [muart-group wiki](https://muart-group.github.io/).
-
-| Byte | Field |
-|------|-------|
-| 0 | `0xFC` sync byte |
-| 1 | Packet type |
-| 2–3 | `0x01 0x30` header |
-| 4 | Data length |
-| 5+ | Data payload |
-| Last | Checksum: `(0xFC - sum_of_all_bytes) & 0xFF` |
-
-**Polling cycle** (5 phases, default 2s interval):
-
-| Phase | Type | Data |
-|-------|------|------|
-| 0x02 | Settings | Power, mode, target temp, fan, vane, wide vane |
-| 0x03 | Room temp | Room temperature, outside temperature, runtime hours |
-| 0x04 | Error | Error code (0x80 = normal) |
-| 0x06 | Status | Operating state, compressor frequency |
-| 0x09 | Standby | Sub mode, stage, auto sub mode |
+2400 baud, 8E1 serial protocol over the CN105 connector. See [Protocol Reference](docs/protocol.md) for packet format and polling cycle details, and the [muart-group wiki](https://muart-group.github.io/) for community protocol documentation.
 
 ## Acknowledgments
 
