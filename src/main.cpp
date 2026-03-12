@@ -11,12 +11,17 @@
 #include "wifi_recovery.h"
 #include "status_led.h"
 #include "branding.h"
+#include "board_profile.h"
 
 // ── Global instances ─────────────────────────────────────────────────────────
-HWCDC DebugLog;                             // USB Serial/JTAG for debug logging
+#if USE_HWCDC_DEBUG
+HWCDC DebugLog;
+#endif
 LogLevel currentLogLevel = LOG_LEVEL_INFO;  // Default log level
 CN105Controller cn105;
-StatusLED statusLED(20, 19);  // NanoC6 onboard WS2812: data=GPIO20, enable=GPIO19
+#if PIN_LED_DATA >= 0
+StatusLED statusLED(PIN_LED_DATA, PIN_LED_ENABLE);
+#endif
 static bool webUIStarted = false;
 static bool firmwareValidated = false;
 static uint32_t webUIStartTime = 0;
@@ -28,12 +33,16 @@ static uint32_t webUIStartTime = 0;
 void setup() {
     Serial.begin(115200);
 
-    // Initialize USB Serial/JTAG for debug logging
+#if USE_HWCDC_DEBUG
     DebugLog.begin();
+#endif
+#if PIN_LED_DATA >= 0
     statusLED.begin();
     statusLED.setState(SLED_BOOT);
+#endif
     LOG_INFO("[MAIN] ═══════════════════════════════════════");
     LOG_INFO("[MAIN] HomeKit controller starting");
+    LOG_INFO("[MAIN] Board: %s", BOARD_NAME);
     LOG_INFO("[MAIN] Log level: %d (0=ERR 1=WARN 2=INFO 3=DBG)", currentLogLevel);
     LOG_INFO("[MAIN] ═══════════════════════════════════════");
 
@@ -110,13 +119,8 @@ void setup() {
         new MitsubishiDryModeSwitch(&cn105);
 
     // ── Initialize CN105 serial communication ───────────────────────────────
-    // M5Stack NanoC6 Grove connector (HY2.0-4P):
-    //   Grove Pin 3 (White)  = GPIO2 → RX (from CN105 Pin 4 TX)
-    //   Grove Pin 4 (Yellow) = GPIO1 → TX (to CN105 Pin 5 RX)
-    //
-    // Uses ESP-IDF UART driver directly (not Arduino HardwareSerial)
-    // for reliable 8E1 configuration on ESP32-C6.
-    cn105.begin(UART_NUM_1, /*rxPin=*/2, /*txPin=*/1);
+    // Pin assignments from board profile (see include/boards/)
+    cn105.begin(CN105_UART_NUM, PIN_CN105_RX, PIN_CN105_TX);
 
     // WiFi recovery: monitors connection, manages AP fallback, handles button
     wifiRecovery.begin(apName);
@@ -149,6 +153,7 @@ void loop() {
         webUI.loop();
     }
 
+#if PIN_LED_DATA >= 0
     // ── Status LED priority evaluation ──────────────────────────────────
     if (statusLED.getState() != SLED_OTA) {
         if (!webUIStarted) {
@@ -177,6 +182,7 @@ void loop() {
         }
     }
     statusLED.loop();
+#endif
 
     // Validate firmware after WiFi + CN105 confirmed working (or 60s timeout)
     if (!firmwareValidated && webUIStarted) {

@@ -1,6 +1,7 @@
 #pragma once
 #include <Arduino.h>
 #include <DNSServer.h>
+#include "board_profile.h"
 
 // Timeout before enabling AP fallback
 constexpr uint32_t WIFI_RECOVERY_TIMEOUT_CHANGE = 120000;  // 2 min (after credential change)
@@ -9,9 +10,9 @@ constexpr uint32_t WIFI_RECOVERY_TIMEOUT_NORMAL = 300000;  // 5 min (after norma
 // Delay before disabling AP after WiFi reconnects (lets recovery page confirm)
 constexpr uint32_t WIFI_AP_LINGER_MS = 6000;  // 6 seconds (recovery page polls every 3s)
 
-// GPIO9 button long-press duration for WiFi reset
+// Button long-press duration for WiFi reset
 constexpr uint32_t WIFI_RESET_BUTTON_HOLD_MS = 10000;  // 10 seconds
-constexpr uint8_t  WIFI_RESET_BUTTON_PIN = 9;          // NanoC6 built-in button
+constexpr int8_t   WIFI_RESET_BUTTON_PIN = PIN_BUTTON;  // From board profile (-1 = no button)
 
 class WifiRecovery {
 public:

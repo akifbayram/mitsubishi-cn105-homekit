@@ -1,10 +1,14 @@
 #pragma once
 
 #include <Arduino.h>
-#include <HWCDC.h>
+#include "board_profile.h"
 
-// USB Serial/JTAG for debug logging (ESP32-C6 built-in USB)
-extern HWCDC DebugLog;
+#if USE_HWCDC_DEBUG
+    #include <HWCDC.h>
+    extern HWCDC DebugLog;
+#else
+    #define DebugLog Serial
+#endif
 
 // ── Log Levels ────────────────────────────────────────────────────────────────
 enum LogLevel : uint8_t {

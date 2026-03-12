@@ -1,8 +1,11 @@
 #include "web_server.h"
 #include <mbedtls/sha256.h>
 #include "status_led.h"
+#include "board_profile.h"
 
+#if PIN_LED_DATA >= 0
 extern StatusLED statusLED;
+#endif
 
 // ══════════════════════════════════════════════════════════════════════════════
 // OTA firmware upload: POST /upload  (raw binary body, not multipart)
@@ -43,7 +46,9 @@ esp_err_t WebUI::handleOtaUpload(httpd_req_t *req) {
         return ESP_FAIL;
     }
 
+#if PIN_LED_DATA >= 0
     statusLED.setState(SLED_OTA);
+#endif
 
     // SHA256 verification: check for X-Firmware-SHA256 header
     char expectedHash[65] = {0};

@@ -18,8 +18,9 @@ void WifiRecovery::begin(const char *apName) {
     strncpy(_apName, apName, sizeof(_apName) - 1);
     _apName[sizeof(_apName) - 1] = '\0';
 
-    // Configure GPIO9 as input with pull-up (NanoC6 BOOT button is active-low)
+#if PIN_BUTTON >= 0
     pinMode(WIFI_RESET_BUTTON_PIN, INPUT_PULLUP);
+#endif
 
     refreshCachedSSID();
 
@@ -153,7 +154,10 @@ uint32_t WifiRecovery::getWifiUptimeSeconds() const {
 }
 
 void WifiRecovery::checkButton() {
-    bool pressed = (digitalRead(WIFI_RESET_BUTTON_PIN) == LOW); // Active-low
+#if PIN_BUTTON < 0
+    return;
+#else
+    bool pressed = (digitalRead(WIFI_RESET_BUTTON_PIN) == (BUTTON_ACTIVE_LOW ? LOW : HIGH));
 
     if (pressed && _buttonPressStart == 0) {
         _buttonPressStart = safeMillis();
@@ -168,4 +172,5 @@ void WifiRecovery::checkButton() {
         _buttonPressStart = 0;
         _buttonTriggered = false;
     }
+#endif
 }
