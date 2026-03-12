@@ -2,8 +2,16 @@
 
 Controls Mitsubishi mini split heat pumps via the CN105 serial connector, compatible with Apple Home through the HomeKit Accessory Protocol (HAP). No cloud, no bridge, no Home Assistant required.
 
-<video src="media/homekit.mov" width=300 />
-<img src="media/webui.png" width=300>
+<table>
+  <tr>
+    <td><img src="media/homekit.gif" height=400></td>
+    <td><img src="media/webui.png" height=400></td>
+  </tr>
+  <tr>
+    <td align="center"><em>HomeKit</em></td>
+    <td align="center"><em>Web UI</em></td>
+  </tr>
+</table>
 
 > [!CAUTION]
 > **Use at your own risk.** This is an unofficial implementation based on the reverse-engineered CN105 serial protocol. It is not developed, endorsed, or supported by Mitsubishi Electric or Apple. Connecting third-party hardware to your heat pump may void its warranty. Not all units support every feature, and behavior may vary by model. The authors and contributors provide this software as-is, with no warranty or guarantee of any kind. 
@@ -11,6 +19,18 @@ Controls Mitsubishi mini split heat pumps via the CN105 serial connector, compat
 ## Requirements
 
 ### Hardware
+
+
+<table>
+  <tr>
+    <td><img src="media/wiring.png" width=300></td>
+  </tr>
+  <tr>
+    <td align="center"><em>M5Stack NanoC6 with Grove to CN105 connector</em></td>
+  </tr>
+</table>
+
+
 
 | Component | Details |
 |-----------|---------|
@@ -27,22 +47,17 @@ Controls Mitsubishi mini split heat pumps via the CN105 serial connector, compat
 
 ### Tested Boards
 
-| Board | PlatformIO env | Build command |
-|-------|---------------|---------------|
-| M5Stack NanoC6 (ESP32-C6) | `nanoc6` | `pio run -e nanoc6` |
-| M5Stack AtomS3/AtomS3 Lite | `m5atoms3-lite` | `pio run -e m5atoms3-lite` |
-
-### Untested but Compatible Boards
-
-| Board | PlatformIO env | Build command |
-|-------|---------------|---------------|
-| Generic ESP32 DevKit v1 | `esp32-devkit` | `pio run -e esp32-devkit` |
-| ESP32-S3-DevKitC-1 | `esp32s3-devkit` | `pio run -e esp32s3-devkit` |
-| ESP32-C3 SuperMini / XIAO | `esp32c3-mini` | `pio run -e esp32c3-mini` |
+| Board | PlatformIO env | Build command | Tested |
+|-------|---------------|---------------|-------|
+| M5Stack NanoC6 (ESP32-C6) | `nanoc6` | `pio run -e nanoc6` | ✅ |
+| M5Stack AtomS3/AtomS3 Lite | `m5atoms3-lite` | `pio run -e m5atoms3-lite` | ✅ |
+| Generic ESP32 DevKit v1 | `esp32-devkit` | `pio run -e esp32-devkit` | ❌ |
+| ESP32-S3-DevKitC-1 | `esp32s3-devkit` | `pio run -e esp32s3-devkit` | ❌ |
+| ESP32-C3 SuperMini / XIAO | `esp32c3-mini` | `pio run -e esp32c3-mini` | ❌ |
 
 Board profiles define GPIO pins, LED, button, UART clock source, and debug output for each target. See `include/boards/` for details.
 
-#### Adding a Custom Board
+### Adding a Custom Board
 
 **Option A — Profile header** (recommended for reuse):
 
@@ -110,8 +125,6 @@ Any macros not set fall back to safe defaults (LED and button disabled, `UART_NU
 
 Connect the M5Stack NanoC6 to the CN105 connector on the indoor unit's control board using the Grove port:
 
-<img src="media/wiring.png" width=300>
-
 ```
 CN105 Connector          M5Stack NanoC6 (Grove)
 ┌──────────────┐         ┌──────────────────────┐
@@ -155,7 +168,6 @@ On first boot, the device creates a WiFi access point:
 4. A unique 8-digit HomeKit setup code is auto-generated on first boot
 
 <img src="media/recovery.png" width=300>
-<img src="media/homekit.png" width=255>
 
 ### 3. WiFi Recovery
 
@@ -168,6 +180,8 @@ If the device loses WiFi connectivity, it automatically enables a fallback AP (*
 | **Button reset** | Physical | 10-second long-press on the board button (e.g., GPIO9 on NanoC6) erases stored WiFi credentials. Only available on boards with a button. |
 
 ### 4. HomeKit Pairing
+
+<img src="media/homekit.png" width=300>
 
 Once connected to WiFi:
 
@@ -183,8 +197,6 @@ Once connected to WiFi:
 2. Tap **+** > **Add Accessory**
 3. Select **Mitsubishi Mini Split** (or tap **More options…** if it doesn't appear)
 4. Enter the setup code shown in the web UI (HomeKit panel > Setup Code)
-
-<img src="media/homekit.png" width=300>
 
 ## OTA Updates
 
@@ -207,9 +219,6 @@ curl --data-binary @.pio/build/nanoc6/firmware.bin \
 
 Access the web interface at `http://<device-ip>:8080`.
 
-<!-- TODO: Add Web UI screenshot or animated GIF — show the main controls page with mode selector, temperature, fan/vane card visible. A GIF cycling through mode changes or temperature adjustments would be ideal.
-![Web UI](docs/images/web-ui-full.png) -->
-
 The single-page interface provides:
 
 - **Mode** — Off/Heat/Cool/Auto/Dry/Fan mode selector (power integrated as Off mode)
@@ -224,9 +233,6 @@ The single-page interface provides:
 - **OTA** — firmware upload with integrity verification (see [OTA Updates](#ota-updates))
 
 ## HomeKit Details
-
-<!-- TODO: Add Apple Home screenshot — show the accessory detail view with thermostat, fan, and mode switches visible.
-![HomeKit accessory](docs/images/homekit-detail.png) -->
 
 Apple's HomeKit Thermostat service only supports Heat, Cool, Auto, and Off. This section covers the mappings and workarounds for features that don't fit natively.
 
