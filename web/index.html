@@ -812,9 +812,8 @@ input[type=range]::-moz-range-thumb{
     var eclBits=[1,0,3,2];
     var fmt=(eclBits[ecl]<<3)|mask;
     var rem=fmt;
-    for(var i=0;i<10;i++){rem<<=1;if(rem&(1<<14))rem^=0x537}
-    var bits=(fmt<<10)|rem;
-    bits^=0x5412;
+    for(var i=0;i<10;i++){rem<<=1;if(rem&(1<<10))rem^=0x537}
+    var bits=((fmt<<10)|(rem&0x3FF))^0x5412;
     var positions=[
       [[8,0],[8,1],[8,2],[8,3],[8,4],[8,5],[8,7],[8,8],[7,8],[5,8],[4,8],[3,8],[2,8],[1,8],[0,8]],
       [[sz-1,8],[sz-2,8],[sz-3,8],[sz-4,8],[sz-5,8],[sz-6,8],[sz-7,8],[8,sz-8],[8,sz-7],[8,sz-6],[8,sz-5],[8,sz-4],[8,sz-3],[8,sz-2],[8,sz-1]]

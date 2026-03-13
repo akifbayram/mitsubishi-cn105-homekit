@@ -83,7 +83,11 @@ void setup() {
         LOG_INFO("[MAIN] No WiFi credentials — activating recovery AP immediately");
         wifiRecovery.activateNow();
     });
-    homeSpan.setQRID(BRAND_QR_ID);
+    // QR Setup ID must be unique per device so iOS can distinguish multiple
+    // accessories when scanning QR codes (used in mDNS Setup Hash "sh" field)
+    static char qrID[5];
+    snprintf(qrID, sizeof(qrID), "%02X%02X", mac[4], mac[5]);
+    homeSpan.setQRID(qrID);
 
     // ── Setup code: auto-generate on first boot, persist in NVS ───────────
     if (strlen(settings.get().setupCode) == 0) {
@@ -99,9 +103,12 @@ void setup() {
     }
     homeSpan.setPairingCode(settings.get().setupCode);
     webUI.setSetupCode(settings.get().setupCode);
-    webUI.setQRID(BRAND_QR_ID);
+    webUI.setQRID(qrID);
 
-    homeSpan.begin(Category::Thermostats, BRAND_NAME, apName);
+    // Display name must be unique per device on the network (HomeSpan/mDNS requirement)
+    static char displayName[32];
+    snprintf(displayName, sizeof(displayName), BRAND_NAME " %02X%02X", mac[4], mac[5]);
+    homeSpan.begin(Category::Thermostats, displayName, apName);
 
     // ── Accessory 1: Bridge / Thermostat ────────────────────────────────────
     new SpanAccessory();
