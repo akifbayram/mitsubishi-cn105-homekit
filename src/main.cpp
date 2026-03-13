@@ -77,6 +77,10 @@ void setup() {
     homeSpan.setApSSID(apName);
     homeSpan.setApPassword(BRAND_AP_PASSWORD);
     LOG_INFO("[MAIN] AP SSID: %s", apName);
+#ifdef WIFI_SSID
+    homeSpan.setWifiCredentials(WIFI_SSID, WIFI_PASSWORD);
+    LOG_INFO("[MAIN] Using build-time WiFi credentials (SSID: %s)", WIFI_SSID);
+#endif
     homeSpan.enableAutoStartAP();
     // Override HomeSpan's blocking AP page — our recovery system handles it
     homeSpan.setApFunction([]() {

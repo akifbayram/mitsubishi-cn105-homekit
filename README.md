@@ -24,7 +24,7 @@ Controls Mitsubishi mini split heat pumps via the CN105 serial connector, compat
 
 | Component | Details |
 |-----------|---------|
-| **Microcontroller** | Any [supported board](#supported-boards) (default: M5Stack NanoC6) |
+| **Microcontroller** | Any [supported board](#boards) (default: M5Stack NanoC6) |
 | **Connector** | Grove (HY2.0-4P) to CN105 cable (NanoC6) |
 | **Heat pump** | Mitsubishi mini split with CN105 connector |
 
@@ -40,8 +40,8 @@ For a list of known-compatible models, see the [MitsubishiCN105ESPHome supported
 | Board | PlatformIO env | Build command | Tested |
 |-------|---------------|---------------|-------|
 | M5Stack NanoC6 (ESP32-C6) | `nanoc6` | `pio run -e nanoc6` | ✅ |
-| M5Stack AtomS3/AtomS3 Lite | `m5atoms3-lite` | `pio run -e m5atoms3-lite` | ✅ |
-| Generic ESP32 DevKit v1 | `esp32-devkit` | `pio run -e esp32-devkit` | ❌ |
+| M5Stack Atom S3 Lite | `m5atoms3-lite` | `pio run -e m5atoms3-lite` | ✅ |
+| Generic ESP32 DevKit | `esp32-devkit` | `pio run -e esp32-devkit` | ❌ |
 | ESP32-S3-DevKitC-1 | `esp32s3-devkit` | `pio run -e esp32s3-devkit` | ❌ |
 | ESP32-C3 SuperMini / XIAO | `esp32c3-mini` | `pio run -e esp32c3-mini` | ❌ |
 
@@ -95,6 +95,18 @@ On first boot, the device creates a WiFi access point:
 
 <img src="media/recovery.png" width=300>
 
+**Build-time WiFi (optional):** To skip the captive portal during development, add WiFi credentials as build flags in `platformio_override.ini` (gitignored):
+
+```ini
+[env:nanoc6]
+build_flags =
+    ${env:nanoc6.build_flags}
+    -DWIFI_SSID=\"MyNetwork\"
+    -DWIFI_PASSWORD=\"MyPassword\"
+```
+
+The device will connect automatically on boot. WiFi can still be changed later via the web UI.
+
 ### 3. WiFi Recovery
 
 If the device loses WiFi connectivity, it automatically enables a fallback AP (**Serin-XXXX**) after 5 minutes, running concurrently with station mode so it continues attempting to reconnect. Three recovery layers are available:
@@ -119,7 +131,7 @@ Once connected to WiFi:
 
 1. Open the **Home** app on your iPhone or iPad
 2. Tap **+** > **Add Accessory**
-3. Select **Mitsubishi Mini Split** (or tap **More options…** if it doesn't appear)
+3. Select **Mini Split XXXX** (or tap **More options…** if it doesn't appear)
 4. Enter the setup code shown in the web UI (HomeKit panel > Setup Code)
 
 ## OTA Updates

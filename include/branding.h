@@ -30,3 +30,11 @@
 #ifndef BRAND_THEME_COLOR
 #define BRAND_THEME_COLOR "#f48120"
 #endif
+
+// Build-time WiFi credentials (dev convenience, no defaults)
+// Define via -DWIFI_SSID=\"...\" -DWIFI_PASSWORD=\"...\" in platformio_override.ini
+#ifdef WIFI_SSID
+  #ifndef WIFI_PASSWORD
+    #error "WIFI_PASSWORD must be defined when WIFI_SSID is set"
+  #endif
+#endif
