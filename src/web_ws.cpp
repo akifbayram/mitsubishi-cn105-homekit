@@ -293,7 +293,10 @@ void WebUI::pushState() {
     const CN105State st = _ctrl->getEffectiveState();
     const DeviceSettings &cfg = settings.get();
 
-    char buf[800];
+    char escName[65];
+    jsonEscape(cfg.deviceName, escName, sizeof(escName));
+
+    char buf[896];
     int n = snprintf(buf, sizeof(buf),
         "{\"type\":\"state\""
         ",\"power\":%s"
@@ -311,7 +314,8 @@ void WebUI::pushState() {
         ",\"wifiUptime\":%lu"
         ",\"subMode\":\"%s\""
         ",\"stage\":\"%s\""
-        ",\"autoSubMode\":\"%s\"",
+        ",\"autoSubMode\":\"%s\""
+        ",\"deviceName\":\"%s\"",
         st.power ? "true" : "false",
         modeToWebStr(st.mode),
         st.targetTemp,
@@ -327,7 +331,8 @@ void WebUI::pushState() {
         (unsigned long)wifiRecovery.getWifiUptimeSeconds(),
         subModeToWebStr(st.subMode),
         stageToWebStr(st.stage),
-        autoSubModeToWebStr(st.autoSubMode)
+        autoSubModeToWebStr(st.autoSubMode),
+        escName
     );
 
     if (st.outsideTempValid) {
