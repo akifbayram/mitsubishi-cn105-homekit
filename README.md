@@ -20,17 +20,7 @@ Controls Mitsubishi mini split heat pumps via the CN105 serial connector, compat
 
 ### Hardware
 
-
-<table>
-  <tr>
-    <td><img src="media/wiring.png" width=300></td>
-  </tr>
-  <tr>
-    <td align="center"><em>M5Stack NanoC6 with Grove to CN105 connector</em></td>
-  </tr>
-</table>
-
-
+<img src="media/wiring.png" width=300>
 
 | Component | Details |
 |-----------|---------|
@@ -38,14 +28,14 @@ Controls Mitsubishi mini split heat pumps via the CN105 serial connector, compat
 | **Connector** | Grove (HY2.0-4P) to CN105 cable (NanoC6) |
 | **Heat pump** | Mitsubishi mini split with CN105 connector |
 
-Most Mitsubishi ductless and ducted units manufactured after 2010 have a CN105 connector on the indoor unit's control board. For a list of known-compatible models, see the [MitsubishiCN105ESPHome supported units list](https://github.com/echavet/MitsubishiCN105ESPHome?tab=readme-ov-file#supported-mitsubishi-climate-units). Not all units support every feature (e.g., outside temperature, half-degree precision, wide vane control) — behavior varies by model.
+For a list of known-compatible models, see the [MitsubishiCN105ESPHome supported units list](https://github.com/echavet/MitsubishiCN105ESPHome?tab=readme-ov-file#supported-mitsubishi-climate-units). Not all units support every feature (e.g., outside temperature, half-degree precision, wide vane control) — behavior varies by model.
 
 ### Software
 
 - [PlatformIO](https://platformio.org/) (build system)
 - Python 3 (for HTML embedding script)
 
-### Tested Boards
+### Boards
 
 | Board | PlatformIO env | Build command | Tested |
 |-------|---------------|---------------|-------|
@@ -55,11 +45,7 @@ Most Mitsubishi ductless and ducted units manufactured after 2010 have a CN105 c
 | ESP32-S3-DevKitC-1 | `esp32s3-devkit` | `pio run -e esp32s3-devkit` | ❌ |
 | ESP32-C3 SuperMini / XIAO | `esp32c3-mini` | `pio run -e esp32c3-mini` | ❌ |
 
-Board profiles define GPIO pins, LED, button, UART clock source, and debug output for each target. See `include/boards/` for details.
-
-### Adding a Custom Board
-
-Create a board profile header or use inline build flag overrides. See the [Custom Board Guide](docs/custom-boards.md) for full instructions.
+Board profiles define GPIO pins, LED, button, UART clock source, and debug output for each target. See `include/boards/` for details. To add support for a new board, create a board profile header or use inline build flag overrides. See the [Custom Board Guide](docs/custom-boards.md) for full instructions.
 
 ## Wiring
 
@@ -67,8 +53,8 @@ Connect the M5Stack NanoC6 to the CN105 connector on the indoor unit's control b
 
 ```
 CN105 Connector          M5Stack NanoC6 (Grove)
-┌──────────────┐         ┌──────────────────────┐
-│ Pin 1 — 12V  │         │                      │
+┌──────────────┐
+│ Pin 1 — 12V  │         ┌──────────────────────┐
 │ Pin 2 — GND ─┼─────────┼─ GND (Black)         │
 │ Pin 3 — 5V  ─┼─────────┼─ 5V  (Red)           │
 │ Pin 4 — TX  ─┼─────────┼─ GPIO2 / RX (White)  │
@@ -76,7 +62,7 @@ CN105 Connector          M5Stack NanoC6 (Grove)
 └──────────────┘         └──────────────────────┘
 ```
 
-> **Note:** The CN105 connector is typically located on the right side of ductless indoor unit's control board behind the front panel. Power is provided by the unit through pins 2 and 3 — no separate power supply is needed. If your board doesn't have a Grove port, you can connect directly to the appropriate GPIO pins for RX/TX, GND, and 5V (see [board profiles](#supported-boards)).
+The CN105 connector is typically located on the right side of ductless indoor unit's control board behind the front panel. Power is provided by the unit through pins 2 and 3 — no separate power supply is needed. If your board doesn't have a Grove port, you can connect directly to the appropriate GPIO pins for RX/TX, GND, and 5V (see [board profiles](#supported-boards)).
 
 ## Setup
 
@@ -127,9 +113,7 @@ Once connected to WiFi:
 
 **Option A — Scan QR Code (recommended):**
 
-1. Open the **Home** app on your iPhone or iPad
-2. Tap **+** > **Add Accessory**
-3. Scan the QR code shown in the web UI at `http://<device-ip>:8080` (HomeKit panel)
+1. Scan the QR code shown in the web UI at `http://<device-ip>:8080` (HomeKit panel)
 
 **Option B — Manual setup code:**
 
