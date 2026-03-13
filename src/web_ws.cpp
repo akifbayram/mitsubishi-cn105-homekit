@@ -216,6 +216,24 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
             changed = true;
         }
 
+        char nameVal[32];
+        if (jsonGetString(msg, "deviceName", nameVal, sizeof(nameVal))) {
+            // Trim leading whitespace
+            char *start = nameVal;
+            while (*start == ' ') start++;
+            // Trim trailing whitespace
+            char *end = start + strlen(start) - 1;
+            while (end > start && *end == ' ') *end-- = '\0';
+            // Empty after trim → reset to default
+            if (strlen(start) == 0) {
+                start = (char *)BRAND_NAME;
+            }
+            strncpy(settings.get().deviceName, start, sizeof(settings.get().deviceName) - 1);
+            settings.get().deviceName[sizeof(settings.get().deviceName) - 1] = '\0';
+            LOG_INFO("[WebUI] Config deviceName=%s", settings.get().deviceName);
+            changed = true;
+        }
+
         if (changed) {
             settings.save();
             // Push updated state to reflect new config values
