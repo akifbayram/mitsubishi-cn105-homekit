@@ -512,6 +512,10 @@ input[type=range]::-moz-range-thumb{
     </div>
     <div class="collapse-body" id="settingsBody">
       <div class="setting-row">
+        <label>Device Name</label>
+        <input type="text" id="cfgDeviceName" maxlength="31" placeholder="{{BRAND_NAME}}" style="flex:1">
+      </div>
+      <div class="setting-row">
         <label>Temp Unit</label>
         <div class="seg" id="unitGrp" style="flex:1">
           <div class="seg-bg"></div>
@@ -1206,8 +1210,10 @@ input[type=range]::-moz-range-thumb{
   };
 
   window.saveConfig=function(){
+    var name=$('cfgDeviceName').value.replace(/["\\\n\r]/g,'').trim();
     send({
       cmd:'config',
+      deviceName:name,
       logLevel:parseInt($('cfgLogLevel').value),
       pollInterval:parseInt($('cfgPoll').value),
       vaneConfig:parseInt($('cfgVanes').value)
