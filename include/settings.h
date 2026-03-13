@@ -2,11 +2,12 @@
 #include <Arduino.h>
 #include <Preferences.h>
 #include "logging.h"
+#include "branding.h"
 
 struct DeviceSettings {
     LogLevel logLevel    = LOG_LEVEL_INFO;
     uint32_t pollMs      = 2000;
-    char     deviceName[32] = "Mitsubishi Mini Split";
+    char     deviceName[32] = BRAND_NAME;
     float    heatingThreshold = 20.0f;  // AUTO mode heating target
     float    coolingThreshold = 25.0f;  // AUTO mode cooling target
     bool     useFahrenheit = false;     // Web UI display unit

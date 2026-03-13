@@ -11,7 +11,7 @@ void SettingsStore::begin() {
 
     size_t nameLen = _prefs.getString("deviceName", _settings.deviceName, sizeof(_settings.deviceName));
     if (nameLen == 0) {
-        strncpy(_settings.deviceName, "Mitsubishi Mini Split", sizeof(_settings.deviceName) - 1);
+        strncpy(_settings.deviceName, BRAND_NAME, sizeof(_settings.deviceName) - 1);
         _settings.deviceName[sizeof(_settings.deviceName) - 1] = '\0';
     }
 
