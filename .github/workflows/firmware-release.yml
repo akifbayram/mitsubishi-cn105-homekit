@@ -1,0 +1,203 @@
+# Firmware Release CI/CD
+#
+# Builds firmware for all board targets and deploys to the serin-cn105
+# distribution repo for ESP Web Tools flashing.
+#
+# Required secret:
+#   SERIN_CN105_PAT — GitHub Personal Access Token with `repo` scope
+#                     for Serin-Labs/serin-cn105
+
+name: Firmware Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - env: nanoc6
+            chip: ESP32-C6
+          - env: m5atoms3-lite
+            chip: ESP32-S3
+          - env: esp32-devkit
+            chip: ESP32
+          - env: esp32s3-devkit
+            chip: ESP32-S3
+          - env: esp32c3-mini
+            chip: ESP32-C3
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      - name: Build firmware
+        run: pio run -e ${{ matrix.env }}
+
+      - name: Collect artifacts
+        env:
+          BUILD_ENV: ${{ matrix.env }}
+        run: |
+          mkdir -p artifact/"${BUILD_ENV}"
+          cp .pio/build/"${BUILD_ENV}"/bootloader.bin artifact/"${BUILD_ENV}"/
+          cp .pio/build/"${BUILD_ENV}"/partitions.bin artifact/"${BUILD_ENV}"/
+          cp .pio/build/"${BUILD_ENV}"/firmware.bin artifact/"${BUILD_ENV}"/
+          cp ~/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin artifact/"${BUILD_ENV}"/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ matrix.env }}
+          path: artifact/${{ matrix.env }}/
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all firmware artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: firmware-*
+          path: artifacts/
+
+      - name: Extract version from tag
+        id: version
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [[ "${REF_TYPE}" == "tag" ]]; then
+            VERSION="${REF_NAME}"
+          else
+            VERSION="v0.0.0-dev"
+          fi
+          echo "tag=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "number=${VERSION#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout serin-cn105
+        uses: actions/checkout@v4
+        with:
+          repository: Serin-Labs/serin-cn105
+          token: ${{ secrets.SERIN_CN105_PAT }}
+          path: serin-cn105
+
+      - name: Deploy firmware files
+        run: |
+          cd serin-cn105
+
+          # Remove old firmware directories
+          rm -rf firmware/homekit/nanoc6 \
+                 firmware/homekit/m5atoms3-lite \
+                 firmware/homekit/esp32-devkit \
+                 firmware/homekit/esp32s3-devkit \
+                 firmware/homekit/esp32c3-mini
+
+          # Remove legacy single merged bins if they exist
+          rm -f firmware/homekit/*.bin
+
+          # Copy new firmware files
+          for env in nanoc6 m5atoms3-lite esp32-devkit esp32s3-devkit esp32c3-mini; do
+            mkdir -p firmware/homekit/${env}
+            cp ../artifacts/firmware-${env}/* firmware/homekit/${env}/
+          done
+
+      - name: Generate manifest.json
+        env:
+          VERSION: ${{ steps.version.outputs.number }}
+        run: |
+          cat > serin-cn105/firmware/homekit/manifest.json << EOF
+          {
+            "name": "Mitsubishi HomeKit Controller",
+            "version": "${VERSION}",
+            "new_install_prompt_erase": true,
+            "builds": [
+              {
+                "chipFamily": "ESP32-C6",
+                "parts": [
+                  { "path": "nanoc6/bootloader.bin", "offset": 0 },
+                  { "path": "nanoc6/partitions.bin", "offset": 32768 },
+                  { "path": "nanoc6/boot_app0.bin", "offset": 57344 },
+                  { "path": "nanoc6/firmware.bin", "offset": 65536 }
+                ]
+              },
+              {
+                "chipFamily": "ESP32-S3",
+                "parts": [
+                  { "path": "m5atoms3-lite/bootloader.bin", "offset": 0 },
+                  { "path": "m5atoms3-lite/partitions.bin", "offset": 32768 },
+                  { "path": "m5atoms3-lite/boot_app0.bin", "offset": 57344 },
+                  { "path": "m5atoms3-lite/firmware.bin", "offset": 65536 }
+                ]
+              },
+              {
+                "chipFamily": "ESP32",
+                "parts": [
+                  { "path": "esp32-devkit/bootloader.bin", "offset": 4096 },
+                  { "path": "esp32-devkit/partitions.bin", "offset": 32768 },
+                  { "path": "esp32-devkit/boot_app0.bin", "offset": 57344 },
+                  { "path": "esp32-devkit/firmware.bin", "offset": 65536 }
+                ]
+              },
+              {
+                "chipFamily": "ESP32-C3",
+                "parts": [
+                  { "path": "esp32c3-mini/bootloader.bin", "offset": 0 },
+                  { "path": "esp32c3-mini/partitions.bin", "offset": 32768 },
+                  { "path": "esp32c3-mini/boot_app0.bin", "offset": 57344 },
+                  { "path": "esp32c3-mini/firmware.bin", "offset": 65536 }
+                ]
+              }
+            ]
+          }
+          EOF
+
+      - name: Commit and push to serin-cn105
+        env:
+          VERSION: ${{ steps.version.outputs.number }}
+        run: |
+          cd serin-cn105
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add firmware/homekit/
+          git commit -m "chore: update homekit firmware to ${VERSION}"
+          git push
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref_type == 'tag'
+    permissions:
+      contents: write
+    steps:
+      - name: Download all firmware artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: firmware-*
+          path: artifacts/
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p release
+          for env in nanoc6 m5atoms3-lite esp32-devkit esp32s3-devkit esp32c3-mini; do
+            cp artifacts/firmware-${env}/firmware.bin release/firmware-${env}.bin
+          done
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: release/firmware-*.bin
