@@ -115,6 +115,14 @@ void CN105Controller::loop() {
         return;
     }
 
+    // ── Send pending remote temperature (same deferred pattern) ──────────
+    if (_pendingRemoteTemp && !_cycleRunning) {
+        sendRemoteTempPacket();
+        _pendingRemoteTemp = false;
+        _lastCycleEnd = now + CN105_DEFER_DELAY;
+        return;
+    }
+
     // ── Cycle-based polling ─────────────────────────────────────────────────
     if (_cycleRunning) {
         if (now - _cycleStartMs > (2 * _updateInterval) + 1000) {
@@ -253,6 +261,45 @@ void CN105Controller::sendPendingChanges() {
     _setFlags1 = 0;
     _setFlags2 = 0;
     _lastCycleEnd = millis() + CN105_DEFER_DELAY;
+}
+
+void CN105Controller::sendRemoteTemperature(float tempC) {
+    _pendingRemoteTemp = true;
+    _pendingRemoteTempC = tempC;
+    LOG_INFO("[CN105] CMD: sendRemoteTemperature(%.1f°C)", tempC);
+}
+
+void CN105Controller::sendRemoteTempPacket() {
+    uint8_t pkt[22];
+    memset(pkt, 0, sizeof(pkt));
+    buildHeader(pkt, CN105_PKT_SET, CN105_DATA_LEN);
+
+    // Verified against SwiCago/HeatPump setRemoteTemperature():
+    // pkt[0-4] = header (FC 41 01 30 10)
+    // pkt[5]   = 0x07 = remote temp command
+    // pkt[6]   = 0x01 enable / 0x00 disable
+    // pkt[7]   = legacy encoding: 3 + ((temp - 10) * 2)
+    // pkt[8]   = enhanced encoding: temp * 2 + 128 (or 0x80 when disabled)
+    pkt[5] = 0x07;
+
+    float tempC = _pendingRemoteTempC;
+    if (tempC > 0.0f) {
+        float rounded = round(tempC * 2.0f) / 2.0f;
+        pkt[6] = 0x01;
+        pkt[7] = (uint8_t)(3 + ((rounded - 10.0f) * 2.0f));
+        pkt[8] = (uint8_t)(rounded * 2.0f + 128.0f);
+    } else {
+        pkt[6] = 0x00;
+        pkt[8] = 0x80;
+    }
+
+    pkt[21] = calcChecksum(pkt, 21);
+    if (currentLogLevel >= LOG_LEVEL_DEBUG) {
+        char hex[128]; logHex(hex, sizeof(hex), pkt, 22);
+        LOG_DEBUG("[CN105] TX REMOTE_TEMP (%d bytes): %s", 22, hex);
+    }
+    _uart->write(pkt, 22);
+    LOG_INFO("[CN105] Remote temp %s (%.1f°C)", tempC > 0.0f ? "SET" : "REVERTED", tempC);
 }
 
 // ════════════════════════════════════════════════════════════════════════════

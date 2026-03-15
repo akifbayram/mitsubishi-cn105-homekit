@@ -198,6 +198,11 @@ public:
     /// Send all pending changes in a single set packet
     void sendPendingChanges();
 
+    /// Send external temperature to heat pump (0x07 packet).
+    /// tempC > 0: override internal thermistor. tempC == 0: revert to internal.
+    /// Uses deferred-send pattern — actual UART write happens between poll cycles.
+    void sendRemoteTemperature(float tempC);
+
     static uint8_t calcChecksum(const uint8_t *pkt, uint8_t len);
     static void    buildHeader(uint8_t *buf, uint8_t pktType, uint8_t dataLen);
 
@@ -254,6 +259,10 @@ private:
     uint8_t  _errorPollFailures = 0;   // consecutive failures
     bool     _errorPollDisabled = false; // true after 3 failures
 
+    // ── Pending remote temperature ──────────────────────────────────────
+    bool     _pendingRemoteTemp  = false;
+    float    _pendingRemoteTempC = 0.0f;
+
     // ── RX buffer ───────────────────────────────────────────────────────────
     uint8_t  _rxBuf[32];
     uint8_t  _rxLen           = 0;
@@ -266,4 +275,5 @@ private:
     void processPacket(const uint8_t *pkt, uint8_t len);
     void handleInfoResponse(const uint8_t *data, uint8_t dataLen);
     void readSerial();
+    void sendRemoteTempPacket();
 };
