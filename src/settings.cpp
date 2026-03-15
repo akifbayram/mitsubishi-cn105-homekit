@@ -21,6 +21,19 @@ void SettingsStore::begin() {
     _prefs.getString("setupCode", _settings.setupCode, sizeof(_settings.setupCode));
     _settings.wifiChangePending = _prefs.getBool("wifiChgPend", false);
     _settings.vaneConfig = _prefs.getUChar("vaneConfig", 2);
+#ifdef BLE_SENSOR_TYPE
+    size_t bleAddrLen = _prefs.getString("bleAddr", _settings.bleSensorAddr, sizeof(_settings.bleSensorAddr));
+    if (bleAddrLen == 0) {
+#ifdef BLE_SENSOR_ADDR
+        strncpy(_settings.bleSensorAddr, BLE_SENSOR_ADDR, sizeof(_settings.bleSensorAddr) - 1);
+        _settings.bleSensorAddr[sizeof(_settings.bleSensorAddr) - 1] = '\0';
+#endif
+    }
+    _settings.bleFeedEnabled = _prefs.getBool("bleFeed", true);
+    LOG_INFO("[Settings] BLE: addr=%s feed=%s",
+             strlen(_settings.bleSensorAddr) > 0 ? _settings.bleSensorAddr : "(none)",
+             _settings.bleFeedEnabled ? "ON" : "OFF");
+#endif
 
     LOG_INFO("[Settings] Loaded: logLevel=%d poll=%lums name=%s unit=%s",
              _settings.logLevel, _settings.pollMs, _settings.deviceName,
@@ -37,6 +50,10 @@ void SettingsStore::save() {
     _prefs.putString("setupCode", _settings.setupCode);
     _prefs.putBool("wifiChgPend", _settings.wifiChangePending);
     _prefs.putUChar("vaneConfig", _settings.vaneConfig);
+#ifdef BLE_SENSOR_TYPE
+    _prefs.putString("bleAddr", _settings.bleSensorAddr);
+    _prefs.putBool("bleFeed", _settings.bleFeedEnabled);
+#endif
     LOG_INFO("[Settings] Saved: logLevel=%d poll=%lums name=%s unit=%s",
              _settings.logLevel, _settings.pollMs, _settings.deviceName,
              _settings.useFahrenheit ? "F" : "C");
