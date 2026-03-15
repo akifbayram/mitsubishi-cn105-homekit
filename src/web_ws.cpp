@@ -4,6 +4,9 @@
 #include "wifi_recovery.h"
 #include <WiFi.h>
 #include "HomeSpan.h"
+#ifdef BLE_SENSOR_TYPE
+#include "ble_sensor.h"
+#endif
 
 // ══════════════════════════════════════════════════════════════════════════════
 // WebSocket handler: GET /ws
@@ -234,6 +237,20 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
             changed = true;
         }
 
+#ifdef BLE_SENSOR_TYPE
+        char bleAddrVal[18];
+        if (jsonGetString(msg, "bleAddr", bleAddrVal, sizeof(bleAddrVal))) {
+            BleSensor::setAddr(bleAddrVal);
+            LOG_INFO("[WebUI] Config bleAddr=%s", bleAddrVal);
+        }
+
+        bool bleFeedVal;
+        if (jsonGetBool(msg, "bleFeed", &bleFeedVal)) {
+            BleSensor::setEnabled(bleFeedVal);
+            LOG_INFO("[WebUI] Config bleFeed=%s", bleFeedVal ? "ON" : "OFF");
+        }
+#endif
+
         if (changed) {
             settings.save();
             // Push updated state to reflect new config values
@@ -314,7 +331,7 @@ void WebUI::pushState() {
     char escName[65];
     jsonEscape(cfg.deviceName, escName, sizeof(escName));
 
-    char buf[896];
+    char buf[1152];
     int n = snprintf(buf, sizeof(buf),
         "{\"type\":\"state\""
         ",\"power\":%s"
@@ -396,8 +413,7 @@ void WebUI::pushState() {
         ",\"hkControllers\":%d"
         ",\"hkStatus\":\"%s\""
         ",\"hkSetupCode\":\"%s\""
-        ",\"hkSetupURI\":\"%s\""
-        "}",
+        ",\"hkSetupURI\":\"%s\"",
         (int)cfg.logLevel,
         (unsigned long)cfg.pollMs,
         cfg.useFahrenheit ? "F" : "C",
@@ -408,6 +424,47 @@ void WebUI::pushState() {
         _fmtCode,
         _setupURI
     );
+
+#ifdef BLE_SENSOR_TYPE
+    {
+        float bleT = BleSensor::temperature();
+        float bleH = BleSensor::humidity();
+        int8_t bleB = BleSensor::battery();
+        uint32_t staleMs = BleSensor::lastUpdateAge();
+        if (staleMs == UINT32_MAX) staleMs = 0;
+
+        char bleTStr[8] = "null", bleHStr[8] = "null";
+        if (!isnan(bleT)) snprintf(bleTStr, sizeof(bleTStr), "%.1f", bleT);
+        if (!isnan(bleH)) snprintf(bleHStr, sizeof(bleHStr), "%.0f", bleH);
+
+        n += snprintf(buf + n, sizeof(buf) - n,
+            ",\"bleTemp\":%s"
+            ",\"bleHumidity\":%s"
+            ",\"bleBattery\":%d"
+            ",\"bleRssi\":%d"
+            ",\"bleActive\":%s"
+            ",\"bleStale\":%s"
+            ",\"bleStaleMs\":%lu"
+            ",\"bleAddr\":\"%s\""
+            ",\"bleFeed\":%s",
+            bleTStr,
+            bleHStr,
+            (int)bleB,
+            BleSensor::rssi(),
+            BleSensor::isActive() ? "true" : "false",
+            BleSensor::isStale() ? "true" : "false",
+            (unsigned long)staleMs,
+            BleSensor::getAddr(),
+            BleSensor::isEnabled() ? "true" : "false"
+        );
+    }
+#endif
+
+    n += snprintf(buf + n, sizeof(buf) - n, "}");
+
+    if (n >= (int)sizeof(buf)) {
+        LOG_WARN("[WebUI] pushState buffer truncated (%d >= %zu)", n, sizeof(buf));
+    }
 
     sendWsText(_wsClientFd, buf);
 }
