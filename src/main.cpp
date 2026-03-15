@@ -12,6 +12,9 @@
 #include "status_led.h"
 #include "branding.h"
 #include "board_profile.h"
+#ifdef BLE_SENSOR_TYPE
+#include "ble_sensor.h"
+#endif
 
 // ── Global instances ─────────────────────────────────────────────────────────
 #if USE_HWCDC_DEBUG
@@ -153,6 +156,9 @@ void loop() {
         webUI.begin(&cn105);
         webUIStarted = true;
         webUIStartTime = millis();
+#ifdef BLE_SENSOR_TYPE
+        BleSensor::begin();
+#endif
     }
     if (webUIStarted) {
         static bool lastAPActive = false;
@@ -162,6 +168,9 @@ void loop() {
             lastAPActive = apNow;
         }
         webUI.loop();
+#ifdef BLE_SENSOR_TYPE
+        BleSensor::loop(cn105);
+#endif
     }
 
 #if PIN_LED_DATA >= 0
