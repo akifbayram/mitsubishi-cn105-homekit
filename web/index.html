@@ -416,6 +416,52 @@ input[type=range]::-moz-range-thumb{
     </div>
   </div>
 
+  <!-- Remote Sensor (hidden when BLE not compiled in) -->
+  <div class="card" style="padding:0;display:none" id="bleCard">
+    <div class="collapse-header" onclick="togglePanel(this)">
+      <span class="collapse-title">Remote Sensor</span>
+      <span class="status-dot idle" id="bleDot"></span>
+      <span class="collapse-chevron">&#8250;</span>
+    </div>
+    <div class="collapse-body" id="bleBody">
+      <div class="status-grid">
+        <div class="status-item">
+          <span class="status-label">Temp</span>
+          <span id="bleTemp">--</span>
+        </div>
+        <div class="status-item" id="bleHumRow">
+          <span class="status-label">Humidity</span>
+          <span id="bleHum">--</span>
+        </div>
+        <div class="status-item" id="bleBattRow">
+          <span class="status-label">Battery</span>
+          <span id="bleBatt">--</span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">RSSI</span>
+          <span id="bleRssi">--</span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">Last Update</span>
+          <span id="bleAge">--</span>
+        </div>
+      </div>
+      <div style="padding:12px 0 0">
+        <label class="status-label" style="display:block;margin-bottom:6px">Sensor MAC</label>
+        <div style="display:flex;gap:8px">
+          <input type="text" id="bleMacInput" placeholder="AA:BB:CC:DD:EE:FF"
+                 maxlength="17" spellcheck="false" autocomplete="off"
+                 style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 10px;color:var(--text);font-family:monospace;font-size:13px">
+          <button class="save-btn" style="margin:0;white-space:nowrap" onclick="saveBleAddr()">Save</button>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:10px">
+          <label class="status-label" style="margin:0">Feed to Heat Pump</label>
+          <button id="bleFeedBtn" class="save-btn" style="margin:0;min-width:50px;font-size:12px" onclick="toggleBleFeed()">ON</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- HomeKit -->
   <div class="card" style="padding:0">
     <div class="collapse-header" onclick="togglePanel(this)">
@@ -1000,6 +1046,29 @@ input[type=range]::-moz-range-thumb{
       $('errorRow').style.display='none';
     }
 
+    // BLE Remote Sensor
+    if(s.bleTemp!==undefined){
+      $('bleCard').style.display='';
+      var bleDot=$('bleDot');
+      if(s.bleActive){bleDot.className='status-dot active'}
+      else if(s.bleStale){bleDot.className='status-dot error'}
+      else{bleDot.className='status-dot idle'}
+      $('bleTemp').textContent=s.bleTemp!=null?fmtReadingTemp(s.bleTemp)+unitStr():'--';
+      if(s.bleHumidity!=null&&s.bleHumidity>=0){$('bleHumRow').style.display='';$('bleHum').textContent=s.bleHumidity+'%'}
+      else{$('bleHumRow').style.display='none'}
+      if(s.bleBattery>=0){$('bleBattRow').style.display='';$('bleBatt').textContent=s.bleBattery+'%'}
+      else{$('bleBattRow').style.display='none'}
+      $('bleRssi').textContent=s.bleRssi?s.bleRssi+' dBm':'--';
+      if(s.bleStaleMs>0&&s.bleStaleMs<4294967295){
+        var sec=Math.floor(s.bleStaleMs/1000);
+        $('bleAge').textContent=sec<60?sec+'s':Math.floor(sec/60)+'m '+sec%60+'s';
+      }else{$('bleAge').textContent=s.bleActive?'now':'--'}
+      if(!$('bleMacInput').matches(':focus')){$('bleMacInput').value=s.bleAddr||''}
+      var feedBtn=$('bleFeedBtn');
+      feedBtn.textContent=s.bleFeed?'ON':'OFF';
+      feedBtn.style.background=s.bleFeed?'var(--green)':'var(--surface3)';
+    }
+
     cn105Dot.className='status-dot '+(s.connected?'running':'idle');
 
     rssiVal.textContent=(s.rssi!=null?s.rssi:'--')+' dBm';
@@ -1092,6 +1161,16 @@ input[type=range]::-moz-range-thumb{
     $('cfgPass').value='';
     $('wifiSaveBtn').disabled=true;
     $('wifiBanner').style.display='block';
+  }
+
+  function saveBleAddr(){
+    var v=$('bleMacInput').value.trim().toUpperCase();
+    if(v&&!/^([0-9A-F]{2}:){5}[0-9A-F]{2}$/.test(v)){alert('Invalid MAC format');return}
+    ws.send(JSON.stringify({cmd:'config',bleAddr:v}));
+  }
+  function toggleBleFeed(){
+    var cur=$('bleFeedBtn').textContent==='ON';
+    ws.send(JSON.stringify({cmd:'config',bleFeed:!cur}));
   }
 
   // ── Controls ───────────────────────────────────────────────────────────────
