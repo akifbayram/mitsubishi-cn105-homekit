@@ -383,10 +383,12 @@ input[type=range]::-moz-range-thumb{
   <div class="card" style="padding:0">
     <div class="collapse-header" onclick="togglePanel(this)">
       <span class="collapse-title">CN105</span>
+      <span id="cn105StatusLabel" style="font-size:12px;color:var(--text2);font-weight:400"></span>
       <span class="status-dot idle" id="cn105Dot"></span>
       <span class="collapse-chevron">&#8250;</span>
     </div>
     <div class="collapse-body" id="statusBody">
+      <div id="cn105Banner" class="ble-banner" style="display:none"></div>
       <div class="status-grid">
         <div class="status-item">
           <div class="status-dot idle" id="compDot"></div>
@@ -476,10 +478,12 @@ input[type=range]::-moz-range-thumb{
   <div class="card" style="padding:0">
     <div class="collapse-header" onclick="togglePanel(this)">
       <span class="collapse-title">HomeKit</span>
+      <span id="hkStatusLabel" style="font-size:12px;color:var(--text2);font-weight:400"></span>
       <span class="status-dot idle" id="hkDot"></span>
       <span class="collapse-chevron">&#8250;</span>
     </div>
     <div class="collapse-body" id="homekitBody">
+      <div id="hkBanner" class="ble-banner" style="display:none"></div>
       <div class="hk-label" id="hkLabel">
         <div class="hk-label-top">
           <svg class="hk-icon" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -1025,7 +1029,7 @@ input[type=range]::-moz-range-thumb{
     roomTemp.textContent=fmtReadingTemp(s.room);
 
     if(s.operating){
-      compDot.className='status-dot running';
+      compDot.className='status-dot active';
       compText.textContent='Compressor On';
     }else{
       compDot.className='status-dot idle';
@@ -1127,7 +1131,23 @@ input[type=range]::-moz-range-thumb{
       feedBtn.style.background=s.bleFeed?'var(--green)':'var(--surface3)';
     }
 
-    cn105Dot.className='status-dot '+(s.connected?'running':'idle');
+    // CN105 header: glowing dot + status label
+    var cn105Lbl=$('cn105StatusLabel');
+    var cn105Bnr=$('cn105Banner');
+    if(s.errorCode!=null){
+      cn105Dot.className='status-dot error';
+      cn105Lbl.textContent='Error';cn105Lbl.style.color='var(--red)';
+      cn105Bnr.className='ble-banner warn';cn105Bnr.textContent='Error code E'+s.errorCode.toString(16).toUpperCase()+' reported by heat pump';cn105Bnr.style.display='flex';
+    }else if(s.connected){
+      cn105Dot.className='status-dot active';
+      cn105Lbl.textContent='Connected';cn105Lbl.style.color='var(--green)';
+      cn105Bnr.style.display='none';
+    }else{
+      cn105Dot.className='status-dot idle';
+      cn105Lbl.textContent='Disconnected';cn105Lbl.style.color='var(--text3)';
+      cn105Bnr.className='ble-banner warn';cn105Bnr.textContent='No communication with heat pump';cn105Bnr.style.display='flex';
+    }
+    $('statusBody').classList.toggle('ble-dimmed',!s.connected);
 
     rssiVal.textContent=(s.rssi!=null?s.rssi:'--')+' dBm';
     wifiUptimeVal.textContent=s.wifiUptime?fmtWifiUptime(s.wifiUptime):'--:--:--';
@@ -1159,9 +1179,24 @@ input[type=range]::-moz-range-thumb{
     }
 
     if(s.hkPaired!=null){
-      var hkCls='status-dot '+(s.hkPaired?'running':'idle');
-      hkDot.className=hkCls;
-      hkDotBody.className=hkCls;
+      var hkLbl=$('hkStatusLabel');
+      var hkBnr=$('hkBanner');
+      if(s.hkPaired){
+        var nc=s.hkControllers||0;
+        hkDot.className='status-dot active';
+        hkDotBody.className='status-dot active';
+        hkLbl.textContent='Paired';
+        hkLbl.style.color='var(--green)';
+        hkBnr.style.display='none';
+      }else{
+        hkDot.className='status-dot idle';
+        hkDotBody.className='status-dot idle';
+        hkLbl.textContent='Not Paired';
+        hkLbl.style.color='var(--text3)';
+        hkBnr.className='ble-banner info';
+        hkBnr.textContent='Scan the QR code or enter the setup code in the Home app to pair';
+        hkBnr.style.display='flex';
+      }
       hkStatusText.textContent=s.hkStatus||'--';
       hkControllersEl.textContent=s.hkControllers!=null?s.hkControllers+' paired':'--';
       hkSetupCodeEl.textContent=s.hkSetupCode||'--';
