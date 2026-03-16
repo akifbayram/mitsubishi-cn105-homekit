@@ -249,6 +249,15 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
             BleSensor::setEnabled(bleFeedVal);
             LOG_INFO("[WebUI] Config bleFeed=%s", bleFeedVal ? "ON" : "OFF");
         }
+
+        int bleTimeoutVal;
+        if (jsonGetInt(msg, "bleTimeout", &bleTimeoutVal)) {
+            if (bleTimeoutVal >= 30 && bleTimeoutVal <= 600) {
+                settings.get().bleStaleTimeoutS = (uint16_t)bleTimeoutVal;
+                settings.save();
+                LOG_INFO("[WebUI] Config bleTimeout=%ds", bleTimeoutVal);
+            }
+        }
 #endif
 
         if (changed) {
@@ -446,7 +455,8 @@ void WebUI::pushState() {
             ",\"bleStale\":%s"
             ",\"bleStaleMs\":%lu"
             ",\"bleAddr\":\"%s\""
-            ",\"bleFeed\":%s",
+            ",\"bleFeed\":%s"
+            ",\"bleTimeout\":%u",
             bleTStr,
             bleHStr,
             (int)bleB,
@@ -455,7 +465,8 @@ void WebUI::pushState() {
             BleSensor::isStale() ? "true" : "false",
             (unsigned long)staleMs,
             BleSensor::getAddr(),
-            BleSensor::isEnabled() ? "true" : "false"
+            BleSensor::isEnabled() ? "true" : "false",
+            (unsigned int)settings.get().bleStaleTimeoutS
         );
     }
 #endif

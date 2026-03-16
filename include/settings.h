@@ -17,6 +17,7 @@ struct DeviceSettings {
 #ifdef BLE_SENSOR_TYPE
     char     bleSensorAddr[18] = "";   // "AA:BB:CC:DD:EE:FF" or empty
     bool     bleFeedEnabled = true;    // Feed BLE temp to heat pump
+    uint16_t bleStaleTimeoutS = 90;    // Seconds before sensor marked stale (30–600)
 #endif
 };
 

@@ -470,6 +470,13 @@ input[type=range]::-moz-range-thumb{
           <label class="status-label" style="margin:0">Feed to Heat Pump</label>
           <button id="bleFeedBtn" class="save-btn" style="margin:0;min-width:50px;font-size:12px" onclick="toggleBleFeed()">ON</button>
         </div>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:10px">
+          <label class="status-label" style="margin:0">Stale Timeout</label>
+          <input type="number" id="bleTimeoutInput" min="30" max="600" step="10"
+                 style="width:70px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 8px;color:var(--text);font-size:13px;text-align:center">
+          <span style="font-size:12px;color:var(--text3)">sec</span>
+          <button class="save-btn" style="margin:0;font-size:12px" onclick="saveBleTimeout()">Save</button>
+        </div>
       </div>
     </div>
   </div>
@@ -1129,6 +1136,9 @@ input[type=range]::-moz-range-thumb{
       var feedBtn=$('bleFeedBtn');
       feedBtn.textContent=s.bleFeed?'ON':'OFF';
       feedBtn.style.background=s.bleFeed?'var(--green)':'var(--surface3)';
+
+      // Stale timeout (preserve user input while editing)
+      if(!$('bleTimeoutInput').matches(':focus')){$('bleTimeoutInput').value=s.bleTimeout||90}
     }
 
     // CN105 header: glowing dot + status label
@@ -1264,6 +1274,11 @@ input[type=range]::-moz-range-thumb{
   window.toggleBleFeed=function(){
     var cur=$('bleFeedBtn').textContent==='ON';
     ws.send(JSON.stringify({cmd:'config',bleFeed:!cur}));
+  };
+  window.saveBleTimeout=function(){
+    var v=parseInt($('bleTimeoutInput').value,10);
+    if(isNaN(v)||v<30||v>600){alert('Timeout must be 30–600 seconds');return}
+    ws.send(JSON.stringify({cmd:'config',bleTimeout:v}));
   };
 
   // ── Controls ───────────────────────────────────────────────────────────────

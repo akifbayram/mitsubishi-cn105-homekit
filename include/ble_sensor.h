@@ -13,7 +13,6 @@
 
 // ── Timing constants ────────────────────────────────────────────────────────
 constexpr uint32_t BLE_KEEPALIVE_MS     = 20000;  // Resend temp to HP every 20s
-constexpr uint32_t BLE_STALE_TIMEOUT_MS = 90000;  // Mark stale after 90s no data
 
 // ── Compile-time guards ─────────────────────────────────────────────────────
 #if !defined(CONFIG_BT_ENABLED)

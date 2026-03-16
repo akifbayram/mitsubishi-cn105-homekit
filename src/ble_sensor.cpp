@@ -276,7 +276,8 @@ void BleSensor::loop(CN105Controller &cn105) {
     lastUpd = s_lastUpdate;
     taskEXIT_CRITICAL(&s_mux);
 
-    bool active = lastUpd > 0 && (now - lastUpd) < BLE_STALE_TIMEOUT_MS;
+    uint32_t staleMs = (uint32_t)settings.get().bleStaleTimeoutS * 1000;
+    bool active = lastUpd > 0 && (now - lastUpd) < staleMs;
     bool stale = lastUpd > 0 && !active;
     bool enabled = settings.get().bleFeedEnabled;
 
@@ -326,14 +327,16 @@ bool BleSensor::isActive() {
     taskENTER_CRITICAL(&s_mux);
     uint32_t lu = s_lastUpdate;
     taskEXIT_CRITICAL(&s_mux);
-    return lu > 0 && (millis() - lu) < BLE_STALE_TIMEOUT_MS;
+    uint32_t staleMs = (uint32_t)settings.get().bleStaleTimeoutS * 1000;
+    return lu > 0 && (millis() - lu) < staleMs;
 }
 
 bool BleSensor::isStale() {
     taskENTER_CRITICAL(&s_mux);
     uint32_t lu = s_lastUpdate;
     taskEXIT_CRITICAL(&s_mux);
-    return lu > 0 && (millis() - lu) >= BLE_STALE_TIMEOUT_MS;
+    uint32_t staleMs = (uint32_t)settings.get().bleStaleTimeoutS * 1000;
+    return lu > 0 && (millis() - lu) >= staleMs;
 }
 
 uint32_t BleSensor::lastUpdateAge() {

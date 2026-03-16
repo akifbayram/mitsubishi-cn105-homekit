@@ -30,9 +30,13 @@ void SettingsStore::begin() {
 #endif
     }
     _settings.bleFeedEnabled = _prefs.getBool("bleFeed", true);
-    LOG_INFO("[Settings] BLE: addr=%s feed=%s",
+    _settings.bleStaleTimeoutS = _prefs.getUShort("bleTimeout", 90);
+    if (_settings.bleStaleTimeoutS < 30) _settings.bleStaleTimeoutS = 30;
+    if (_settings.bleStaleTimeoutS > 600) _settings.bleStaleTimeoutS = 600;
+    LOG_INFO("[Settings] BLE: addr=%s feed=%s timeout=%us",
              strlen(_settings.bleSensorAddr) > 0 ? _settings.bleSensorAddr : "(none)",
-             _settings.bleFeedEnabled ? "ON" : "OFF");
+             _settings.bleFeedEnabled ? "ON" : "OFF",
+             _settings.bleStaleTimeoutS);
 #endif
 
     LOG_INFO("[Settings] Loaded: logLevel=%d poll=%lums name=%s unit=%s",
@@ -53,6 +57,7 @@ void SettingsStore::save() {
 #ifdef BLE_SENSOR_TYPE
     _prefs.putString("bleAddr", _settings.bleSensorAddr);
     _prefs.putBool("bleFeed", _settings.bleFeedEnabled);
+    _prefs.putUShort("bleTimeout", _settings.bleStaleTimeoutS);
 #endif
     LOG_INFO("[Settings] Saved: logLevel=%d poll=%lums name=%s unit=%s",
              _settings.logLevel, _settings.pollMs, _settings.deviceName,
