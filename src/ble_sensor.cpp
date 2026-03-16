@@ -191,17 +191,17 @@ static DecodeResult tryDecode(uint8_t fieldType, const uint8_t* data, uint8_t le
         uint16_t cid = data[0] | (data[1] << 8);
         if (cid == 0xEC88) {
             if (len <= 7 && decodeGoveeV3(data, len))
-                return {true, "Govee V3 (H5072/H5075)"};
+                return {true, "Govee V3"};
             if (len > 7 && decodeGoveeV2(data, len))
-                return {true, "Govee V2 (H5074/H5051/H5052/H5071)"};
+                return {true, "Govee V2"};
         }
         if (cid == 0x0001 && len >= 8 && decodeGoveeV1(data, len))
-            return {true, "Govee V1 (H510x/H5174/H5177/GV5179)"};
+            return {true, "Govee V1"};
     }
     if (fieldType == 0x16 && len >= 2) {
         uint16_t uuid = data[0] | (data[1] << 8);
         if (uuid == 0x181A && len >= 15 && decodePVVX(data + 2, len - 2))
-            return {true, "PVVX (LYWSD03MMC/CGG1)"};
+            return {true, "PVVX"};
         if (uuid == 0xFCD2 && decodeBTHome(data + 2, len - 2))
             return {true, "BTHome v2"};
     }
@@ -225,18 +225,18 @@ static const char* identifySensorType(const uint8_t* adv, size_t totalLen) {
         if (fieldType == 0xFF && dl >= 2) {
             uint16_t cid = fd[0] | (fd[1] << 8);
             if (cid == 0xEC88 && dl >= 7)
-                return dl <= 7 ? "Govee V3 (H5072/H5075)" : "Govee V2 (H5074/H5051)";
+                return dl <= 7 ? "Govee V3" : "Govee V2";
             if (cid == 0x0001 && dl >= 8 && !(fd[7] & 0x80)) {
                 int32_t val = ((int32_t)fd[4] << 16) | ((int32_t)fd[5] << 8) | fd[6];
                 if (val & 0x800000) val ^= 0x800000;
                 float t = (float)(val / 1000) / 10.0f;
-                if (t >= -40.0f && t <= 80.0f) return "Govee V1 (H510x/H5174)";
+                if (t >= -40.0f && t <= 80.0f) return "Govee V1";
             }
         }
 
         if (fieldType == 0x16 && dl >= 2) {
             uint16_t uuid = fd[0] | (fd[1] << 8);
-            if (uuid == 0x181A && dl >= 15) return "PVVX (LYWSD03MMC/CGG1)";
+            if (uuid == 0x181A && dl >= 15) return "PVVX";
             if (uuid == 0xFCD2 && dl >= 3) return "BTHome v2";
         }
 
