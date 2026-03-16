@@ -3,6 +3,7 @@
 #include <Preferences.h>
 #include "logging.h"
 #include "branding.h"
+#include "ble_config.h"
 
 struct DeviceSettings {
     LogLevel logLevel    = LOG_LEVEL_INFO;
@@ -14,7 +15,7 @@ struct DeviceSettings {
     char     setupCode[9] = "";        // HomeKit pairing code (8 digits)
     bool     wifiChangePending = false; // True after WiFi creds changed via web UI (shorter fallback timeout)
     uint8_t  vaneConfig = 2;          // 0=no vanes, 1=vertical only, 2=vertical+horizontal
-#ifdef BLE_SENSOR_TYPE
+#ifdef BLE_ENABLE
     char     bleSensorAddr[18] = "";   // "AA:BB:CC:DD:EE:FF" or empty
     bool     bleFeedEnabled = true;    // Feed BLE temp to heat pump
     uint16_t bleStaleTimeoutS = 90;    // Seconds before sensor marked stale (30–600)

@@ -142,34 +142,19 @@ The firmware passively listens for BLE advertisements from a configured sensor �
 
 ### Supported Sensors
 
-| Type | Build Flag | Devices |
-|------|-----------|---------|
-| Govee V3 | `BLE_TYPE_GOVEE_V3` | H5072, H5075, H5101, H5102, H5174, H5177 |
-| Govee V2 | `BLE_TYPE_GOVEE_V2` | H5074, H5100, H5104, H5105, H5179 |
-| PVVX | `BLE_TYPE_PVVX` | Xiaomi LYWSD03MMC, CGG1 (requires [PVVX custom firmware](https://github.com/pvvx/ATC_MiThermometer) — stock Xiaomi firmware uses encrypted advertisements that can't be decoded) |
-| BTHome v2 | `BLE_TYPE_BTHOME` | SwitchBot, Shelly, or any BTHome v2 device |
+The firmware auto-detects the sensor type from the BLE advertisement format — no build flags needed.
 
-### Enabling BLE Sensor
-
-Add build flags to `platformio_override.ini` (gitignored):
-
-```ini
-[env:nanoc6-ble]
-extends = env:nanoc6
-build_flags =
-    ${env:nanoc6.build_flags}
-    -DBLE_SENSOR_TYPE=BLE_TYPE_GOVEE_V2
-    -DBLE_SENSOR_ADDR="A4:C1:38:AA:BB:CC"
-```
-
-- `BLE_SENSOR_TYPE` — required, selects the decoder for your sensor model
-- `BLE_SENSOR_ADDR` — optional default MAC address (can also be set at runtime via web UI)
-
-Only one sensor type compiles in, adding ~5–10 KB to the firmware. The NimBLE stack uses ~40–60 KB of RAM at runtime. Requires a board with Bluetooth (ESP32, ESP32-S3, ESP32-C3, ESP32-C6).
+| Protocol | Devices | Tested |
+|----------|---------|:------:|
+| Govee V2 | H5074, H5051, H5052, H5071 | ✅ |
+| Govee V3 | H5072, H5075 | ❌ |
+| Govee V1 | H5100, H5101, H5102, H5103, H5104, H5105, H5108, H5110, H5174, H5177, GV5179 | ❌ |
+| PVVX | Xiaomi LYWSD03MMC, CGG1 (requires [PVVX custom firmware](https://github.com/pvvx/ATC_MiThermometer) — stock Xiaomi firmware uses encrypted advertisements that can't be decoded) | ❌ |
+| BTHome v2 | SwitchBot, Shelly, or any BTHome v2 device | ❌ |
 
 ### Web UI Configuration
 
-Once built with BLE support, a **Remote Sensor** card appears in the web UI:
+A **Remote Sensor** card appears in the web UI on boards with Bluetooth:
 
 - **MAC Address** — enter or change the sensor's BLE MAC address (persisted to flash)
 - **Feed Toggle** — enable/disable sending the sensor temperature to the heat pump (disabling the feed keeps scanning and displaying sensor data, it just stops overriding the HP's internal thermistor)

@@ -24,7 +24,8 @@ include/
   settings.h                # Settings store
   status_led.h              # LED state enum, StatusLED class
   wifi_recovery.h           # WiFi fallback AP manager
-  ble_sensor.h              # BLE sensor types, public API, compile guards
+  ble_config.h              # BLE_ENABLE auto-define (standalone, no dependencies)
+  ble_sensor.h              # BLE sensor public API, auto-detect decoders
   logging.h                 # Log level macros (conditional HWCDC/Serial)
   board_profile.h           # Board profile selector + defaults
   boards/                   # Per-board hardware definitions

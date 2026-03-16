@@ -4,9 +4,7 @@
 #include "wifi_recovery.h"
 #include <WiFi.h>
 #include "HomeSpan.h"
-#ifdef BLE_SENSOR_TYPE
 #include "ble_sensor.h"
-#endif
 
 // ══════════════════════════════════════════════════════════════════════════════
 // WebSocket handler: GET /ws
@@ -237,7 +235,7 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
             changed = true;
         }
 
-#ifdef BLE_SENSOR_TYPE
+#ifdef BLE_ENABLE
         char bleAddrVal[18];
         if (jsonGetString(msg, "bleAddr", bleAddrVal, sizeof(bleAddrVal))) {
             BleSensor::setAddr(bleAddrVal);
@@ -434,7 +432,7 @@ void WebUI::pushState() {
         _setupURI
     );
 
-#ifdef BLE_SENSOR_TYPE
+#ifdef BLE_ENABLE
     {
         float bleT = BleSensor::temperature();
         float bleH = BleSensor::humidity();

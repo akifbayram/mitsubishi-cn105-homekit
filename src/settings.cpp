@@ -21,7 +21,7 @@ void SettingsStore::begin() {
     _prefs.getString("setupCode", _settings.setupCode, sizeof(_settings.setupCode));
     _settings.wifiChangePending = _prefs.getBool("wifiChgPend", false);
     _settings.vaneConfig = _prefs.getUChar("vaneConfig", 2);
-#ifdef BLE_SENSOR_TYPE
+#ifdef BLE_ENABLE
     size_t bleAddrLen = _prefs.getString("bleAddr", _settings.bleSensorAddr, sizeof(_settings.bleSensorAddr));
     if (bleAddrLen == 0) {
 #ifdef BLE_SENSOR_ADDR
@@ -54,7 +54,7 @@ void SettingsStore::save() {
     _prefs.putString("setupCode", _settings.setupCode);
     _prefs.putBool("wifiChgPend", _settings.wifiChangePending);
     _prefs.putUChar("vaneConfig", _settings.vaneConfig);
-#ifdef BLE_SENSOR_TYPE
+#ifdef BLE_ENABLE
     _prefs.putString("bleAddr", _settings.bleSensorAddr);
     _prefs.putBool("bleFeed", _settings.bleFeedEnabled);
     _prefs.putUShort("bleTimeout", _settings.bleStaleTimeoutS);

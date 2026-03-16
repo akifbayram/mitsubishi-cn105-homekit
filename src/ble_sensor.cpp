@@ -1,4 +1,6 @@
-#ifdef BLE_SENSOR_TYPE
+#include "ble_config.h"
+
+#ifdef BLE_ENABLE
 
 #include "ble_sensor.h"
 #include "settings.h"
@@ -27,6 +29,9 @@ static NimBLEScan* s_pScan      = nullptr;
 // ── Keepalive state ─────────────────────────────────────────────────────────
 static uint32_t s_lastKeepalive = 0;
 
+// ── Detected type (logged once) ─────────────────────────────────────────────
+static const char* s_detectedType = nullptr;
+
 // ── Validation ranges ───────────────────────────────────────────────────────
 static inline bool validTemp(float t) { return t >= -40.0f && t <= 80.0f; }
 static inline bool validHum(float h)  { return h >= 0.0f && h <= 100.0f; }
@@ -51,35 +56,31 @@ static void updateTargetLower() {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// Decoders — only the selected one compiles in
+// Decoders — all compiled in, dispatched at runtime
 // ══════════════════════════════════════════════════════════════════════════════
 
-#if BLE_SENSOR_TYPE == BLE_TYPE_GOVEE_V3
-// Govee H5072/H5075 (msg_length 6 after company ID)
-// Manufacturer data 0xEC88: [0-1]=company ID, [2]=padding, [3-5]=combined temp+hum,
-// [6]=battery (lower 7 bits) + error flag (MSB)
-// Ref: HA govee-ble decode_temp_humid_battery_error()
-static bool decode(const uint8_t* mfr, uint8_t len) {
+// Govee H5072/H5075 — 3-byte combined temp+hum encoding
+// Manufacturer data 0xEC88: [0-1]=company ID, [2]=padding, [3-5]=combined, [6]=battery|error
+// Ref: HA govee-ble decode_temp_humid_battery_error() offset 1
+static bool decodeGoveeV3(const uint8_t* mfr, uint8_t len) {
     if (len < 7) return false;
-    // Check error flag (MSB of last data byte)
-    if (mfr[6] & 0x80) return false;
+    if (mfr[6] & 0x80) return false;  // Error flag
     int32_t val = ((int32_t)mfr[3] << 16) | ((int32_t)mfr[4] << 8) | mfr[5];
     bool negative = false;
     if (val & 0x800000) { val = val ^ 0x800000; negative = true; }
-    float temp = (float)(val / 1000) / 10.0f;  // Match HA: int division then /10
+    float temp = (float)(val / 1000) / 10.0f;
     if (negative) temp = -temp;
     float hum = (float)(val % 1000) / 10.0f;
     if (!validTemp(temp) || !validHum(hum)) return false;
     s_temperature = temp;
     s_humidity = hum;
-    s_battery = (int8_t)(mfr[6] & 0x7F);  // Mask off error bit
+    s_battery = (int8_t)(mfr[6] & 0x7F);
     return true;
 }
 
-#elif BLE_SENSOR_TYPE == BLE_TYPE_GOVEE_V2
-// Govee H5074/H5100/H5104/H5105/H5179
+// Govee H5074/H5051/H5052/H5071 — little-endian temp/hum
 // Manufacturer data 0xEC88: [0-1]=company ID, [2]=reserved, [3-4]=temp LE, [5-6]=hum LE, [7]=battery
-static bool decode(const uint8_t* mfr, uint8_t len) {
+static bool decodeGoveeV2(const uint8_t* mfr, uint8_t len) {
     if (len < 8) return false;
     int16_t rawTemp = (int16_t)(mfr[3] | (mfr[4] << 8));
     uint16_t rawHum = (uint16_t)(mfr[5] | (mfr[6] << 8));
@@ -92,9 +93,29 @@ static bool decode(const uint8_t* mfr, uint8_t len) {
     return true;
 }
 
-#elif BLE_SENSOR_TYPE == BLE_TYPE_PVVX
+// Govee H5100/H5101/H5102/H5103/H5104/H5105/H5108/H5110/H5174/H5177/GV5179
+// 3-byte combined temp+hum encoding at offset 4 (after company ID + 2-byte header)
+// Manufacturer data 0x0001: [0-1]=company ID, [2-3]=header, [4-6]=combined, [7]=battery|error
+// Ref: HA govee-ble decode_temp_humid_battery_error() offset 2
+static bool decodeGoveeV1(const uint8_t* mfr, uint8_t len) {
+    if (len < 8) return false;
+    if (mfr[7] & 0x80) return false;  // Error flag
+    int32_t val = ((int32_t)mfr[4] << 16) | ((int32_t)mfr[5] << 8) | mfr[6];
+    bool negative = false;
+    if (val & 0x800000) { val = val ^ 0x800000; negative = true; }
+    float temp = (float)(val / 1000) / 10.0f;
+    if (negative) temp = -temp;
+    float hum = (float)(val % 1000) / 10.0f;
+    if (!validTemp(temp) || !validHum(hum)) return false;
+    s_temperature = temp;
+    s_humidity = hum;
+    s_battery = (int8_t)(mfr[7] & 0x7F);
+    return true;
+}
+
 // Xiaomi LYWSD03MMC / CGG1 with PVVX custom firmware
-static bool decode(const uint8_t* svc, uint8_t len) {
+// Service data UUID 0x181A: [0-5]=MAC, [6-7]=temp LE, [8-9]=hum LE, ..., [12]=battery
+static bool decodePVVX(const uint8_t* svc, uint8_t len) {
     if (len < 13) return false;
     int16_t rawTemp = (int16_t)(svc[6] | (svc[7] << 8));
     uint16_t rawHum = (uint16_t)(svc[8] | (svc[9] << 8));
@@ -107,9 +128,8 @@ static bool decode(const uint8_t* svc, uint8_t len) {
     return true;
 }
 
-#elif BLE_SENSOR_TYPE == BLE_TYPE_BTHOME
 // BTHome v2 — Service data UUID 0xFCD2, TLV objects
-static bool decode(const uint8_t* svc, uint8_t len) {
+static bool decodeBTHome(const uint8_t* svc, uint8_t len) {
     if (len < 3) return false;
     uint8_t devInfo = svc[0];
     if ((devInfo & 0x01) != 0) return false;  // Encrypted
@@ -148,8 +168,6 @@ static bool decode(const uint8_t* svc, uint8_t len) {
     return gotTemp;
 }
 
-#endif
-
 // ══════════════════════════════════════════════════════════════════════════════
 // NimBLE Scan Callbacks
 // ══════════════════════════════════════════════════════════════════════════════
@@ -158,10 +176,10 @@ class BLESensorScanCB : public NimBLEScanCallbacks {
     void onResult(const NimBLEAdvertisedDevice* device) override {
         if (!s_addrValid) return;
 
-        // Compare MAC address (NimBLE toString() returns lowercase colon-separated)
+        // MAC filter — only process the single configured sensor
         if (device->getAddress().toString() != s_targetLower) return;
 
-        // Parse raw advertisement payload (same AD structure regardless of BLE stack)
+        // Parse raw advertisement payload
         const std::vector<uint8_t>& payload = device->getPayload();
         size_t totalLen = payload.size();
         const uint8_t* adv = payload.data();
@@ -174,46 +192,60 @@ class BLESensorScanCB : public NimBLEScanCallbacks {
             const uint8_t *fieldData = &adv[i + 2];
             uint8_t dataLen = fieldLen - 1;
 
-#if BLE_SENSOR_TYPE == BLE_TYPE_GOVEE_V3 || BLE_SENSOR_TYPE == BLE_TYPE_GOVEE_V2
+            bool decoded = false;
+
+            // Manufacturer data (0xFF) — Govee sensors
             if (fieldType == 0xFF && dataLen >= 2) {
                 uint16_t companyId = fieldData[0] | (fieldData[1] << 8);
+
                 if (companyId == 0xEC88) {
                     taskENTER_CRITICAL(&s_mux);
-                    if (decode(fieldData, dataLen)) {
-                        s_rssi = device->getRSSI();
-                        s_lastUpdate = millis();
-                        s_staleReverted = false;
+                    if (dataLen <= 7) {
+                        decoded = decodeGoveeV3(fieldData, dataLen);
+                        if (decoded && !s_detectedType) s_detectedType = "Govee V3 (H5072/H5075)";
+                    } else {
+                        decoded = decodeGoveeV2(fieldData, dataLen);
+                        if (decoded && !s_detectedType) s_detectedType = "Govee V2 (H5074/H5051/H5052/H5071)";
                     }
+                    taskEXIT_CRITICAL(&s_mux);
+                } else if (companyId == 0x0001 && dataLen >= 8) {
+                    taskENTER_CRITICAL(&s_mux);
+                    decoded = decodeGoveeV1(fieldData, dataLen);
+                    if (decoded && !s_detectedType) s_detectedType = "Govee V1 (H510x/H5174/H5177/GV5179)";
                     taskEXIT_CRITICAL(&s_mux);
                 }
             }
-#elif BLE_SENSOR_TYPE == BLE_TYPE_PVVX
-            if (fieldType == 0x16 && dataLen >= 2) {
+
+            // Service data (0x16) — PVVX / BTHome
+            if (!decoded && fieldType == 0x16 && dataLen >= 2) {
                 uint16_t uuid = fieldData[0] | (fieldData[1] << 8);
+
                 if (uuid == 0x181A && dataLen >= 15) {
                     taskENTER_CRITICAL(&s_mux);
-                    if (decode(fieldData + 2, dataLen - 2)) {
-                        s_rssi = device->getRSSI();
-                        s_lastUpdate = millis();
-                        s_staleReverted = false;
-                    }
+                    decoded = decodePVVX(fieldData + 2, dataLen - 2);
+                    if (decoded && !s_detectedType) s_detectedType = "PVVX (LYWSD03MMC/CGG1)";
                     taskEXIT_CRITICAL(&s_mux);
-                }
-            }
-#elif BLE_SENSOR_TYPE == BLE_TYPE_BTHOME
-            if (fieldType == 0x16 && dataLen >= 2) {
-                uint16_t uuid = fieldData[0] | (fieldData[1] << 8);
-                if (uuid == 0xFCD2) {
+                } else if (uuid == 0xFCD2) {
                     taskENTER_CRITICAL(&s_mux);
-                    if (decode(fieldData + 2, dataLen - 2)) {
-                        s_rssi = device->getRSSI();
-                        s_lastUpdate = millis();
-                        s_staleReverted = false;
-                    }
+                    decoded = decodeBTHome(fieldData + 2, dataLen - 2);
+                    if (decoded && !s_detectedType) s_detectedType = "BTHome v2";
                     taskEXIT_CRITICAL(&s_mux);
                 }
             }
-#endif
+
+            if (decoded) {
+                taskENTER_CRITICAL(&s_mux);
+                s_rssi = device->getRSSI();
+                s_lastUpdate = millis();
+                s_staleReverted = false;
+                taskEXIT_CRITICAL(&s_mux);
+
+                if (s_detectedType) {
+                    LOG_INFO("[BLE] Detected sensor type: %s", s_detectedType);
+                    s_detectedType = nullptr;  // Log once
+                }
+            }
+
             i += fieldLen + 1;
         }
     }
@@ -255,7 +287,7 @@ void BleSensor::begin() {
     if (s_addrValid) {
         s_pScan->start(0);  // 0 = scan forever
         s_scanning = true;
-        LOG_INFO("[BLE] Scanning started");
+        LOG_INFO("[BLE] Scanning started (auto-detect all sensor types)");
     }
 
     uint32_t heapAfter = esp_get_free_heap_size();
@@ -395,4 +427,4 @@ const char* BleSensor::getAddr() {
     return settings.get().bleSensorAddr;
 }
 
-#endif // BLE_SENSOR_TYPE
+#endif // BLE_ENABLE
