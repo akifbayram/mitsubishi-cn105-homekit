@@ -136,7 +136,9 @@ Once connected to WiFi:
 
 ## Remote Temperature Sensor (BLE)
 
-The firmware can receive temperature readings from external BLE sensors and feed them to the heat pump, overriding its internal thermistor for more accurate room temperature control. The sensor temperature is resent every 20 seconds and automatically reverts to the internal sensor if no BLE data is received for 90 seconds.
+Wall-mounted units measure temperature at ceiling height near the indoor unit, which often reads warmer than the actual living space. An external BLE sensor placed at a better location gives the heat pump a more accurate room temperature to work with.
+
+The firmware passively listens for BLE advertisements from a configured sensor — no Bluetooth pairing is needed, the sensor just needs to be powered on and broadcasting. The temperature is resent to the heat pump every 20 seconds. If no BLE data is received for 90 seconds, the heat pump automatically reverts to its internal thermistor (no error, no interruption — it just switches back silently).
 
 ### Supported Sensors
 
@@ -144,7 +146,7 @@ The firmware can receive temperature readings from external BLE sensors and feed
 |------|-----------|---------|
 | Govee V3 | `BLE_TYPE_GOVEE_V3` | H5072, H5075, H5101, H5102, H5174, H5177 |
 | Govee V2 | `BLE_TYPE_GOVEE_V2` | H5074, H5100, H5104, H5105, H5179 |
-| PVVX | `BLE_TYPE_PVVX` | Xiaomi LYWSD03MMC, CGG1 (with [PVVX custom firmware](https://github.com/pvvx/ATC_MiThermometer)) |
+| PVVX | `BLE_TYPE_PVVX` | Xiaomi LYWSD03MMC, CGG1 (requires [PVVX custom firmware](https://github.com/pvvx/ATC_MiThermometer) — stock Xiaomi firmware uses encrypted advertisements that can't be decoded) |
 | BTHome v2 | `BLE_TYPE_BTHOME` | SwitchBot, Shelly, or any BTHome v2 device |
 
 ### Enabling BLE Sensor
@@ -163,14 +165,14 @@ build_flags =
 - `BLE_SENSOR_TYPE` — required, selects the decoder for your sensor model
 - `BLE_SENSOR_ADDR` — optional default MAC address (can also be set at runtime via web UI)
 
-Only one sensor type compiles in, adding ~5–10 KB to the firmware. Requires a board with Bluetooth (ESP32, ESP32-S3, ESP32-C3, ESP32-C6).
+Only one sensor type compiles in, adding ~5–10 KB to the firmware. The NimBLE stack uses ~40–60 KB of RAM at runtime. Requires a board with Bluetooth (ESP32, ESP32-S3, ESP32-C3, ESP32-C6).
 
 ### Web UI Configuration
 
 Once built with BLE support, a **Remote Sensor** card appears in the web UI:
 
 - **MAC Address** — enter or change the sensor's BLE MAC address (persisted to flash)
-- **Feed Toggle** — enable/disable sending the sensor temperature to the heat pump
+- **Feed Toggle** — enable/disable sending the sensor temperature to the heat pump (disabling the feed keeps scanning and displaying sensor data, it just stops overriding the HP's internal thermistor)
 - **Status** — live temperature, humidity, battery level, signal strength, and last update time
 - **Indicators** — green (active), orange (feed disabled), red (stale data), gray (scanning/not configured)
 
