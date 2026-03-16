@@ -193,6 +193,7 @@ input[type=range]::-moz-range-thumb{
 .ble-banner.info{background:rgba(0,122,255,0.12);color:var(--accent)}
 .ble-banner.muted{background:var(--seg-bg);color:var(--text2)}
 .ble-dimmed .status-grid{opacity:0.4}
+.ble-dimmed .ble-hero,.ble-dimmed .ble-health{opacity:0.4}
 /* ── iOS Toggle ───────────────────────────────────────────────────────────── */
 .ios-toggle{position:relative;display:inline-block;width:44px;height:26px;flex-shrink:0}
 .ios-toggle input{opacity:0;width:0;height:0}
@@ -209,7 +210,24 @@ input[type=range]::-moz-range-thumb{
 .signal-bars[data-strength="2"] i:nth-child(-n+2){background:var(--orange)}
 .signal-bars[data-strength="3"] i:nth-child(-n+3){background:var(--green)}
 .signal-bars[data-strength="4"] i{background:var(--green)}
-/* ── BLE Config & Scan ────────────────────────────────────────────────────── */
+/* ── BLE Remote Sensor ────────────────────────────────────────────────────── */
+.ble-hero{text-align:center;padding:4px 0 8px}
+.ble-hero-temp{font-size:36px;font-weight:300;letter-spacing:-1px;line-height:1.1}
+.ble-hero-hum{font-size:13px;color:var(--text2);margin-top:2px}
+.ble-compare{display:flex;align-items:center;justify-content:center;gap:6px;margin-top:6px;font-size:12px;color:var(--text3)}
+.ble-compare .ble-delta{font-weight:600;border-radius:4px;padding:1px 5px}
+.ble-delta.delta-warm{color:var(--orange)}
+.ble-delta.delta-cool{color:var(--accent)}
+.ble-health{display:flex;align-items:center;justify-content:center;gap:14px;padding:8px 0 4px;font-size:12px;color:var(--text2)}
+.ble-health-item{display:flex;align-items:center;gap:4px}
+.ble-health-batt{display:inline-flex;align-items:center;gap:3px}
+.ble-health-batt svg{width:18px;height:10px}
+.ble-health-batt .batt-body{fill:none;stroke:var(--text3);stroke-width:1}
+.ble-health-batt .batt-tip{fill:var(--text3)}
+.ble-health-batt .batt-fill{transition:width .3s}
+.ble-sensor-chip{display:flex;align-items:center;justify-content:center;gap:6px;font-size:11px;color:var(--text3);padding:4px 0 2px}
+.ble-sensor-chip code{font-family:'SF Mono',Menlo,monospace;font-size:10px;background:var(--seg-bg);padding:2px 6px;border-radius:4px}
+.ble-config-sep{border:none;border-top:0.5px solid var(--border);margin:10px 0 12px}
 .ble-config-row{display:flex;align-items:center;justify-content:space-between;gap:12px}
 .ble-scan-item{display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--seg-bg);border-radius:var(--radius-sm);cursor:pointer;margin-bottom:4px;transition:background .15s}
 .ble-scan-item:active{background:var(--surface3)}
@@ -218,6 +236,8 @@ input[type=range]::-moz-range-thumb{
 .ble-scan-item .scan-addr{font-size:11px;color:var(--text2);font-family:monospace}
 @keyframes scan-pulse{0%,100%{opacity:1}50%{opacity:.5}}
 .scanning{animation:scan-pulse 1s infinite}
+@keyframes ble-live-pulse{0%,100%{opacity:1}50%{opacity:.6}}
+.ble-live .ble-hero-temp{animation:ble-live-pulse 2s ease-in-out infinite}
 .status-label{color:var(--text2);margin-right:auto}
 
 /* ── Settings & Forms ──────────────────────────────────────────────────── */
@@ -461,33 +481,36 @@ input[type=range]::-moz-range-thumb{
     </div>
     <div class="collapse-body" id="bleBody">
       <div id="bleBanner" class="ble-banner" style="display:none"></div>
-      <div class="status-grid">
-        <div class="status-item">
-          <span class="status-label">Temp</span>
-          <span id="bleTemp">--</span>
-        </div>
-        <div class="status-item" id="bleHumRow">
-          <span class="status-label">Humidity</span>
-          <span id="bleHum">--</span>
-        </div>
-        <div class="status-item" id="bleBattRow">
-          <span class="status-label">Battery</span>
-          <span id="bleBatt">--</span>
-        </div>
-        <div class="status-item">
-          <span class="status-label">Signal</span>
-          <span id="bleRssi" class="signal-bars" data-strength="0"><i></i><i></i><i></i><i></i></span>
-        </div>
-        <div class="status-item">
-          <span class="status-label">Last Update</span>
-          <span id="bleAge">--</span>
-        </div>
-        <div class="status-item" id="bleSensorTypeRow" style="display:none">
-          <span class="status-label">Sensor</span>
-          <span id="bleSensorType" style="font-size:12px">--</span>
+      <!-- Hero temperature -->
+      <div class="ble-hero" id="bleHero">
+        <div class="ble-hero-temp"><span id="bleTemp">--</span><span class="temp-unit-label" style="font-size:16px">&deg;C</span></div>
+        <div class="ble-hero-hum" id="bleHumRow"><span id="bleHum">--</span></div>
+        <div class="ble-compare" id="bleCompare" style="display:none">
+          vs internal <span id="bleInternalTemp">--</span> <span class="ble-delta" id="bleDelta"></span>
         </div>
       </div>
-      <div style="padding:12px 0 0">
+      <!-- Health strip -->
+      <div class="ble-health">
+        <span class="ble-health-item ble-health-batt" id="bleBattRow">
+          <svg viewBox="0 0 18 10"><rect class="batt-body" x="0.5" y="0.5" width="14" height="9" rx="1.5"/><rect class="batt-tip" x="15" y="3" width="2" height="4" rx="0.5"/><rect class="batt-fill" id="bleBattFill" x="1.5" y="1.5" width="0" height="7" rx="0.5"/></svg>
+          <span id="bleBatt">--</span>
+        </span>
+        <span class="ble-health-item">
+          <span id="bleRssi" class="signal-bars" data-strength="0"><i></i><i></i><i></i><i></i></span>
+          <span id="bleRssiVal" style="font-size:11px"></span>
+        </span>
+        <span class="ble-health-item" id="bleAgeItem">
+          <span id="bleAge">--</span>
+        </span>
+      </div>
+      <!-- Sensor identity chip -->
+      <div class="ble-sensor-chip" id="bleSensorChip" style="display:none">
+        <span id="bleSensorType">--</span>
+        <code id="bleSensorAddr"></code>
+      </div>
+      <!-- Configuration -->
+      <hr class="ble-config-sep">
+      <div>
         <div class="ble-config-row">
           <label class="status-label" style="margin:0">Sensor MAC</label>
           <input type="text" id="bleMacInput" placeholder="AA:BB:CC:DD:EE:FF"
@@ -1112,6 +1135,7 @@ input[type=range]::-moz-range-thumb{
       var banner=$('bleBanner');
       var statusLbl=$('bleStatusLabel');
       var bleBody=$('bleBody');
+      var bleHero=$('bleHero');
       var noMac=!s.bleAddr;
       var waiting=!noMac&&!s.bleActive&&!s.bleStale;
       var stale=!!s.bleStale;
@@ -1136,33 +1160,57 @@ input[type=range]::-moz-range-thumb{
       else if(s.bleBattery>=0&&s.bleBattery<=15){banner.className='ble-banner warn';banner.textContent='Sensor battery low ('+s.bleBattery+'%)';banner.style.display='flex'}
       else{banner.style.display='none'}
 
-      // Dim readings grid when no data available
+      // Dim hero + health when no data available
       bleBody.classList.toggle('ble-dimmed',noMac||waiting);
 
-      // Temperature
-      $('bleTemp').textContent=s.bleTemp!=null?fmtReadingTemp(s.bleTemp)+unitStr():'--';
+      // Live pulse on hero temp when actively receiving
+      bleHero.classList.toggle('ble-live',s.bleActive&&!stale);
 
-      // Humidity
-      if(s.bleHumidity!=null&&s.bleHumidity>=0){$('bleHumRow').style.display='';$('bleHum').textContent=s.bleHumidity+'%'}
+      // Hero temperature
+      $('bleTemp').textContent=s.bleTemp!=null?fmtReadingTemp(s.bleTemp):'--';
+
+      // Humidity (inline below hero temp)
+      if(s.bleHumidity!=null&&s.bleHumidity>=0){$('bleHumRow').style.display='';$('bleHum').textContent=s.bleHumidity+'% humidity'}
       else{$('bleHumRow').style.display='none'}
 
-      // Battery with color coding
+      // Temperature comparison vs internal sensor
+      var cmpEl=$('bleCompare');
+      if(s.bleTemp!=null&&s.room!=null&&s.bleActive){
+        cmpEl.style.display='';
+        $('bleInternalTemp').textContent=fmtReadingTemp(s.room)+unitStr();
+        var delta=s.bleTemp-s.room;
+        var deltaEl=$('bleDelta');
+        var absDelta=Math.abs(delta);
+        var sign=delta>0?'+':'';
+        deltaEl.textContent=sign+(tempUnit==='F'?Math.round(delta*9/5):delta.toFixed(1))+'\u00B0';
+        deltaEl.className='ble-delta '+(delta>0?'delta-warm':'delta-cool')
+      }else{cmpEl.style.display='none'}
+
+      // Battery with icon fill
       if(s.bleBattery>=0){
         $('bleBattRow').style.display='';
         var battEl=$('bleBatt');
+        var battFill=$('bleBattFill');
         battEl.textContent=s.bleBattery+'%';
-        battEl.style.color=s.bleBattery<=15?'var(--red)':s.bleBattery<=30?'var(--orange)':''
+        battEl.style.color=s.bleBattery<=15?'var(--red)':s.bleBattery<=30?'var(--orange)':'';
+        var fillW=Math.max(0,Math.min(12,s.bleBattery/100*12));
+        battFill.setAttribute('width',fillW.toFixed(1));
+        battFill.setAttribute('fill',s.bleBattery<=15?'var(--red)':s.bleBattery<=30?'var(--orange)':'var(--green)')
       }else{$('bleBattRow').style.display='none'}
 
-      // RSSI signal bars
+      // RSSI signal bars + dBm value
       var rssiEl=$('bleRssi');
-      if(s.bleRssi){var a=Math.abs(s.bleRssi);rssiEl.setAttribute('data-strength',a<=55?'4':a<=67?'3':a<=80?'2':'1');rssiEl.title=s.bleRssi+' dBm'}
-      else{rssiEl.setAttribute('data-strength','0');rssiEl.title=''}
+      if(s.bleRssi){
+        var a=Math.abs(s.bleRssi);
+        rssiEl.setAttribute('data-strength',a<=55?'4':a<=67?'3':a<=80?'2':'1');
+        rssiEl.title=s.bleRssi+' dBm';
+        $('bleRssiVal').textContent=s.bleRssi+'dBm'
+      }else{rssiEl.setAttribute('data-strength','0');rssiEl.title='';$('bleRssiVal').textContent=''}
 
       // Last update age
       if(s.bleStaleMs>0&&s.bleStaleMs<4294967295){
         var sec=Math.floor(s.bleStaleMs/1000);
-        $('bleAge').textContent=sec<60?sec+'s':Math.floor(sec/60)+'m '+sec%60+'s'
+        $('bleAge').textContent=sec<60?sec+'s ago':Math.floor(sec/60)+'m '+sec%60+'s ago'
       }else{$('bleAge').textContent=s.bleActive?'now':'--'}
 
       // MAC input (preserve user input while editing)
@@ -1174,9 +1222,13 @@ input[type=range]::-moz-range-thumb{
       // Stale timeout (preserve user input while editing)
       if(!$('bleTimeoutInput').matches(':focus')){$('bleTimeoutInput').value=s.bleTimeout||90}
 
-      // Sensor type
-      if(s.bleSensorType){$('bleSensorTypeRow').style.display='';$('bleSensorType').textContent=s.bleSensorType}
-      else{$('bleSensorTypeRow').style.display='none'}
+      // Sensor identity chip (type + MAC)
+      var chipEl=$('bleSensorChip');
+      if(s.bleSensorType||s.bleAddr){
+        chipEl.style.display='';
+        $('bleSensorType').textContent=s.bleSensorType||'Unknown';
+        $('bleSensorAddr').textContent=s.bleAddr||''
+      }else{chipEl.style.display='none'}
 
       // Discovery state
       var scanBtn=$('bleScanBtn');
