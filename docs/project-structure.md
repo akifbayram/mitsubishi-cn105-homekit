@@ -13,6 +13,7 @@ src/
   settings.cpp              # NVS persistent settings
   status_led.cpp            # RGB LED state machine and patterns
   wifi_recovery.cpp         # WiFi fallback AP manager, button handler
+  ble_sensor.cpp            # BLE scanner, sensor decoders, keepalive/stale logic
 
 include/
   cn105_protocol.h          # Protocol constants, state structures
@@ -23,6 +24,7 @@ include/
   settings.h                # Settings store
   status_led.h              # LED state enum, StatusLED class
   wifi_recovery.h           # WiFi fallback AP manager
+  ble_sensor.h              # BLE sensor types, public API, compile guards
   logging.h                 # Log level macros (conditional HWCDC/Serial)
   board_profile.h           # Board profile selector + defaults
   boards/                   # Per-board hardware definitions

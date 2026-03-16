@@ -134,6 +134,46 @@ Once connected to WiFi:
 3. Select **Mini Split XXXX** (or tap **More options…** if it doesn't appear)
 4. Enter the setup code shown in the web UI (HomeKit panel > Setup Code)
 
+## Remote Temperature Sensor (BLE)
+
+The firmware can receive temperature readings from external BLE sensors and feed them to the heat pump, overriding its internal thermistor for more accurate room temperature control. The sensor temperature is resent every 20 seconds and automatically reverts to the internal sensor if no BLE data is received for 90 seconds.
+
+### Supported Sensors
+
+| Type | Build Flag | Devices |
+|------|-----------|---------|
+| Govee V3 | `BLE_TYPE_GOVEE_V3` | H5072, H5075, H5101, H5102, H5174, H5177 |
+| Govee V2 | `BLE_TYPE_GOVEE_V2` | H5074, H5100, H5104, H5105, H5179 |
+| PVVX | `BLE_TYPE_PVVX` | Xiaomi LYWSD03MMC, CGG1 (with [PVVX custom firmware](https://github.com/pvvx/ATC_MiThermometer)) |
+| BTHome v2 | `BLE_TYPE_BTHOME` | SwitchBot, Shelly, or any BTHome v2 device |
+
+### Enabling BLE Sensor
+
+Add build flags to `platformio_override.ini` (gitignored):
+
+```ini
+[env:nanoc6-ble]
+extends = env:nanoc6
+build_flags =
+    ${env:nanoc6.build_flags}
+    -DBLE_SENSOR_TYPE=BLE_TYPE_GOVEE_V2
+    -DBLE_SENSOR_ADDR="A4:C1:38:AA:BB:CC"
+```
+
+- `BLE_SENSOR_TYPE` — required, selects the decoder for your sensor model
+- `BLE_SENSOR_ADDR` — optional default MAC address (can also be set at runtime via web UI)
+
+Only one sensor type compiles in, adding ~5–10 KB to the firmware. Requires a board with Bluetooth (ESP32, ESP32-S3, ESP32-C3, ESP32-C6).
+
+### Web UI Configuration
+
+Once built with BLE support, a **Remote Sensor** card appears in the web UI:
+
+- **MAC Address** — enter or change the sensor's BLE MAC address (persisted to flash)
+- **Feed Toggle** — enable/disable sending the sensor temperature to the heat pump
+- **Status** — live temperature, humidity, battery level, signal strength, and last update time
+- **Indicators** — green (active), orange (feed disabled), red (stale data), gray (scanning/not configured)
+
 ## OTA Updates
 
 Update firmware over the air without USB access:
@@ -162,6 +202,7 @@ The single-page interface provides:
 - **Dual Setpoints** — independent heat/cool thresholds in Auto mode (persisted to flash)
 - **Fan Speed** — Auto, Quiet, Speed 1–4
 - **Vane Control** — vertical and wide vane positions, swing mode
+- **Remote Sensor** — BLE sensor temperature, humidity, battery, signal strength, MAC config, feed toggle (only visible when built with BLE support)
 - **Diagnostics** — compressor frequency, outside temp, runtime hours, error codes, sub mode/stage
 - **HomeKit** — pairing status, controller count, setup code with copy button, QR code for pairing, reset pairing button
 - **Settings** — device name, poll interval (ms), log level, °C/°F toggle
