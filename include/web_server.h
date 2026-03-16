@@ -41,6 +41,7 @@ private:
     static esp_err_t handleIcon512(httpd_req_t *req);
     void handleWsMessage(httpd_req_t *req, const char *msg);
     void pushState();
+    void pushDiscoveryResults(bool done);
     void sendWsText(int fd, const char *text);
     void updateCachedSetupInfo();            // Recompute _fmtCode and _setupURI
     bool applyWifiCredentials(const char *json, const char **outError); // Shared WiFi cred logic

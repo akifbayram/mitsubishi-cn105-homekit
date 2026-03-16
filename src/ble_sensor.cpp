@@ -29,8 +29,16 @@ static NimBLEScan* s_pScan      = nullptr;
 // ── Keepalive state ─────────────────────────────────────────────────────────
 static uint32_t s_lastKeepalive = 0;
 
-// ── Detected type (logged once) ─────────────────────────────────────────────
-static const char* s_detectedType = nullptr;
+// ── Detected type ───────────────────────────────────────────────────────────
+static const char* s_sensorType = nullptr;
+static bool s_typeLogged = false;
+
+// ── Discovery state ─────────────────────────────────────────────────────────
+static BleDiscoveredDevice s_discovered[BLE_MAX_DISCOVERED];
+static int      s_discoveryCount    = 0;
+static bool     s_discoveryMode     = false;
+static uint32_t s_discoveryStart    = 0;
+static int      s_lastPushedCount   = 0;
 
 // ── Validation ranges ───────────────────────────────────────────────────────
 static inline bool validTemp(float t) { return t >= -40.0f && t <= 80.0f; }
@@ -169,20 +177,96 @@ static bool decodeBTHome(const uint8_t* svc, uint8_t len) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
+// Discovery helpers
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Identify sensor type from raw advertisement without decoding values
+static const char* identifySensorType(const uint8_t* adv, size_t totalLen) {
+    uint8_t i = 0;
+    while (i + 1 < totalLen) {
+        uint8_t fieldLen = adv[i];
+        if (fieldLen == 0 || i + fieldLen >= totalLen) break;
+        uint8_t fieldType = adv[i + 1];
+        const uint8_t* fd = &adv[i + 2];
+        uint8_t dl = fieldLen - 1;
+
+        if (fieldType == 0xFF && dl >= 2) {
+            uint16_t cid = fd[0] | (fd[1] << 8);
+            if (cid == 0xEC88 && dl >= 7)
+                return dl <= 7 ? "Govee V3 (H5072/H5075)" : "Govee V2 (H5074/H5051)";
+            if (cid == 0x0001 && dl >= 8 && !(fd[7] & 0x80)) {
+                int32_t val = ((int32_t)fd[4] << 16) | ((int32_t)fd[5] << 8) | fd[6];
+                if (val & 0x800000) val ^= 0x800000;
+                float t = (float)(val / 1000) / 10.0f;
+                if (t >= -40.0f && t <= 80.0f) return "Govee V1 (H510x/H5174)";
+            }
+        }
+
+        if (fieldType == 0x16 && dl >= 2) {
+            uint16_t uuid = fd[0] | (fd[1] << 8);
+            if (uuid == 0x181A && dl >= 15) return "PVVX (LYWSD03MMC/CGG1)";
+            if (uuid == 0xFCD2 && dl >= 3) return "BTHome v2";
+        }
+
+        i += fieldLen + 1;
+    }
+    return nullptr;
+}
+
+// Add a discovered device to the results array (deduplicate by MAC)
+static void addDiscoveryResult(const char* addrLower, const char* name,
+                               const char* type, int rssi) {
+    // Convert to uppercase for display
+    char addr[18];
+    strncpy(addr, addrLower, 17);
+    addr[17] = '\0';
+    for (int j = 0; j < 17; j++) {
+        if (addr[j] >= 'a' && addr[j] <= 'f') addr[j] -= 32;
+    }
+
+    // Update RSSI if already seen
+    for (int j = 0; j < s_discoveryCount; j++) {
+        if (strcmp(s_discovered[j].addr, addr) == 0) {
+            s_discovered[j].rssi = rssi;
+            return;
+        }
+    }
+
+    // Add new entry
+    if (s_discoveryCount < BLE_MAX_DISCOVERED) {
+        auto& d = s_discovered[s_discoveryCount];
+        strncpy(d.addr, addr, sizeof(d.addr));
+        strncpy(d.name, name ? name : "", sizeof(d.name) - 1);
+        d.name[sizeof(d.name) - 1] = '\0';
+        d.type = type;
+        d.rssi = rssi;
+        s_discoveryCount++;
+    }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
 // NimBLE Scan Callbacks
 // ══════════════════════════════════════════════════════════════════════════════
 
 class BLESensorScanCB : public NimBLEScanCallbacks {
     void onResult(const NimBLEAdvertisedDevice* device) override {
-        if (!s_addrValid) return;
-
-        // MAC filter — only process the single configured sensor
-        if (device->getAddress().toString() != s_targetLower) return;
-
-        // Parse raw advertisement payload
+        // Get raw advertisement payload
         const std::vector<uint8_t>& payload = device->getPayload();
-        size_t totalLen = payload.size();
         const uint8_t* adv = payload.data();
+        size_t totalLen = payload.size();
+
+        // Discovery mode: identify all compatible sensors
+        if (s_discoveryMode) {
+            const char* type = identifySensorType(adv, totalLen);
+            if (type) {
+                addDiscoveryResult(device->getAddress().toString().c_str(),
+                                   device->getName().c_str(), type, device->getRSSI());
+            }
+        }
+
+        // Normal processing: only configured target sensor
+        if (!s_addrValid) return;
+        if (device->getAddress().toString() != s_targetLower) return;
 
         uint8_t i = 0;
         while (i + 1 < totalLen) {
@@ -202,16 +286,16 @@ class BLESensorScanCB : public NimBLEScanCallbacks {
                     taskENTER_CRITICAL(&s_mux);
                     if (dataLen <= 7) {
                         decoded = decodeGoveeV3(fieldData, dataLen);
-                        if (decoded && !s_detectedType) s_detectedType = "Govee V3 (H5072/H5075)";
+                        if (decoded) s_sensorType = "Govee V3 (H5072/H5075)";
                     } else {
                         decoded = decodeGoveeV2(fieldData, dataLen);
-                        if (decoded && !s_detectedType) s_detectedType = "Govee V2 (H5074/H5051/H5052/H5071)";
+                        if (decoded) s_sensorType = "Govee V2 (H5074/H5051/H5052/H5071)";
                     }
                     taskEXIT_CRITICAL(&s_mux);
                 } else if (companyId == 0x0001 && dataLen >= 8) {
                     taskENTER_CRITICAL(&s_mux);
                     decoded = decodeGoveeV1(fieldData, dataLen);
-                    if (decoded && !s_detectedType) s_detectedType = "Govee V1 (H510x/H5174/H5177/GV5179)";
+                    if (decoded) s_sensorType = "Govee V1 (H510x/H5174/H5177/GV5179)";
                     taskEXIT_CRITICAL(&s_mux);
                 }
             }
@@ -223,12 +307,12 @@ class BLESensorScanCB : public NimBLEScanCallbacks {
                 if (uuid == 0x181A && dataLen >= 15) {
                     taskENTER_CRITICAL(&s_mux);
                     decoded = decodePVVX(fieldData + 2, dataLen - 2);
-                    if (decoded && !s_detectedType) s_detectedType = "PVVX (LYWSD03MMC/CGG1)";
+                    if (decoded) s_sensorType = "PVVX (LYWSD03MMC/CGG1)";
                     taskEXIT_CRITICAL(&s_mux);
                 } else if (uuid == 0xFCD2) {
                     taskENTER_CRITICAL(&s_mux);
                     decoded = decodeBTHome(fieldData + 2, dataLen - 2);
-                    if (decoded && !s_detectedType) s_detectedType = "BTHome v2";
+                    if (decoded) s_sensorType = "BTHome v2";
                     taskEXIT_CRITICAL(&s_mux);
                 }
             }
@@ -240,9 +324,9 @@ class BLESensorScanCB : public NimBLEScanCallbacks {
                 s_staleReverted = false;
                 taskEXIT_CRITICAL(&s_mux);
 
-                if (s_detectedType) {
-                    LOG_INFO("[BLE] Detected sensor type: %s", s_detectedType);
-                    s_detectedType = nullptr;  // Log once
+                if (!s_typeLogged && s_sensorType) {
+                    LOG_INFO("[BLE] Detected sensor type: %s", s_sensorType);
+                    s_typeLogged = true;
                 }
             }
 
@@ -251,7 +335,7 @@ class BLESensorScanCB : public NimBLEScanCallbacks {
     }
 
     void onScanEnd(const NimBLEScanResults& results, int reason) override {
-        if (s_addrValid && s_pScan) {
+        if ((s_addrValid || s_discoveryMode) && s_pScan) {
             s_pScan->start(0);
             LOG_DEBUG("[BLE] Scan restarted");
         }
@@ -397,6 +481,10 @@ void BleSensor::setAddr(const char* mac) {
         s_scanning = false;
     }
 
+    // Reset type detection for new sensor
+    s_sensorType = nullptr;
+    s_typeLogged = false;
+
     if (strlen(mac) == 0) {
         s_addrValid = false;
         memset(s_targetAddr, 0, 6);
@@ -425,6 +513,59 @@ void BleSensor::setAddr(const char* mac) {
 
 const char* BleSensor::getAddr() {
     return settings.get().bleSensorAddr;
+}
+
+const char* BleSensor::sensorType() {
+    return s_sensorType;
+}
+
+void BleSensor::startDiscovery() {
+    s_discoveryCount = 0;
+    s_lastPushedCount = 0;
+    s_discoveryMode = true;
+    s_discoveryStart = millis();
+
+    // Start scanning if not already running (e.g., no MAC configured)
+    if (!s_scanning && s_pScan) {
+        s_pScan->start(0);
+        s_scanning = true;
+    }
+
+    LOG_INFO("[BLE] Discovery scan started (%lums)", (unsigned long)BLE_DISCOVERY_MS);
+}
+
+bool BleSensor::isDiscovering() {
+    return s_discoveryMode;
+}
+
+bool BleSensor::pollDiscoveryUpdate() {
+    if (!s_discoveryMode) return false;
+    if (s_discoveryCount > s_lastPushedCount) {
+        s_lastPushedCount = s_discoveryCount;
+        return true;
+    }
+    return false;
+}
+
+bool BleSensor::pollDiscoveryComplete() {
+    if (s_discoveryMode && millis() - s_discoveryStart >= BLE_DISCOVERY_MS) {
+        s_discoveryMode = false;
+
+        // Stop scanning if no target configured
+        if (!s_addrValid && s_scanning && s_pScan) {
+            s_pScan->stop();
+            s_scanning = false;
+        }
+
+        LOG_INFO("[BLE] Discovery complete: %d sensor(s) found", s_discoveryCount);
+        return true;
+    }
+    return false;
+}
+
+const BleDiscoveredDevice* BleSensor::discoveryResults(int& count) {
+    count = s_discoveryCount;
+    return s_discovered;
 }
 
 #endif // BLE_ENABLE

@@ -193,6 +193,31 @@ input[type=range]::-moz-range-thumb{
 .ble-banner.info{background:rgba(0,122,255,0.12);color:var(--accent)}
 .ble-banner.muted{background:var(--seg-bg);color:var(--text2)}
 .ble-dimmed .status-grid{opacity:0.4}
+/* ── iOS Toggle ───────────────────────────────────────────────────────────── */
+.ios-toggle{position:relative;display:inline-block;width:44px;height:26px;flex-shrink:0}
+.ios-toggle input{opacity:0;width:0;height:0}
+.ios-toggle-slider{position:absolute;cursor:pointer;inset:0;background:var(--surface3);border-radius:13px;transition:.3s}
+.ios-toggle-slider:before{position:absolute;content:"";height:22px;width:22px;left:2px;bottom:2px;background:#fff;border-radius:50%;transition:.3s;box-shadow:0 1px 3px rgba(0,0,0,0.3)}
+.ios-toggle input:checked+.ios-toggle-slider{background:var(--green)}
+.ios-toggle input:checked+.ios-toggle-slider:before{transform:translateX(18px)}
+/* ── Signal Bars ──────────────────────────────────────────────────────────── */
+.signal-bars{display:inline-flex;align-items:flex-end;gap:2px;height:14px}
+.signal-bars i{display:block;width:3px;background:var(--surface3);border-radius:1px;transition:background .3s}
+.signal-bars i:nth-child(1){height:4px}.signal-bars i:nth-child(2){height:7px}
+.signal-bars i:nth-child(3){height:10px}.signal-bars i:nth-child(4){height:14px}
+.signal-bars[data-strength="1"] i:nth-child(1){background:var(--red)}
+.signal-bars[data-strength="2"] i:nth-child(-n+2){background:var(--orange)}
+.signal-bars[data-strength="3"] i:nth-child(-n+3){background:var(--green)}
+.signal-bars[data-strength="4"] i{background:var(--green)}
+/* ── BLE Config & Scan ────────────────────────────────────────────────────── */
+.ble-config-row{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.ble-scan-item{display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--seg-bg);border-radius:var(--radius-sm);cursor:pointer;margin-bottom:4px;transition:background .15s}
+.ble-scan-item:active{background:var(--surface3)}
+.ble-scan-item .scan-info{flex:1;min-width:0}
+.ble-scan-item .scan-type{font-size:13px;font-weight:500}
+.ble-scan-item .scan-addr{font-size:11px;color:var(--text2);font-family:monospace}
+@keyframes scan-pulse{0%,100%{opacity:1}50%{opacity:.5}}
+.scanning{animation:scan-pulse 1s infinite}
 .status-label{color:var(--text2);margin-right:auto}
 
 /* ── Settings & Forms ──────────────────────────────────────────────────── */
@@ -450,33 +475,45 @@ input[type=range]::-moz-range-thumb{
           <span id="bleBatt">--</span>
         </div>
         <div class="status-item">
-          <span class="status-label">RSSI</span>
-          <span id="bleRssi">--</span>
+          <span class="status-label">Signal</span>
+          <span id="bleRssi" class="signal-bars" data-strength="0"><i></i><i></i><i></i><i></i></span>
         </div>
         <div class="status-item">
           <span class="status-label">Last Update</span>
           <span id="bleAge">--</span>
         </div>
+        <div class="status-item" id="bleSensorTypeRow" style="display:none">
+          <span class="status-label">Sensor</span>
+          <span id="bleSensorType" style="font-size:12px">--</span>
+        </div>
       </div>
       <div style="padding:12px 0 0">
-        <label class="status-label" style="display:block;margin-bottom:6px">Sensor MAC</label>
-        <div style="display:flex;gap:8px">
+        <div class="ble-config-row">
+          <label class="status-label" style="margin:0">Sensor MAC</label>
           <input type="text" id="bleMacInput" placeholder="AA:BB:CC:DD:EE:FF"
                  maxlength="17" spellcheck="false" autocomplete="off"
-                 style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 10px;color:var(--text);font-family:monospace;font-size:13px">
-          <button class="save-btn" style="margin:0;white-space:nowrap" onclick="saveBleAddr()">Save</button>
+                 style="flex:1;min-width:0;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 10px;color:var(--text);font-family:monospace;font-size:13px">
         </div>
-        <div style="display:flex;align-items:center;gap:8px;margin-top:10px">
-          <label class="status-label" style="margin:0">Feed to Heat Pump</label>
-          <button id="bleFeedBtn" class="save-btn" style="margin:0;min-width:50px;font-size:12px" onclick="toggleBleFeed()">ON</button>
+        <div style="margin-top:8px">
+          <button class="save-btn" id="bleScanBtn" style="margin:0;width:100%;background:var(--surface3);color:var(--text);font-size:13px" onclick="startBleScan()">Scan for Sensors</button>
         </div>
-        <div style="display:flex;align-items:center;gap:8px;margin-top:10px">
+        <div id="bleScanResults" style="display:none;margin-top:8px"></div>
+        <div class="ble-config-row" style="margin-top:10px">
+          <label class="status-label" style="margin:0">Feed to HP</label>
+          <label class="ios-toggle">
+            <input type="checkbox" id="bleFeedToggle" onchange="toggleBleFeed()">
+            <span class="ios-toggle-slider"></span>
+          </label>
+        </div>
+        <div class="ble-config-row" style="margin-top:10px">
           <label class="status-label" style="margin:0">Stale Timeout</label>
-          <input type="number" id="bleTimeoutInput" min="30" max="600" step="10"
-                 style="width:70px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 8px;color:var(--text);font-size:13px;text-align:center">
-          <span style="font-size:12px;color:var(--text3)">sec</span>
-          <button class="save-btn" style="margin:0;font-size:12px" onclick="saveBleTimeout()">Save</button>
+          <div style="display:flex;align-items:center;gap:8px">
+            <input type="number" id="bleTimeoutInput" min="30" max="600" step="10"
+                   style="width:70px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 8px;color:var(--text);font-size:13px;text-align:center">
+            <span style="font-size:12px;color:var(--text3)">sec</span>
+          </div>
         </div>
+        <button class="save-btn" style="margin:12px 0 0;width:100%" onclick="saveBleConfig()">Save</button>
       </div>
     </div>
   </div>
@@ -966,6 +1003,7 @@ input[type=range]::-moz-range-thumb{
         if(msg.type==='state') onState(msg);
         else if(msg.type==='log') onLog(msg.msg);
         else if(msg.type==='ota') onOta(msg);
+        else if(msg.type==='bleScanResults') onBleScanResults(msg);
         else if(msg.type==='wifiSaved') onWifiSaved();
         else if(msg.type==='error') alert(msg.msg);
       }catch(e){}
@@ -1116,12 +1154,10 @@ input[type=range]::-moz-range-thumb{
         battEl.style.color=s.bleBattery<=15?'var(--red)':s.bleBattery<=30?'var(--orange)':''
       }else{$('bleBattRow').style.display='none'}
 
-      // RSSI with signal quality coloring
-      if(s.bleRssi){
-        $('bleRssi').textContent=s.bleRssi+' dBm';
-        var rssiAbs=Math.abs(s.bleRssi);
-        $('bleRssi').style.color=rssiAbs<=60?'var(--green)':rssiAbs<=80?'':'var(--red)'
-      }else{$('bleRssi').textContent='--';$('bleRssi').style.color=''}
+      // RSSI signal bars
+      var rssiEl=$('bleRssi');
+      if(s.bleRssi){var a=Math.abs(s.bleRssi);rssiEl.setAttribute('data-strength',a<=55?'4':a<=67?'3':a<=80?'2':'1');rssiEl.title=s.bleRssi+' dBm'}
+      else{rssiEl.setAttribute('data-strength','0');rssiEl.title=''}
 
       // Last update age
       if(s.bleStaleMs>0&&s.bleStaleMs<4294967295){
@@ -1133,12 +1169,19 @@ input[type=range]::-moz-range-thumb{
       if(!$('bleMacInput').matches(':focus')){$('bleMacInput').value=s.bleAddr||''}
 
       // Feed toggle
-      var feedBtn=$('bleFeedBtn');
-      feedBtn.textContent=s.bleFeed?'ON':'OFF';
-      feedBtn.style.background=s.bleFeed?'var(--green)':'var(--surface3)';
+      $('bleFeedToggle').checked=!!s.bleFeed;
 
       // Stale timeout (preserve user input while editing)
       if(!$('bleTimeoutInput').matches(':focus')){$('bleTimeoutInput').value=s.bleTimeout||90}
+
+      // Sensor type
+      if(s.bleSensorType){$('bleSensorTypeRow').style.display='';$('bleSensorType').textContent=s.bleSensorType}
+      else{$('bleSensorTypeRow').style.display='none'}
+
+      // Discovery state
+      var scanBtn=$('bleScanBtn');
+      if(s.bleDiscovering){scanBtn.textContent='Scanning\u2026';scanBtn.disabled=true;scanBtn.classList.add('scanning')}
+      else if(scanBtn.classList.contains('scanning')){scanBtn.textContent='Scan for Sensors';scanBtn.disabled=false;scanBtn.classList.remove('scanning')}
     }
 
     // CN105 header: glowing dot + status label
@@ -1266,20 +1309,63 @@ input[type=range]::-moz-range-thumb{
     $('wifiBanner').style.display='block';
   }
 
-  window.saveBleAddr=function(){
-    var v=$('bleMacInput').value.trim().toUpperCase();
-    if(v&&!/^([0-9A-F]{2}:){5}[0-9A-F]{2}$/.test(v)){alert('Invalid MAC format');return}
-    ws.send(JSON.stringify({cmd:'config',bleAddr:v}));
+  window.saveBleConfig=function(){
+    var mac=$('bleMacInput').value.trim().toUpperCase();
+    if(mac&&!/^([0-9A-F]{2}:){5}[0-9A-F]{2}$/.test(mac)){alert('Invalid MAC format');return}
+    var t=parseInt($('bleTimeoutInput').value,10);
+    if(isNaN(t)||t<30||t>600){alert('Timeout must be 30–600 seconds');return}
+    ws.send(JSON.stringify({cmd:'config',bleAddr:mac,bleTimeout:t}));
   };
   window.toggleBleFeed=function(){
-    var cur=$('bleFeedBtn').textContent==='ON';
-    ws.send(JSON.stringify({cmd:'config',bleFeed:!cur}));
+    ws.send(JSON.stringify({cmd:'config',bleFeed:$('bleFeedToggle').checked}));
   };
-  window.saveBleTimeout=function(){
-    var v=parseInt($('bleTimeoutInput').value,10);
-    if(isNaN(v)||v<30||v>600){alert('Timeout must be 30–600 seconds');return}
-    ws.send(JSON.stringify({cmd:'config',bleTimeout:v}));
+  window.startBleScan=function(){
+    var btn=$('bleScanBtn');
+    btn.textContent='Scanning\u2026';btn.disabled=true;btn.classList.add('scanning');
+    $('bleScanResults').style.display='none';
+    $('bleScanResults').textContent='';
+    ws.send(JSON.stringify({cmd:'bleScan'}));
   };
+  function onBleScanResults(msg){
+    if(msg.done){
+      var btn=$('bleScanBtn');
+      btn.textContent='Scan for Sensors';btn.disabled=false;btn.classList.remove('scanning');
+    }
+    var el=$('bleScanResults');
+    el.textContent='';
+    if(!msg.devices||msg.devices.length===0){
+      if(msg.done){
+        var empty=document.createElement('div');
+        empty.style.cssText='font-size:12px;color:var(--text3);padding:8px 0';
+        empty.textContent='No sensors found';
+        el.appendChild(empty);
+      }
+      el.style.display='block';return;
+    }
+    for(var i=0;i<msg.devices.length;i++){
+      var d=msg.devices[i];
+      var a=Math.abs(d.rssi);var str=a<=55?'4':a<=67?'3':a<=80?'2':'1';
+      var row=document.createElement('div');row.className='ble-scan-item';
+      row.setAttribute('data-addr',d.addr);
+      row.addEventListener('click',(function(addr){return function(){pickBleSensor(addr)}})(d.addr));
+      var bars=document.createElement('span');bars.className='signal-bars';bars.setAttribute('data-strength',str);
+      for(var b=0;b<4;b++) bars.appendChild(document.createElement('i'));
+      var info=document.createElement('div');info.className='scan-info';
+      var tp=document.createElement('div');tp.className='scan-type';tp.textContent=d.type;
+      var ad=document.createElement('div');ad.className='scan-addr';ad.textContent=d.addr+(d.name?' \u00b7 '+d.name:'');
+      info.appendChild(tp);info.appendChild(ad);
+      var rssiLbl=document.createElement('span');rssiLbl.style.cssText='font-size:11px;color:var(--text3)';rssiLbl.textContent=d.rssi+' dBm';
+      row.appendChild(bars);row.appendChild(info);row.appendChild(rssiLbl);
+      el.appendChild(row);
+    }
+    el.style.display='block';
+  }
+  function pickBleSensor(addr){
+    $('bleMacInput').value=addr;
+    $('bleScanResults').style.display='none';
+    saveBleConfig();
+  }
+  window.pickBleSensor=pickBleSensor;
 
   // ── Controls ───────────────────────────────────────────────────────────────
   window.setMode=function(btn){

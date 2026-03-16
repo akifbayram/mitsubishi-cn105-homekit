@@ -1,5 +1,7 @@
 #pragma once
 
+#include <sdkconfig.h>  // Ensure CONFIG_BT_ENABLED is available
+
 // ── Auto-enable BLE on Bluetooth-capable boards ────────────────────────────
 // Include this header anywhere that needs to check #ifdef BLE_ENABLE.
 // Opt out with -DBLE_DISABLE in build flags.

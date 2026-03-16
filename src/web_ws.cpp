@@ -264,6 +264,14 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
             pushState();
         }
 
+    } else if (strcmp(cmd, "bleScan") == 0) {
+#ifdef BLE_ENABLE
+        if (!BleSensor::isDiscovering()) {
+            BleSensor::startDiscovery();
+            LOG_INFO("[WebUI] BLE discovery scan requested");
+        }
+#endif
+
     } else if (strcmp(cmd, "wifi") == 0) {
         // ── WiFi credential update ──────────────────────────────────────
         const char *error = nullptr;
@@ -444,6 +452,8 @@ void WebUI::pushState() {
         if (!isnan(bleT)) snprintf(bleTStr, sizeof(bleTStr), "%.1f", bleT);
         if (!isnan(bleH)) snprintf(bleHStr, sizeof(bleHStr), "%.0f", bleH);
 
+        const char* sType = BleSensor::sensorType();
+
         n += snprintf(buf + n, sizeof(buf) - n,
             ",\"bleTemp\":%s"
             ",\"bleHumidity\":%s"
@@ -454,7 +464,9 @@ void WebUI::pushState() {
             ",\"bleStaleMs\":%lu"
             ",\"bleAddr\":\"%s\""
             ",\"bleFeed\":%s"
-            ",\"bleTimeout\":%u",
+            ",\"bleTimeout\":%u"
+            ",\"bleDiscovering\":%s"
+            ",\"bleSensorType\":%s%s%s",
             bleTStr,
             bleHStr,
             (int)bleB,
@@ -464,7 +476,9 @@ void WebUI::pushState() {
             (unsigned long)staleMs,
             BleSensor::getAddr(),
             BleSensor::isEnabled() ? "true" : "false",
-            (unsigned int)settings.get().bleStaleTimeoutS
+            (unsigned int)settings.get().bleStaleTimeoutS,
+            BleSensor::isDiscovering() ? "true" : "false",
+            sType ? "\"" : "", sType ? sType : "null", sType ? "\"" : ""
         );
     }
 #endif
@@ -497,6 +511,32 @@ void WebUI::broadcastLog(const char *msg) {
 // loop() — called from main loop, pushes state every 1 second
 // ══════════════════════════════════════════════════════════════════════════════
 
+void WebUI::pushDiscoveryResults(bool done) {
+#ifdef BLE_ENABLE
+    if (_wsClientFd < 0) return;
+
+    int count = 0;
+    const BleDiscoveredDevice* devs = BleSensor::discoveryResults(count);
+
+    char buf[768];
+    int n = snprintf(buf, sizeof(buf), "{\"type\":\"bleScanResults\",\"done\":%s,\"devices\":[",
+                     done ? "true" : "false");
+
+    for (int i = 0; i < count; i++) {
+        char escName[50];
+        jsonEscape(devs[i].name, escName, sizeof(escName));
+        n += snprintf(buf + n, sizeof(buf) - n,
+            "%s{\"addr\":\"%s\",\"name\":\"%s\",\"type\":\"%s\",\"rssi\":%d}",
+            i > 0 ? "," : "",
+            devs[i].addr, escName, devs[i].type, devs[i].rssi);
+        if (n >= (int)sizeof(buf) - 2) break;
+    }
+
+    n += snprintf(buf + n, sizeof(buf) - n, "]}");
+    sendWsText(_wsClientFd, buf);
+#endif
+}
+
 void WebUI::loop() {
     if (_wsClientFd < 0) return;
 
@@ -505,4 +545,12 @@ void WebUI::loop() {
         _lastStatePush = now;
         pushState();
     }
+
+#ifdef BLE_ENABLE
+    if (BleSensor::pollDiscoveryComplete()) {
+        pushDiscoveryResults(true);
+    } else if (BleSensor::pollDiscoveryUpdate()) {
+        pushDiscoveryResults(false);
+    }
+#endif
 }

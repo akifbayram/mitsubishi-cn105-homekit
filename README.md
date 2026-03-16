@@ -14,7 +14,26 @@ Controls Mitsubishi mini split heat pumps via the CN105 serial connector, compat
 </table>
 
 > [!CAUTION]
-> **Use at your own risk.** This is an unofficial implementation based on the reverse-engineered CN105 serial protocol. It is not developed, endorsed, or supported by Mitsubishi Electric or Apple. Connecting third-party hardware to your heat pump may void its warranty. Not all units support every feature, and behavior may vary by model. The authors and contributors provide this software as-is, with no warranty or guarantee of any kind. 
+> **Use at your own risk.** This is an unofficial implementation based on the reverse-engineered CN105 serial protocol. It is not developed, endorsed, or supported by Mitsubishi Electric or Apple. Connecting third-party hardware to your heat pump may void its warranty. Not all units support every feature, and behavior may vary by model. The authors and contributors provide this software as-is, with no warranty or guarantee of any kind.
+
+## Features
+
+- **Native Apple HomeKit** — no bridge, cloud, or Home Assistant required
+- **Web UI** — real-time control, diagnostics, and log streaming
+- **Browser-based flashing** — no development tools needed ([web flasher](https://serin-labs.github.io/flash/))
+- **BLE remote temperature sensor** — Govee, Xiaomi (PVVX), BTHome v2, with auto-detection
+- **OTA firmware updates** — with SHA256 verification and automatic rollback
+- **Dual setpoint Auto mode** — independent heating and cooling thresholds
+- **Multi-board support** — ESP32, ESP32-C3, ESP32-C6, ESP32-S3, ESP32-P4
+- **WiFi recovery** — automatic fallback AP with web-based credential entry
+
+## Quick Start
+
+1. **Flash** — Open the [web flasher](https://serin-labs.github.io/flash/), connect your board via USB, and flash the firmware from your browser
+2. **Connect** — Join the **Serin-XXXX** WiFi network (password: `serinlabs`) and enter your WiFi credentials
+3. **Pair** — Open Apple Home, scan the QR code from the web UI at `http://<device-ip>:8080`
+
+For developer setup with PlatformIO, custom boards, and build-time options, see [Setup](#setup).
 
 ## Requirements
 
@@ -40,7 +59,7 @@ For a list of known-compatible models, see the [MitsubishiCN105ESPHome supported
 | Board | PlatformIO env | Build command | Tested |
 |-------|---------------|---------------|-------|
 | M5Stack NanoC6 (ESP32-C6) | `nanoc6` | `pio run -e nanoc6` | ✅ |
-| M5Stack Atom S3 Lite | `m5atoms3-lite` | `pio run -e m5atoms3-lite` | ✅ |
+| M5Stack Atom S3 Lite (ESP32-C6) | `m5atoms3-lite` | `pio run -e m5atoms3-lite` | ✅ |
 | Generic ESP32 DevKit | `esp32-devkit` | `pio run -e esp32-devkit` | ❌ |
 | ESP32-S3-DevKitC-1 | `esp32s3-devkit` | `pio run -e esp32s3-devkit` | ❌ |
 | ESP32-C3 SuperMini / XIAO | `esp32c3-mini` | `pio run -e esp32c3-mini` | ❌ |
@@ -62,13 +81,17 @@ CN105 Connector          M5Stack NanoC6 (Grove)
 └──────────────┘         └──────────────────────┘
 ```
 
-The CN105 connector is typically located on the right side of ductless indoor unit's control board behind the front panel. Power is provided by the unit through pins 2 and 3 — no separate power supply is needed. If your board doesn't have a Grove port, you can connect directly to the appropriate GPIO pins for RX/TX, GND, and 5V (see [board profiles](#supported-boards)).
+The CN105 connector is typically located on the right side of ductless indoor unit's control board behind the front panel. Power is provided by the unit through pins 2 and 3. If your board doesn't have a Grove port, you can connect directly to the appropriate GPIO pins for RX/TX, GND, and 5V (see [board profiles](#supported-boards)).
 
 ## Setup
 
-### 1. Build and Flash
+### 1. Flash Firmware
 
-Clone the repository and flash the firmware:
+**Option A — Web Flasher (recommended):**
+
+No tools to install. Visit the [web flasher](https://serin-labs.github.io/flash/), connect your board via USB, select your board type, and click flash. Works in Chrome and Edge.
+
+**Option B — PlatformIO (developers):**
 
 ```bash
 git clone https://github.com/akifbayram/mitsubishi-cn105-homekit.git
@@ -138,18 +161,18 @@ Once connected to WiFi:
 
 Wall-mounted units measure temperature at ceiling height near the indoor unit, which often reads warmer than the actual living space. An external BLE sensor placed at a better location gives the heat pump a more accurate room temperature to work with.
 
-The firmware passively listens for BLE advertisements from a configured sensor — no Bluetooth pairing is needed, the sensor just needs to be powered on and broadcasting. The temperature is resent to the heat pump every 20 seconds. If no BLE data is received for 90 seconds, the heat pump automatically reverts to its internal thermistor (no error, no interruption — it just switches back silently).
+The firmware passively listens for BLE advertisements from a configured sensor. No Bluetooth pairing is needed, the sensor just needs to be powered on and broadcasting. The temperature is resent to the heat pump every 20 seconds. If no BLE data is received for 90 seconds, the heat pump automatically reverts to its internal thermistor.
 
 ### Supported Sensors
 
-The firmware auto-detects the sensor type from the BLE advertisement format — no build flags needed.
+The firmware auto-detects the sensor type from the BLE advertisement format.
 
 | Protocol | Devices | Tested |
 |----------|---------|:------:|
 | Govee V2 | H5074, H5051, H5052, H5071 | ✅ |
 | Govee V3 | H5072, H5075 | ❌ |
 | Govee V1 | H5100, H5101, H5102, H5103, H5104, H5105, H5108, H5110, H5174, H5177, GV5179 | ❌ |
-| PVVX | Xiaomi LYWSD03MMC, CGG1 (requires [PVVX custom firmware](https://github.com/pvvx/ATC_MiThermometer) — stock Xiaomi firmware uses encrypted advertisements that can't be decoded) | ❌ |
+| PVVX | Xiaomi LYWSD03MMC, CGG1 (requires [PVVX custom firmware](https://github.com/pvvx/ATC_MiThermometer)) | ❌ |
 | BTHome v2 | SwitchBot, Shelly, or any BTHome v2 device | ❌ |
 
 ### Web UI Configuration
