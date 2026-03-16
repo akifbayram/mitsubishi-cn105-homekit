@@ -48,19 +48,24 @@ static bool parseMac(const char* str, uint8_t out[6]) {
 // ══════════════════════════════════════════════════════════════════════════════
 
 #if BLE_SENSOR_TYPE == BLE_TYPE_GOVEE_V3
-// Govee H5072/H5075/H5101/H5102/H5174/H5177
+// Govee H5072/H5075 (msg_length 6 after company ID)
+// Manufacturer data 0xEC88: [0-1]=company ID, [2]=padding, [3-5]=combined temp+hum,
+// [6]=battery (lower 7 bits) + error flag (MSB)
+// Ref: HA govee-ble decode_temp_humid_battery_error()
 static bool decode(const uint8_t* mfr, uint8_t len) {
     if (len < 7) return false;
+    // Check error flag (MSB of last data byte)
+    if (mfr[6] & 0x80) return false;
     int32_t val = ((int32_t)mfr[3] << 16) | ((int32_t)mfr[4] << 8) | mfr[5];
     bool negative = false;
     if (val & 0x800000) { val = val ^ 0x800000; negative = true; }
-    float temp = (float)val / 10000.0f;
+    float temp = (float)(val / 1000) / 10.0f;  // Match HA: int division then /10
     if (negative) temp = -temp;
     float hum = (float)(val % 1000) / 10.0f;
     if (!validTemp(temp) || !validHum(hum)) return false;
     s_temperature = temp;
     s_humidity = hum;
-    if (len >= 7 && validBatt((int8_t)mfr[6])) s_battery = (int8_t)mfr[6];
+    s_battery = (int8_t)(mfr[6] & 0x7F);  // Mask off error bit
     return true;
 }
 
