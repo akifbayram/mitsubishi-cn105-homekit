@@ -1163,15 +1163,15 @@ input[type=range]::-moz-range-thumb{
     $('wifiBanner').style.display='block';
   }
 
-  function saveBleAddr(){
+  window.saveBleAddr=function(){
     var v=$('bleMacInput').value.trim().toUpperCase();
     if(v&&!/^([0-9A-F]{2}:){5}[0-9A-F]{2}$/.test(v)){alert('Invalid MAC format');return}
     ws.send(JSON.stringify({cmd:'config',bleAddr:v}));
-  }
-  function toggleBleFeed(){
+  };
+  window.toggleBleFeed=function(){
     var cur=$('bleFeedBtn').textContent==='ON';
     ws.send(JSON.stringify({cmd:'config',bleFeed:!cur}));
-  }
+  };
 
   // ── Controls ───────────────────────────────────────────────────────────────
   window.setMode=function(btn){

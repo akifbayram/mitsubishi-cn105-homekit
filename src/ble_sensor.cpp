@@ -66,16 +66,17 @@ static bool decode(const uint8_t* mfr, uint8_t len) {
 
 #elif BLE_SENSOR_TYPE == BLE_TYPE_GOVEE_V2
 // Govee H5074/H5100/H5104/H5105/H5179
+// Manufacturer data 0xEC88: [0-1]=company ID, [2]=reserved, [3-4]=temp LE, [5-6]=hum LE, [7]=battery
 static bool decode(const uint8_t* mfr, uint8_t len) {
     if (len < 8) return false;
-    int16_t rawTemp = (int16_t)(mfr[4] | (mfr[5] << 8));
-    uint16_t rawHum = (uint16_t)(mfr[6] | (mfr[7] << 8));
+    int16_t rawTemp = (int16_t)(mfr[3] | (mfr[4] << 8));
+    uint16_t rawHum = (uint16_t)(mfr[5] | (mfr[6] << 8));
     float temp = (float)rawTemp / 100.0f;
     float hum = (float)rawHum / 100.0f;
     if (!validTemp(temp) || !validHum(hum)) return false;
     s_temperature = temp;
     s_humidity = hum;
-    if (len >= 9 && validBatt((int8_t)mfr[8])) s_battery = (int8_t)mfr[8];
+    if (len >= 8 && validBatt((int8_t)mfr[7])) s_battery = (int8_t)mfr[7];
     return true;
 }
 
@@ -156,13 +157,15 @@ static void gapCallback(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *pa
                 if (!s_addrValid || memcmp(param->scan_rst.bda, s_targetAddr, 6) != 0)
                     break;
 
+                // Parse both advertisement data AND scan response data
+                // (H5074 sends temp in scan response, only available with active scanning)
                 uint8_t *adv = param->scan_rst.ble_adv;
-                uint8_t advLen = param->scan_rst.adv_data_len;
+                uint8_t totalLen = param->scan_rst.adv_data_len + param->scan_rst.scan_rsp_len;
 
                 uint8_t i = 0;
-                while (i + 1 < advLen) {
+                while (i + 1 < totalLen) {
                     uint8_t fieldLen = adv[i];
-                    if (fieldLen == 0 || i + fieldLen >= advLen) break;
+                    if (fieldLen == 0 || i + fieldLen >= totalLen) break;
                     uint8_t fieldType = adv[i + 1];
                     uint8_t *fieldData = &adv[i + 2];
                     uint8_t dataLen = fieldLen - 1;
@@ -267,7 +270,7 @@ void BleSensor::begin() {
     esp_ble_gap_register_callback(gapCallback);
 
     esp_ble_scan_params_t scanParams = {};
-    scanParams.scan_type          = BLE_SCAN_TYPE_PASSIVE;
+    scanParams.scan_type          = BLE_SCAN_TYPE_ACTIVE;
     scanParams.own_addr_type      = BLE_ADDR_TYPE_PUBLIC;
     scanParams.scan_filter_policy = BLE_SCAN_FILTER_ALLOW_ALL;
     scanParams.scan_interval      = 0x50;
