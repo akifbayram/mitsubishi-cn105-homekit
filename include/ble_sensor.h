@@ -19,9 +19,6 @@ constexpr uint32_t BLE_STALE_TIMEOUT_MS = 90000;  // Mark stale after 90s no dat
 #if !defined(CONFIG_BT_ENABLED)
     #error "BLE_SENSOR_TYPE requires a board with Bluetooth support"
 #endif
-#if !defined(CONFIG_BT_BLUEDROID_ENABLED)
-    #error "BLE_SENSOR_TYPE requires Bluedroid (not NimBLE) BLE host stack"
-#endif
 
 #if BLE_SENSOR_TYPE != BLE_TYPE_GOVEE_V3 && \
     BLE_SENSOR_TYPE != BLE_TYPE_GOVEE_V2 && \
@@ -31,7 +28,7 @@ constexpr uint32_t BLE_STALE_TIMEOUT_MS = 90000;  // Mark stale after 90s no dat
 #endif
 
 namespace BleSensor {
-    void begin();                        // Init BT controller + Bluedroid GAP
+    void begin();                        // Init NimBLE + start scanning
     void loop(CN105Controller &cn105);   // Keepalive + stale detection
 
     float    temperature();   // NAN if no data

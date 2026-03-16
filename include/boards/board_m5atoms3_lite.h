@@ -23,5 +23,5 @@
 
 // ESP32-S3 has HWCDC
 #define USE_HWCDC_DEBUG         1
-#define UART_NEEDS_RX_PULLUP    0
+#define UART_NEEDS_RX_PULLUP    1
 #define UART_USE_XTAL_CLK       0

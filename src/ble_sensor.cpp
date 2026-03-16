@@ -4,9 +4,7 @@
 #include "settings.h"
 #include "logging.h"
 
-#include <esp_bt.h>
-#include <esp_bt_main.h>
-#include <esp_gap_ble_api.h>
+#include <NimBLEDevice.h>
 #include <cstring>
 #include <cmath>
 
@@ -20,9 +18,11 @@ static uint32_t s_lastUpdate  = 0;
 
 // ── Scanner state ───────────────────────────────────────────────────────────
 static uint8_t  s_targetAddr[6] = {0};
+static char     s_targetLower[18] = {0};  // lowercase "aa:bb:cc:dd:ee:ff"
 static bool     s_addrValid     = false;
 static bool     s_scanning      = false;
 static bool     s_staleReverted = false;
+static NimBLEScan* s_pScan      = nullptr;
 
 // ── Keepalive state ─────────────────────────────────────────────────────────
 static uint32_t s_lastKeepalive = 0;
@@ -41,6 +41,13 @@ static bool parseMac(const char* str, uint8_t out[6]) {
         return false;
     for (int i = 0; i < 6; i++) out[i] = (uint8_t)b[i];
     return true;
+}
+
+// ── Update lowercase MAC string for NimBLE address comparison ───────────────
+static void updateTargetLower() {
+    snprintf(s_targetLower, sizeof(s_targetLower), "%02x:%02x:%02x:%02x:%02x:%02x",
+             s_targetAddr[0], s_targetAddr[1], s_targetAddr[2],
+             s_targetAddr[3], s_targetAddr[4], s_targetAddr[5]);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -144,96 +151,82 @@ static bool decode(const uint8_t* svc, uint8_t len) {
 #endif
 
 // ══════════════════════════════════════════════════════════════════════════════
-// GAP Callback
+// NimBLE Scan Callbacks
 // ══════════════════════════════════════════════════════════════════════════════
 
-static void gapCallback(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param) {
-    switch (event) {
-        case ESP_GAP_BLE_SCAN_PARAM_SET_COMPLETE_EVT:
-            if (s_addrValid) {
-                esp_ble_gap_start_scanning(0xFFFF);
-                s_scanning = true;
-                LOG_INFO("[BLE] Scanning started");
-            }
-            break;
+class BLESensorScanCB : public NimBLEScanCallbacks {
+    void onResult(const NimBLEAdvertisedDevice* device) override {
+        if (!s_addrValid) return;
 
-        case ESP_GAP_BLE_SCAN_RESULT_EVT:
-            if (param->scan_rst.search_evt == ESP_GAP_SEARCH_INQ_RES_EVT) {
-                if (!s_addrValid || memcmp(param->scan_rst.bda, s_targetAddr, 6) != 0)
-                    break;
+        // Compare MAC address (NimBLE toString() returns lowercase colon-separated)
+        if (device->getAddress().toString() != s_targetLower) return;
 
-                // Parse both advertisement data AND scan response data
-                // (H5074 sends temp in scan response, only available with active scanning)
-                uint8_t *adv = param->scan_rst.ble_adv;
-                uint8_t totalLen = param->scan_rst.adv_data_len + param->scan_rst.scan_rsp_len;
+        // Parse raw advertisement payload (same AD structure regardless of BLE stack)
+        const std::vector<uint8_t>& payload = device->getPayload();
+        size_t totalLen = payload.size();
+        const uint8_t* adv = payload.data();
 
-                uint8_t i = 0;
-                while (i + 1 < totalLen) {
-                    uint8_t fieldLen = adv[i];
-                    if (fieldLen == 0 || i + fieldLen >= totalLen) break;
-                    uint8_t fieldType = adv[i + 1];
-                    uint8_t *fieldData = &adv[i + 2];
-                    uint8_t dataLen = fieldLen - 1;
+        uint8_t i = 0;
+        while (i + 1 < totalLen) {
+            uint8_t fieldLen = adv[i];
+            if (fieldLen == 0 || i + fieldLen >= totalLen) break;
+            uint8_t fieldType = adv[i + 1];
+            const uint8_t *fieldData = &adv[i + 2];
+            uint8_t dataLen = fieldLen - 1;
 
 #if BLE_SENSOR_TYPE == BLE_TYPE_GOVEE_V3 || BLE_SENSOR_TYPE == BLE_TYPE_GOVEE_V2
-                    if (fieldType == 0xFF && dataLen >= 2) {
-                        uint16_t companyId = fieldData[0] | (fieldData[1] << 8);
-                        if (companyId == 0xEC88) {
-                            taskENTER_CRITICAL(&s_mux);
-                            if (decode(fieldData, dataLen)) {
-                                s_rssi = param->scan_rst.rssi;
-                                s_lastUpdate = millis();
-                                s_staleReverted = false;
-                            }
-                            taskEXIT_CRITICAL(&s_mux);
-                        }
+            if (fieldType == 0xFF && dataLen >= 2) {
+                uint16_t companyId = fieldData[0] | (fieldData[1] << 8);
+                if (companyId == 0xEC88) {
+                    taskENTER_CRITICAL(&s_mux);
+                    if (decode(fieldData, dataLen)) {
+                        s_rssi = device->getRSSI();
+                        s_lastUpdate = millis();
+                        s_staleReverted = false;
                     }
-#elif BLE_SENSOR_TYPE == BLE_TYPE_PVVX
-                    if (fieldType == 0x16 && dataLen >= 2) {
-                        uint16_t uuid = fieldData[0] | (fieldData[1] << 8);
-                        if (uuid == 0x181A && dataLen >= 15) {
-                            taskENTER_CRITICAL(&s_mux);
-                            if (decode(fieldData + 2, dataLen - 2)) {
-                                s_rssi = param->scan_rst.rssi;
-                                s_lastUpdate = millis();
-                                s_staleReverted = false;
-                            }
-                            taskEXIT_CRITICAL(&s_mux);
-                        }
-                    }
-#elif BLE_SENSOR_TYPE == BLE_TYPE_BTHOME
-                    if (fieldType == 0x16 && dataLen >= 2) {
-                        uint16_t uuid = fieldData[0] | (fieldData[1] << 8);
-                        if (uuid == 0xFCD2) {
-                            taskENTER_CRITICAL(&s_mux);
-                            if (decode(fieldData + 2, dataLen - 2)) {
-                                s_rssi = param->scan_rst.rssi;
-                                s_lastUpdate = millis();
-                                s_staleReverted = false;
-                            }
-                            taskEXIT_CRITICAL(&s_mux);
-                        }
-                    }
-#endif
-                    i += fieldLen + 1;
-                }
-            } else if (param->scan_rst.search_evt == ESP_GAP_SEARCH_INQ_CMPL_EVT) {
-                if (s_addrValid) {
-                    esp_ble_gap_start_scanning(0xFFFF);
-                    LOG_DEBUG("[BLE] Scan restarted");
+                    taskEXIT_CRITICAL(&s_mux);
                 }
             }
-            break;
-
-        case ESP_GAP_BLE_SCAN_STOP_COMPLETE_EVT:
-            s_scanning = false;
-            LOG_DEBUG("[BLE] Scan stopped");
-            break;
-
-        default:
-            break;
+#elif BLE_SENSOR_TYPE == BLE_TYPE_PVVX
+            if (fieldType == 0x16 && dataLen >= 2) {
+                uint16_t uuid = fieldData[0] | (fieldData[1] << 8);
+                if (uuid == 0x181A && dataLen >= 15) {
+                    taskENTER_CRITICAL(&s_mux);
+                    if (decode(fieldData + 2, dataLen - 2)) {
+                        s_rssi = device->getRSSI();
+                        s_lastUpdate = millis();
+                        s_staleReverted = false;
+                    }
+                    taskEXIT_CRITICAL(&s_mux);
+                }
+            }
+#elif BLE_SENSOR_TYPE == BLE_TYPE_BTHOME
+            if (fieldType == 0x16 && dataLen >= 2) {
+                uint16_t uuid = fieldData[0] | (fieldData[1] << 8);
+                if (uuid == 0xFCD2) {
+                    taskENTER_CRITICAL(&s_mux);
+                    if (decode(fieldData + 2, dataLen - 2)) {
+                        s_rssi = device->getRSSI();
+                        s_lastUpdate = millis();
+                        s_staleReverted = false;
+                    }
+                    taskEXIT_CRITICAL(&s_mux);
+                }
+            }
+#endif
+            i += fieldLen + 1;
+        }
     }
-}
+
+    void onScanEnd(const NimBLEScanResults& results, int reason) override {
+        if (s_addrValid && s_pScan) {
+            s_pScan->start(0);
+            LOG_DEBUG("[BLE] Scan restarted");
+        }
+    }
+};
+
+static BLESensorScanCB scanCallbacks;
 
 // ══════════════════════════════════════════════════════════════════════════════
 // Public API
@@ -243,6 +236,7 @@ void BleSensor::begin() {
     const char* addr = settings.get().bleSensorAddr;
     if (strlen(addr) > 0 && parseMac(addr, s_targetAddr)) {
         s_addrValid = true;
+        updateTargetLower();
         LOG_INFO("[BLE] Target sensor: %s", addr);
     } else {
         LOG_INFO("[BLE] No sensor MAC configured — scanning deferred");
@@ -250,41 +244,22 @@ void BleSensor::begin() {
 
     uint32_t heapBefore = esp_get_free_heap_size();
 
-    esp_bt_controller_config_t bt_cfg = BT_CONTROLLER_INIT_CONFIG_DEFAULT();
-    esp_err_t err = esp_bt_controller_init(&bt_cfg);
-    if (err != ESP_OK) {
-        LOG_ERROR("[BLE] BT controller init failed: %d", err);
-        return;
-    }
-    err = esp_bt_controller_enable(ESP_BT_MODE_BLE);
-    if (err != ESP_OK) {
-        LOG_ERROR("[BLE] BT controller enable failed: %d", err);
-        return;
-    }
-    err = esp_bluedroid_init();
-    if (err != ESP_OK) {
-        LOG_ERROR("[BLE] Bluedroid init failed: %d", err);
-        return;
-    }
-    err = esp_bluedroid_enable();
-    if (err != ESP_OK) {
-        LOG_ERROR("[BLE] Bluedroid enable failed: %d", err);
-        return;
-    }
+    NimBLEDevice::init("");
+    s_pScan = NimBLEDevice::getScan();
+    s_pScan->setScanCallbacks(&scanCallbacks, true);  // true = want duplicates
+    s_pScan->setActiveScan(true);
+    s_pScan->setInterval(50);   // 50ms
+    s_pScan->setWindow(30);     // 30ms
+    s_pScan->setDuplicateFilter(false);
 
-    esp_ble_gap_register_callback(gapCallback);
-
-    esp_ble_scan_params_t scanParams = {};
-    scanParams.scan_type          = BLE_SCAN_TYPE_ACTIVE;
-    scanParams.own_addr_type      = BLE_ADDR_TYPE_PUBLIC;
-    scanParams.scan_filter_policy = BLE_SCAN_FILTER_ALLOW_ALL;
-    scanParams.scan_interval      = 0x50;
-    scanParams.scan_window        = 0x30;
-    scanParams.scan_duplicate     = BLE_SCAN_DUPLICATE_DISABLE;
-    esp_ble_gap_set_scan_params(&scanParams);
+    if (s_addrValid) {
+        s_pScan->start(0);  // 0 = scan forever
+        s_scanning = true;
+        LOG_INFO("[BLE] Scanning started");
+    }
 
     uint32_t heapAfter = esp_get_free_heap_size();
-    LOG_INFO("[BLE] Init complete. Heap: %u -> %u (-%u bytes)",
+    LOG_INFO("[BLE] Init complete (NimBLE). Heap: %u -> %u (-%u bytes)",
              heapBefore, heapAfter, heapBefore - heapAfter);
     if (heapAfter < 30000) {
         LOG_WARN("[BLE] Low heap after BLE init: %u bytes remaining", heapAfter);
@@ -382,14 +357,15 @@ void BleSensor::setEnabled(bool enabled) {
 void BleSensor::setAddr(const char* mac) {
     if (!mac) return;
 
-    if (s_scanning) {
-        esp_ble_gap_stop_scanning();
+    if (s_scanning && s_pScan) {
+        s_pScan->stop();
         s_scanning = false;
     }
 
     if (strlen(mac) == 0) {
         s_addrValid = false;
         memset(s_targetAddr, 0, 6);
+        memset(s_targetLower, 0, sizeof(s_targetLower));
         strncpy(settings.get().bleSensorAddr, "", sizeof(settings.get().bleSensorAddr));
         settings.save();
         LOG_INFO("[BLE] Sensor address cleared");
@@ -398,12 +374,15 @@ void BleSensor::setAddr(const char* mac) {
 
     if (parseMac(mac, s_targetAddr)) {
         s_addrValid = true;
+        updateTargetLower();
         strncpy(settings.get().bleSensorAddr, mac, sizeof(settings.get().bleSensorAddr) - 1);
         settings.get().bleSensorAddr[sizeof(settings.get().bleSensorAddr) - 1] = '\0';
         settings.save();
         LOG_INFO("[BLE] Sensor address set: %s", mac);
-        esp_ble_gap_start_scanning(0xFFFF);
-        s_scanning = true;
+        if (s_pScan) {
+            s_pScan->start(0);
+            s_scanning = true;
+        }
     } else {
         LOG_WARN("[BLE] Invalid MAC format: %s", mac);
     }

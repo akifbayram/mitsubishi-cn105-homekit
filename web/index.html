@@ -185,6 +185,14 @@ input[type=range]::-moz-range-thumb{
 .status-dot{display:inline-block;width:8px;height:8px;border-radius:50%;flex-shrink:0}
 .status-dot.running{background:var(--green)}
 .status-dot.idle{background:var(--text3)}
+.status-dot.active{background:var(--green);box-shadow:0 0 6px var(--green)}
+.status-dot.warning{background:var(--orange)}
+.status-dot.error{background:var(--red)}
+.ble-banner{display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:var(--radius-sm);font-size:12px;font-weight:500;margin-bottom:8px;line-height:1.4}
+.ble-banner.warn{background:rgba(255,59,48,0.12);color:var(--red)}
+.ble-banner.info{background:rgba(0,122,255,0.12);color:var(--accent)}
+.ble-banner.muted{background:var(--seg-bg);color:var(--text2)}
+.ble-dimmed .status-grid{opacity:0.4}
 .status-label{color:var(--text2);margin-right:auto}
 
 /* ── Settings & Forms ──────────────────────────────────────────────────── */
@@ -420,10 +428,12 @@ input[type=range]::-moz-range-thumb{
   <div class="card" style="padding:0;display:none" id="bleCard">
     <div class="collapse-header" onclick="togglePanel(this)">
       <span class="collapse-title">Remote Sensor</span>
+      <span id="bleStatusLabel" style="font-size:12px;color:var(--text2);font-weight:400"></span>
       <span class="status-dot idle" id="bleDot"></span>
       <span class="collapse-chevron">&#8250;</span>
     </div>
     <div class="collapse-body" id="bleBody">
+      <div id="bleBanner" class="ble-banner" style="display:none"></div>
       <div class="status-grid">
         <div class="status-item">
           <span class="status-label">Temp</span>
@@ -1050,20 +1060,68 @@ input[type=range]::-moz-range-thumb{
     if(s.bleTemp!==undefined){
       $('bleCard').style.display='';
       var bleDot=$('bleDot');
-      if(s.bleActive){bleDot.className='status-dot active'}
-      else if(s.bleStale){bleDot.className='status-dot error'}
-      else{bleDot.className='status-dot idle'}
+      var banner=$('bleBanner');
+      var statusLbl=$('bleStatusLabel');
+      var bleBody=$('bleBody');
+      var noMac=!s.bleAddr;
+      var waiting=!noMac&&!s.bleActive&&!s.bleStale;
+      var stale=!!s.bleStale;
+      var feedOff=!s.bleFeed;
+
+      // Status dot + header label (visible when collapsed)
+      if(noMac){bleDot.className='status-dot idle';statusLbl.textContent='Not Configured';statusLbl.style.color='var(--text3)'}
+      else if(stale){bleDot.className='status-dot error';statusLbl.textContent='Stale';statusLbl.style.color='var(--red)'}
+      else if(s.bleActive&&feedOff){bleDot.className='status-dot warning';statusLbl.textContent='Feed Off';statusLbl.style.color='var(--orange)'}
+      else if(s.bleActive){bleDot.className='status-dot active';statusLbl.textContent='Active';statusLbl.style.color='var(--green)'}
+      else{bleDot.className='status-dot idle';statusLbl.textContent='Scanning\u2026';statusLbl.style.color='var(--text2)'}
+
+      // Contextual banner (visible when expanded)
+      if(noMac){banner.className='ble-banner info';banner.textContent='Configure a sensor MAC address to begin';banner.style.display='flex'}
+      else if(stale){
+        var staleSec=Math.floor((s.bleStaleMs||0)/1000);
+        var staleStr=staleSec<60?staleSec+'s':Math.floor(staleSec/60)+'m';
+        banner.className='ble-banner warn';banner.textContent='No update for '+staleStr+' \u2014 reverted to internal sensor';banner.style.display='flex'
+      }
+      else if(waiting){banner.className='ble-banner muted';banner.textContent='Scanning for sensor\u2026';banner.style.display='flex'}
+      else if(s.bleActive&&feedOff){banner.className='ble-banner muted';banner.textContent='Not feeding temperature to heat pump';banner.style.display='flex'}
+      else if(s.bleBattery>=0&&s.bleBattery<=15){banner.className='ble-banner warn';banner.textContent='Sensor battery low ('+s.bleBattery+'%)';banner.style.display='flex'}
+      else{banner.style.display='none'}
+
+      // Dim readings grid when no data available
+      bleBody.classList.toggle('ble-dimmed',noMac||waiting);
+
+      // Temperature
       $('bleTemp').textContent=s.bleTemp!=null?fmtReadingTemp(s.bleTemp)+unitStr():'--';
+
+      // Humidity
       if(s.bleHumidity!=null&&s.bleHumidity>=0){$('bleHumRow').style.display='';$('bleHum').textContent=s.bleHumidity+'%'}
       else{$('bleHumRow').style.display='none'}
-      if(s.bleBattery>=0){$('bleBattRow').style.display='';$('bleBatt').textContent=s.bleBattery+'%'}
-      else{$('bleBattRow').style.display='none'}
-      $('bleRssi').textContent=s.bleRssi?s.bleRssi+' dBm':'--';
+
+      // Battery with color coding
+      if(s.bleBattery>=0){
+        $('bleBattRow').style.display='';
+        var battEl=$('bleBatt');
+        battEl.textContent=s.bleBattery+'%';
+        battEl.style.color=s.bleBattery<=15?'var(--red)':s.bleBattery<=30?'var(--orange)':''
+      }else{$('bleBattRow').style.display='none'}
+
+      // RSSI with signal quality coloring
+      if(s.bleRssi){
+        $('bleRssi').textContent=s.bleRssi+' dBm';
+        var rssiAbs=Math.abs(s.bleRssi);
+        $('bleRssi').style.color=rssiAbs<=60?'var(--green)':rssiAbs<=80?'':'var(--red)'
+      }else{$('bleRssi').textContent='--';$('bleRssi').style.color=''}
+
+      // Last update age
       if(s.bleStaleMs>0&&s.bleStaleMs<4294967295){
         var sec=Math.floor(s.bleStaleMs/1000);
-        $('bleAge').textContent=sec<60?sec+'s':Math.floor(sec/60)+'m '+sec%60+'s';
+        $('bleAge').textContent=sec<60?sec+'s':Math.floor(sec/60)+'m '+sec%60+'s'
       }else{$('bleAge').textContent=s.bleActive?'now':'--'}
+
+      // MAC input (preserve user input while editing)
       if(!$('bleMacInput').matches(':focus')){$('bleMacInput').value=s.bleAddr||''}
+
+      // Feed toggle
       var feedBtn=$('bleFeedBtn');
       feedBtn.textContent=s.bleFeed?'ON':'OFF';
       feedBtn.style.background=s.bleFeed?'var(--green)':'var(--surface3)';
