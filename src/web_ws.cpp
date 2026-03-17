@@ -140,26 +140,25 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
         }
 
         float heatT, coolT;
-        bool threshChanged = false;
+        bool heatSet = false, coolSet = false;
         if (jsonGetFloat(msg, "heatThresh", &heatT)) {
             heatT = constrain(heatT, CN105_TEMP_MIN, CN105_TEMP_MAX);
             settings.get().heatingThreshold = heatT;
-            threshChanged = true;
+            heatSet = true;
             LOG_INFO("[WebUI] Set heatingThreshold=%.1f", heatT);
         }
         if (jsonGetFloat(msg, "coolThresh", &coolT)) {
             coolT = constrain(coolT, CN105_TEMP_MIN, CN105_TEMP_MAX);
             settings.get().coolingThreshold = coolT;
-            threshChanged = true;
+            coolSet = true;
             LOG_INFO("[WebUI] Set coolingThreshold=%.1f", coolT);
         }
-        if (threshChanged) {
+        if (heatSet || coolSet) {
             // Enforce minimum 2°C gap (bidirectional)
             float h = settings.get().heatingThreshold;
             float c = settings.get().coolingThreshold;
             if (c - h < 2.0f) {
-                // If cool was explicitly set, adjust heat downward
-                if (jsonGetFloat(msg, "coolThresh", &coolT)) {
+                if (coolSet) {
                     h = c - 2.0f;
                     if (h < CN105_TEMP_MIN) { h = CN105_TEMP_MIN; c = h + 2.0f; }
                 } else {
@@ -518,18 +517,18 @@ void WebUI::pushDiscoveryResults(bool done) {
     int count = 0;
     const BleDiscoveredDevice* devs = BleSensor::discoveryResults(count);
 
-    char buf[768];
+    char buf[1024];
     int n = snprintf(buf, sizeof(buf), "{\"type\":\"bleScanResults\",\"done\":%s,\"devices\":[",
                      done ? "true" : "false");
 
     for (int i = 0; i < count; i++) {
+        if (n >= (int)sizeof(buf) - 100) break;  // Reserve space for entry + closing
         char escName[50];
         jsonEscape(devs[i].name, escName, sizeof(escName));
         n += snprintf(buf + n, sizeof(buf) - n,
             "%s{\"addr\":\"%s\",\"name\":\"%s\",\"type\":\"%s\",\"rssi\":%d}",
             i > 0 ? "," : "",
             devs[i].addr, escName, devs[i].type, devs[i].rssi);
-        if (n >= (int)sizeof(buf) - 2) break;
     }
 
     n += snprintf(buf + n, sizeof(buf) - n, "]}");

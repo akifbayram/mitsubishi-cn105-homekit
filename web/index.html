@@ -322,7 +322,7 @@ input[type=range]::-moz-range-thumb{
   <div class="header">
     <div class="header-left">
       <div class="device-name" id="devName">{{BRAND_NAME}}</div>
-      <div class="fw-version" id="fwVer">v0.1.0</div>
+      <div class="fw-version" id="fwVer">v0.1.1</div>
     </div>
     <div class="header-right">
       <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="Toggle theme">
@@ -1234,7 +1234,7 @@ input[type=range]::-moz-range-thumb{
     $('statusBody').classList.toggle('ble-dimmed',!s.connected);
 
     rssiVal.textContent=(s.rssi!=null?s.rssi:'--')+' dBm';
-    wifiUptimeVal.textContent=s.wifiUptime?fmtWifiUptime(s.wifiUptime):'--:--:--';
+    wifiUptimeVal.textContent=s.wifiUptime?fmtUptime(s.wifiUptime):'--:--:--';
     uptimeVal.textContent=s.uptime!=null?fmtUptime(s.uptime):'--:--:--';
 
     if(s.tempUnit && s.tempUnit!==tempUnit && !locked){
@@ -1317,11 +1317,6 @@ input[type=range]::-moz-range-thumb{
     return pad(h)+':'+pad(m)+':'+pad(s);
   }
   function pad(n){return n<10?'0'+n:''+n}
-  function fmtWifiUptime(sec){
-    if(!sec) return '--:--:--';
-    return fmtUptime(sec);
-  }
-
   // ── Log handler ────────────────────────────────────────────────────────────
   function onLog(msg){
     var atBottom=logBox.scrollHeight-logBox.scrollTop-logBox.clientHeight<30;
