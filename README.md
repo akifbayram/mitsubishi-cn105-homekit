@@ -24,7 +24,7 @@ Controls Mitsubishi mini split heat pumps via the CN105 serial connector, compat
 - **BLE remote temperature sensor** — Govee, Xiaomi (PVVX), BTHome v2, with auto-detection
 - **OTA firmware updates** — with SHA256 verification and automatic rollback
 - **Dual setpoint Auto mode** — independent heating and cooling thresholds
-- **Multi-board support** — ESP32, ESP32-C3, ESP32-C6, ESP32-S3, ESP32-P4
+- **Multi-board support** — ESP32, ESP32-C3, ESP32-C6, ESP32-S3
 - **WiFi recovery** — automatic fallback AP with web-based credential entry
 
 ## Quick Start
@@ -33,7 +33,7 @@ Controls Mitsubishi mini split heat pumps via the CN105 serial connector, compat
 2. **Connect** — Join the **Serin-XXXX** WiFi network (password: `serinlabs`) and enter your WiFi credentials
 3. **Pair** — Open Apple Home, scan the QR code from the web UI at `http://<device-ip>:8080`
 
-For developer setup with PlatformIO, custom boards, and build-time options, see [Setup](#setup).
+For developer setup with ESP-IDF, custom boards, and build-time options, see [Setup](#setup).
 
 ## Requirements
 
@@ -51,20 +51,20 @@ For a list of known-compatible models, see the [MitsubishiCN105ESPHome supported
 
 ### Software
 
-- [PlatformIO](https://platformio.org/) (build system)
+- [ESP-IDF v5.5](https://docs.espressif.com/projects/esp-idf/en/v5.5/) (build framework)
 - Python 3 (for HTML embedding script)
 
 ### Boards
 
-| Board | PlatformIO env | Build command | Tested |
-|-------|---------------|---------------|-------|
-| M5Stack NanoC6 (ESP32-C6) | `nanoc6` | `pio run -e nanoc6` | ✅ |
-| M5Stack Atom S3 Lite (ESP32-C6) | `m5atoms3-lite` | `pio run -e m5atoms3-lite` | ✅ |
-| Generic ESP32 DevKit | `esp32-devkit` | `pio run -e esp32-devkit` | ❌ |
-| ESP32-S3-DevKitC-1 | `esp32s3-devkit` | `pio run -e esp32s3-devkit` | ❌ |
-| ESP32-C3 SuperMini / XIAO | `esp32c3-mini` | `pio run -e esp32c3-mini` | ❌ |
+| Board | Target | Build command | Tested |
+|-------|--------|---------------|-------|
+| M5Stack NanoC6 (ESP32-C6) | `esp32c6` | `idf.py set-target esp32c6 && idf.py build` | ✅ |
+| M5Stack AtomS3 Lite (ESP32-S3) | `esp32s3` | `idf.py set-target esp32s3 && idf.py build` | ✅ |
+| Generic ESP32 DevKit | `esp32` | `idf.py set-target esp32 && idf.py build` | ❌ |
+| ESP32-S3-DevKitC-1 | `esp32s3` | `idf.py set-target esp32s3 && idf.py build` | ❌ |
+| ESP32-C3 SuperMini / XIAO | `esp32c3` | `idf.py set-target esp32c3 && idf.py build` | ❌ |
 
-Board profiles define GPIO pins, LED, button, UART clock source, and debug output for each target. See `include/boards/` for details. To add support for a new board, create a board profile header or use inline build flag overrides. See the [Custom Board Guide](docs/custom-boards.md) for full instructions.
+Board profiles define GPIO pins, LED, button, UART clock source, and debug output for each target. See `main/boards/` for details. To add support for a new board, create a board profile header or use inline build flag overrides. See the [Custom Board Guide](docs/custom-boards.md) for full instructions.
 
 ## Wiring
 
@@ -91,20 +91,24 @@ The CN105 connector is typically located on the right side of ductless indoor un
 
 No tools to install. Visit the [web flasher](https://serin-labs.github.io/flash/), connect your board via USB, select your board type, and click flash. Works in Chrome and Edge.
 
-**Option B — PlatformIO (developers):**
+**Option B — ESP-IDF (developers):**
 
 ```bash
-git clone https://github.com/akifbayram/mitsubishi-cn105-homekit.git
+git clone --recursive https://github.com/akifbayram/mitsubishi-cn105-homekit.git
 cd mitsubishi-cn105-homekit
 
-# Build for default board (NanoC6)
-pio run
+# Activate ESP-IDF environment
+source ~/esp/esp-idf/export.sh
 
-# Or build for a specific board
-pio run -e esp32-devkit
+# Build for default board (NanoC6 / ESP32-C6)
+idf.py set-target esp32c6
+idf.py build
 
 # Flash via USB
-pio run -t upload --upload-port /dev/ttyACM0
+idf.py -p /dev/ttyACM0 flash
+
+# Monitor serial output
+idf.py -p /dev/ttyACM0 monitor
 ```
 
 ### 2. WiFi Provisioning
@@ -118,14 +122,10 @@ On first boot, the device creates a WiFi access point:
 
 <img src="media/recovery.png" width=300>
 
-**Build-time WiFi (optional):** To skip the captive portal during development, add WiFi credentials as build flags in `platformio_override.ini` (gitignored):
+**Build-time WiFi (optional):** To skip the captive portal during development, pass WiFi credentials as CMake flags:
 
-```ini
-[env:nanoc6]
-build_flags =
-    ${env:nanoc6.build_flags}
-    -DWIFI_SSID=\"MyNetwork\"
-    -DWIFI_PASSWORD=\"MyPassword\"
+```bash
+idf.py -DWIFI_SSID="MyNetwork" -DWIFI_PASSWORD="MyPassword" build
 ```
 
 The device will connect automatically on boot. WiFi can still be changed later via the web UI.
@@ -193,8 +193,8 @@ Navigate to `http://<device-ip>:8080`, open Settings, and use the Firmware Updat
 
 **Via curl:**
 ```bash
-pio run  # build firmware
-curl --data-binary @.pio/build/nanoc6/firmware.bin \
+idf.py build
+curl --data-binary @build/mitsubishi-cn105-homekit.bin \
      -H "Content-Type: application/octet-stream" \
      http://<device-ip>:8080/upload
 ```
@@ -235,7 +235,8 @@ See [Project Structure](docs/project-structure.md) for the full source tree with
 
 This project builds on the work of several open-source projects in the Mitsubishi heat pump community:
 
-- **[HomeSpan](https://github.com/HomeSpan/HomeSpan)** — ESP32 HomeKit library
+- **[esp-homekit-sdk](https://github.com/espressif/esp-homekit-sdk)** — Espressif's official HomeKit SDK for ESP-IDF
+- **[HomeSpan](https://github.com/HomeSpan/HomeSpan)** — ESP32 HomeKit library (used in earlier Arduino versions)
 - **[SwiCago/HeatPump](https://github.com/SwiCago/HeatPump)** — the original CN105 protocol library and compatibility documentation
 - **[esphome-mitsubishiheatpump](https://github.com/geoffdavis/esphome-mitsubishiheatpump)** — early ESPHome integration
 - **[MitsubishiCN105ESPHome](https://github.com/echavet/MitsubishiCN105ESPHome)** — ESPHome component with comprehensive CN105 protocol implementation
