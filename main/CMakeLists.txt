@@ -16,7 +16,7 @@ idf_component_register(
          "homekit_fan.cpp"
          "homekit_switches.cpp"
          "ble_sensor.cpp"
-    INCLUDE_DIRS "." "../include"
+    INCLUDE_DIRS "."
     REQUIRES nvs_flash esp_wifi esp_netif esp_http_server esp_timer driver bt app_update mbedtls
              esp_hap_core esp_hap_apple_profiles esp_hap_platform
 )
