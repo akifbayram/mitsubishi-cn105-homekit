@@ -1,51 +1,59 @@
 # Project Structure
 
 ```
-src/
-  main.cpp                  # Setup, HomeSpan config, accessory tree, LED priority
-  cn105_protocol.cpp        # UART driver, packet TX/RX/parsing
-  homekit_thermostat.cpp    # HomeKit Thermostat service
-  homekit_fan.cpp           # HomeKit Fan + Fan Auto switch services
-  homekit_switches.cpp      # HomeKit FAN mode + DRY mode switch services
-  web_server.cpp            # HTTP server setup and request routing
-  web_ws.cpp                # WebSocket handler, state push, command dispatch
-  web_ota.cpp               # OTA firmware upload and verification
-  settings.cpp              # NVS persistent settings
-  status_led.cpp            # RGB LED state machine and patterns
-  wifi_recovery.cpp         # WiFi fallback AP manager, button handler
-  ble_sensor.cpp            # BLE scanner, sensor decoders, keepalive/stale logic
+main/
+  main.cpp                    # app_main(), init sequence, FreeRTOS main loop
+  cn105_protocol.cpp/h        # UART driver, packet TX/RX/parsing, WantedSettings
+  cn105_strings.h             # Shared enum-string conversions (log + web + parsers)
+  homekit_setup.cpp/h         # HAP init, setup code gen, event handler, status
+  homekit_services.h          # Service creation + sync interface
+  homekit_services_glue.cpp   # Service dispatcher, CN105 controller binding
+  homekit_thermostat.cpp      # Thermostat service (write callback, sync, dual setpoint)
+  homekit_fan.cpp             # Fan v2 + Fan Auto switch services
+  homekit_switches.cpp        # FAN mode + DRY mode switch services
+  web_server.cpp/h            # HTTP server setup, request routing, HomeKit status
+  web_ws.cpp                  # WebSocket handler, state push, command dispatch
+  web_ota.cpp                 # OTA firmware upload with SHA256 verification
+  settings.cpp/h              # NVS persistent settings (direct nvs_get/set API)
+  logging.cpp/h               # ESP_LOG* macros, custom vprintf handler, WS log hook
+  status_led.cpp/h            # RGB LED state machine via led_strip RMT driver
+  wifi_manager.cpp/h          # esp_wifi + esp_netif, event-driven, NVS credentials
+  wifi_recovery.cpp/h         # 3-layer WiFi recovery (AP fallback, recovery page, button)
+  dns_server.cpp/h            # Lightweight UDP DNS captive portal for recovery AP
+  ble_sensor.cpp/h            # Native NimBLE scanner, auto-detect decoders, keepalive
+  ble_config.h                # BLE_ENABLE auto-define (standalone, no dependencies)
+  board_profile.h             # Board profile selector + defaults
+  boards/                     # Per-board hardware definitions
+    board_nanoc6.h            #   M5Stack NanoC6 (ESP32-C6)
+    board_esp32_devkit.h      #   Generic ESP32 DevKit v1
+    board_esp32s3_devkit.h    #   ESP32-S3-DevKitC-1
+    board_esp32c3_mini.h      #   ESP32-C3 SuperMini / XIAO
+    board_m5atoms3_lite.h     #   M5Stack AtomS3 Lite
+  branding.h                  # Build-time branding defaults
+  compat_arduino.h            # millis(), delay(), constrain() shims
+  uart_interface.h            # UART abstraction interface
+  hardware_uart.h             # ESP-IDF UART driver implementation
+  json_utils.h                # Lightweight JSON string parser
 
-include/
-  cn105_protocol.h          # Protocol constants, state structures
-  cn105_strings.h           # Shared enum-string conversions (log + web + parsers)
-  homekit_services.h        # HomeKit service classes
-  web_server.h              # Web server interface
-  json_utils.h              # Lightweight JSON builder for WebSocket responses
-  settings.h                # Settings store
-  status_led.h              # LED state enum, StatusLED class
-  wifi_recovery.h           # WiFi fallback AP manager
-  ble_config.h              # BLE_ENABLE auto-define (standalone, no dependencies)
-  ble_sensor.h              # BLE sensor public API, auto-detect decoders
-  logging.h                 # Log level macros (conditional HWCDC/Serial)
-  board_profile.h           # Board profile selector + defaults
-  boards/                   # Per-board hardware definitions
-    board_nanoc6.h          #   M5Stack NanoC6 (ESP32-C6)
-    board_esp32_devkit.h    #   Generic ESP32 DevKit v1
-    board_esp32s3_devkit.h  #   ESP32-S3-DevKitC-1
-    board_esp32c3_mini.h    #   ESP32-C3 SuperMini / XIAO
-    board_m5atoms3_lite.h   #   M5Stack AtomS3 Lite
-  branding.h                # Build-time branding defaults
-  web_ui_html.h             # Auto-generated — do not edit
-  wifi_recovery_html.h      # Auto-generated — do not edit
+components/
+  esp-homekit-sdk/            # Espressif HomeKit SDK (git submodule)
 
 web/
-  index.html                # Web UI source (edit this)
-  recovery.html             # WiFi recovery page source (edit this)
+  index.html                  # Web UI source (edit this; CMake auto-embeds gzipped)
+  recovery.html               # WiFi recovery page source
+  icon-192.png                # PWA icon 192x192
+  icon-512.png                # PWA icon 512x512
 
 scripts/
-  embed_html.py             # Gzips HTML -> generates web_ui_html.h
-  pre_build.py              # PlatformIO pre-build: auto-runs embed_html.py
-  provision.sh              # Per-unit provisioning: flash, read MAC, generate QR label
+  embed_html_idf.py           # Gzips HTML with {{BRAND_*}} template substitution
+  provision.sh                # Per-unit provisioning: flash, read MAC, generate QR label
 
-partitions.csv                # Custom partition table (dual OTA, no SPIFFS)
+partitions.csv                # 8MB flash partition table (dual OTA)
+partitions_4mb.csv            # 4MB flash partition table (NanoC6)
+sdkconfig.defaults            # Shared ESP-IDF config
+sdkconfig.defaults.esp32c6    # ESP32-C6 overrides (4MB flash, USB JTAG)
+sdkconfig.defaults.esp32s3    # ESP32-S3 overrides (USB JTAG)
+sdkconfig.defaults.esp32      # ESP32 classic overrides (BLE disabled)
+sdkconfig.defaults.esp32c3    # ESP32-C3 overrides
+CMakeLists.txt                # Top-level ESP-IDF project + component paths
 ```
