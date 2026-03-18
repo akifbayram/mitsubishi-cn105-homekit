@@ -236,7 +236,6 @@ See [Project Structure](docs/project-structure.md) for the full source tree with
 This project builds on the work of several open-source projects in the Mitsubishi heat pump community:
 
 - **[esp-homekit-sdk](https://github.com/espressif/esp-homekit-sdk)** — Espressif's official HomeKit SDK for ESP-IDF
-- **[HomeSpan](https://github.com/HomeSpan/HomeSpan)** — ESP32 HomeKit library (used in earlier Arduino versions)
 - **[SwiCago/HeatPump](https://github.com/SwiCago/HeatPump)** — the original CN105 protocol library and compatibility documentation
 - **[esphome-mitsubishiheatpump](https://github.com/geoffdavis/esphome-mitsubishiheatpump)** — early ESPHome integration
 - **[MitsubishiCN105ESPHome](https://github.com/echavet/MitsubishiCN105ESPHome)** — ESPHome component with comprehensive CN105 protocol implementation
