@@ -5,6 +5,8 @@ idf_component_register(
          "status_led.cpp"
          "cn105_protocol.cpp"
          "wifi_manager.cpp"
+         "dns_server.cpp"
+         "wifi_recovery.cpp"
          "web_server.cpp"
          "web_ws.cpp"
          "web_ota.cpp"
