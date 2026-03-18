@@ -3,8 +3,6 @@
 #include "settings.h"
 #include "logging.h"
 #include "branding.h"
-#include "compat_arduino.h"
-
 #include <cstring>
 #include <cstdio>
 
@@ -75,6 +73,13 @@ static int accessory_identify(hap_acc_t *ha)
 {
     LOG_INFO("[HK] Accessory identified");
     return HAP_SUCCESS;
+}
+
+static void homekit_set_setup_id(const char* setupId)
+{
+    if (setupId) {
+        hap_set_setup_id(setupId);
+    }
 }
 
 // ── Public API ──────────────────────────────────────────────────────────────
@@ -198,13 +203,6 @@ void homekit_generate_setup_code(void)
     LOG_INFO("[HK] Generated new setup code: %s", s_setupCode);
 }
 
-void homekit_set_setup_id(const char* setupId)
-{
-    if (setupId) {
-        hap_set_setup_id(setupId);
-    }
-}
-
 const char* homekit_get_setup_payload(void)
 {
     return s_setupPayload ? s_setupPayload : "";
@@ -224,12 +222,6 @@ void homekit_reset_pairings(void)
 {
     LOG_WARN("[HK] Resetting all pairings");
     hap_reset_pairings();
-}
-
-void homekit_reset_network(void)
-{
-    LOG_WARN("[HK] Resetting network");
-    hap_reset_network();
 }
 
 const char* homekit_get_status_string(void)

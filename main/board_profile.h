@@ -72,11 +72,6 @@
 #define BUTTON_ACTIVE_LOW       1
 #endif
 
-// USB debug output
-#ifndef USE_HWCDC_DEBUG
-#define USE_HWCDC_DEBUG         0
-#endif
-
 // UART hardware quirks
 #ifndef UART_NEEDS_RX_PULLUP
 #define UART_NEEDS_RX_PULLUP    0

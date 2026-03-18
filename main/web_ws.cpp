@@ -2,6 +2,7 @@
 #include "cn105_strings.h"
 #include "json_utils.h"
 #include "wifi_manager.h"
+#include "wifi_recovery.h"
 #include "homekit_setup.h"
 #include "compat_arduino.h"
 #include <cmath>
@@ -352,15 +353,7 @@ void WebUI::pushState() {
     char escName[65];
     jsonEscape(cfg.deviceName, escName, sizeof(escName));
 
-    // WiFi uptime: time since WiFi connected (approximation — no wifiRecovery module yet)
-    // Will be refined in Task 10 (WiFi Recovery)
-    static uint32_t s_wifiConnectedSince = 0;
-    if (WifiManager::isConnected() && s_wifiConnectedSince == 0) {
-        s_wifiConnectedSince = millis();
-    } else if (!WifiManager::isConnected()) {
-        s_wifiConnectedSince = 0;
-    }
-    unsigned long wifiUptimeSec = s_wifiConnectedSince ? (millis() - s_wifiConnectedSince) / 1000 : 0;
+    unsigned long wifiUptimeSec = wifiRecovery.getWifiUptimeSeconds();
 
     char buf[1152];
     int n = snprintf(buf, sizeof(buf),
@@ -429,7 +422,6 @@ void WebUI::pushState() {
         cfg.coolingThreshold
     );
 
-    // HomeKit status (stubs until Task 11)
     int hkControllers = homekit_get_controller_count();
 
     n += snprintf(buf + n, sizeof(buf) - n,

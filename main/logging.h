@@ -5,7 +5,7 @@
 #include "esp_log.h"
 
 // ── Log Levels ────────────────────────────────────────────────────────────────
-// Values match the original Arduino enum for NVS settings compatibility.
+// Values must remain stable for NVS backward compatibility.
 enum LogLevel : uint8_t {
     LOG_LEVEL_ERROR = 0,   // Errors only
     LOG_LEVEL_WARN  = 1,   // + warnings

@@ -21,7 +21,6 @@
 #define PIN_BUTTON              9
 #define BUTTON_ACTIVE_LOW       1
 
-// ESP32-C3: USBSerial not HWCDC, floating GPIOs, XTAL clock recommended
-#define USE_HWCDC_DEBUG         0
+// ESP32-C3: floating GPIOs, XTAL clock recommended
 #define UART_NEEDS_RX_PULLUP    1
 #define UART_USE_XTAL_CLK       1

@@ -22,6 +22,5 @@
 #define BUTTON_ACTIVE_LOW       1
 
 // ESP32-C6 specifics
-#define USE_HWCDC_DEBUG         1
 #define UART_NEEDS_RX_PULLUP    1
 #define UART_USE_XTAL_CLK       1

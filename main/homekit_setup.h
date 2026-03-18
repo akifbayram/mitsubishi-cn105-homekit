@@ -17,9 +17,6 @@ void homekit_init(const char* name, const char* manufacturer,
 /// Generate (or load from NVS) the 8-digit setup code, then set it on HAP.
 void homekit_generate_setup_code(void);
 
-/// Set the 4-character setup ID (for QR code generation).
-void homekit_set_setup_id(const char* setupId);
-
 /// Get the X-HM:// setup payload URI (for QR code). Caller must NOT free.
 const char* homekit_get_setup_payload(void);
 
@@ -31,9 +28,6 @@ int homekit_get_controller_count(void);
 
 /// Remove all HomeKit pairings and reboot.
 void homekit_reset_pairings(void);
-
-/// Reset HomeKit network credentials and reboot.
-void homekit_reset_network(void);
 
 /// Get a human-readable status string reflecting the current HAP state.
 const char* homekit_get_status_string(void);

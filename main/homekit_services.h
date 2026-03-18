@@ -26,9 +26,6 @@ void homekit_sync_fan(CN105Controller &cn105);
 /// Push CN105 mode switch states to HomeKit characteristics.
 void homekit_sync_switches(CN105Controller &cn105);
 
-/// Set StatusActive on all services (true = CN105 connected).
-void homekit_set_status_active(bool active);
-
 // ── Per-service creation (internal, called from create_all) ─────────────────
 
 void homekit_create_thermostat(hap_acc_t *acc);

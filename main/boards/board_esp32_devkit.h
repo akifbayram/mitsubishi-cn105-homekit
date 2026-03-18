@@ -22,6 +22,5 @@
 #define BUTTON_ACTIVE_LOW       1
 
 // Classic ESP32
-#define USE_HWCDC_DEBUG         0
 #define UART_NEEDS_RX_PULLUP    0
 #define UART_USE_XTAL_CLK       0

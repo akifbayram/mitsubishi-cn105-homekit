@@ -2,7 +2,6 @@
 #include <mbedtls/sha256.h>
 #include "status_led.h"
 #include "board_profile.h"
-#include "compat_arduino.h"
 
 static const char *TAG = "web_ota";
 

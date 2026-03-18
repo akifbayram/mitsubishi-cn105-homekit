@@ -159,10 +159,10 @@ extern "C" void app_main(void)
     }
 
     // ── 12. BLE sensor init ──────────────────────────────────────────────
-    // BLE is started later, after web UI is up (same as Arduino version)
+    // BLE is started later, after web UI is up
 
     // ════════════════════════════════════════════════════════════════════════
-    // Main loop (replaces Arduino loop())
+    // Main loop
     // ════════════════════════════════════════════════════════════════════════
     LOG_INFO("Entering main loop");
 
@@ -174,8 +174,6 @@ extern "C" void app_main(void)
         homekit_sync_thermostat(cn105);
         homekit_sync_fan(cn105);
         homekit_sync_switches(cn105);
-        homekit_set_status_active(cn105.isHealthy());
-
         // ── WiFi recovery + AP mode tracking ─────────────────────────────
         wifiRecovery.loop();
 

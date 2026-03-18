@@ -21,7 +21,6 @@
 #define PIN_BUTTON              0
 #define BUTTON_ACTIVE_LOW       1
 
-// ESP32-S3 has HWCDC
-#define USE_HWCDC_DEBUG         1
+// ESP32-S3
 #define UART_NEEDS_RX_PULLUP    0
 #define UART_USE_XTAL_CLK       0
