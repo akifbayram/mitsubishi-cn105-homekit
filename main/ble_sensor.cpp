@@ -458,13 +458,13 @@ void BleSensor::loop(CN105Controller &cn105) {
     bool stale = lastUpd > 0 && !active;
     bool enabled = settings.get().bleFeedEnabled;
 
-    if (active && enabled && !std::isnan(temp) && (now - s_lastKeepalive >= BLE_KEEPALIVE_MS)) {
+    if (active && enabled && cn105.isConnected() && !std::isnan(temp) && (now - s_lastKeepalive >= BLE_KEEPALIVE_MS)) {
         cn105.sendRemoteTemperature(temp);
         s_lastKeepalive = now;
         LOG_DEBUG("Keepalive sent: %.1f C", temp);
     }
 
-    if (stale && enabled && !s_staleReverted) {
+    if (stale && enabled && cn105.isConnected() && !s_staleReverted) {
         cn105.sendRemoteTemperature(0);
         s_staleReverted = true;
         LOG_WARN("Sensor stale (%lus no data) — reverted to internal thermistor",
