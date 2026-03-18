@@ -21,6 +21,21 @@ idf_component_register(
              esp_hap_core esp_hap_apple_profiles esp_hap_platform
 )
 
+# ── Auto-select board profile based on IDF_TARGET ────────────────────────────
+# Each chip gets a default board profile. Override by setting -DBOARD_PROFILE_*
+# on the cmake command line (e.g., idf.py build -DBOARD_PROFILE_M5ATOMS3_LITE=1).
+if(NOT DEFINED BOARD_PROFILE_CUSTOM)
+    if(CONFIG_IDF_TARGET_ESP32C6)
+        target_compile_definitions(${COMPONENT_TARGET} PRIVATE BOARD_PROFILE_NANOC6)
+    elseif(CONFIG_IDF_TARGET_ESP32S3)
+        target_compile_definitions(${COMPONENT_TARGET} PRIVATE BOARD_PROFILE_ESP32S3_DEVKIT)
+    elseif(CONFIG_IDF_TARGET_ESP32)
+        target_compile_definitions(${COMPONENT_TARGET} PRIVATE BOARD_PROFILE_ESP32_DEVKIT)
+    elseif(CONFIG_IDF_TARGET_ESP32C3)
+        target_compile_definitions(${COMPONENT_TARGET} PRIVATE BOARD_PROFILE_ESP32C3_MINI)
+    endif()
+endif()
+
 # ── Brand defaults (overridable via -DBRAND_NAME=... on cmake command line) ──
 if(NOT DEFINED BRAND_NAME)
     set(BRAND_NAME "Serin")

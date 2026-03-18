@@ -20,7 +20,9 @@ public:
         uart_config.parity    = UART_PARITY_EVEN;
         uart_config.stop_bits = UART_STOP_BITS_1;
         uart_config.flow_ctrl = UART_HW_FLOWCTRL_DISABLE;
-#if UART_USE_XTAL_CLK
+// ESP32-C6/C3 have UART_SCLK_XTAL for precise low-baud clocking.
+// Classic ESP32 only has UART_SCLK_APB/REF_TICK; UART_SCLK_XTAL doesn't exist.
+#if UART_USE_XTAL_CLK && defined(SOC_UART_SUPPORT_XTAL_CLK)
         uart_config.source_clk = UART_SCLK_XTAL;
 #else
         uart_config.source_clk = UART_SCLK_DEFAULT;
