@@ -5,9 +5,6 @@ sdkconfig.old
 managed_components/
 dependencies.lock
 
-# PlatformIO
-.pio/
-
 # Python venv (provisioning script dependencies)
 .venv/
 
@@ -31,19 +28,10 @@ reports/
 .DS_Store
 Thumbs.db
 
-# Provisioning
+# Provisioning (per-unit, not committed)
 labels/
 scripts/provision.sh
 scripts/generate_wifi_qr.py
 
-# Branded build overrides (per-brand -D flags)
-platformio_override.ini
-
-# Auto-generated (regenerate via scripts/embed_html.py)
-include/web_ui_html.h
-include/wifi_recovery_html.h
-include/icon_192_png.h
-include/icon_512_png.h
-
-# Branded build auto-generated headers
+# Branded build auto-generated markers
 *.brand
