@@ -1,8 +1,9 @@
 #include <stdio.h>
-#include "esp_log.h"
+#include "logging.h"
 
 static const char *TAG = "main";
 
 extern "C" void app_main(void) {
-    ESP_LOGI(TAG, "Mitsubishi CN105 HomeKit Controller starting...");
+    logging_init();
+    LOG_INFO("Mitsubishi CN105 HomeKit Controller starting...");
 }
