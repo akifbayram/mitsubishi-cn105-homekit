@@ -1,0 +1,77 @@
+#pragma once
+
+#ifndef UNIT_TEST
+
+#include "uart_interface.h"
+#include <driver/uart.h>
+#include <driver/gpio.h>
+#include "board_profile.h"
+#include "logging.h"
+
+/// ESP-IDF UART implementation of UartInterface.
+class HardwareUart : public UartInterface {
+public:
+    HardwareUart(uart_port_t uartNum, int rxPin, int txPin, uint32_t baudRate) : _uartNum(uartNum) {
+        static const char *TAG = "uart";
+
+        uart_config_t uart_config = {};
+        uart_config.baud_rate = baudRate;
+        uart_config.data_bits = UART_DATA_8_BITS;
+        uart_config.parity    = UART_PARITY_EVEN;
+        uart_config.stop_bits = UART_STOP_BITS_1;
+        uart_config.flow_ctrl = UART_HW_FLOWCTRL_DISABLE;
+#if UART_USE_XTAL_CLK
+        uart_config.source_clk = UART_SCLK_XTAL;
+#else
+        uart_config.source_clk = UART_SCLK_DEFAULT;
+#endif
+
+        esp_err_t err;
+        err = uart_param_config(_uartNum, &uart_config);
+        LOG_INFO("[CN105] uart_param_config: %s", esp_err_to_name(err));
+
+        err = uart_set_pin(_uartNum, txPin, rxPin, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+        LOG_INFO("[CN105] uart_set_pin(TX=%d, RX=%d): %s", txPin, rxPin, esp_err_to_name(err));
+
+        err = uart_driver_install(_uartNum, 256, 256, 0, NULL, 0);
+        LOG_INFO("[CN105] uart_driver_install: %s", esp_err_to_name(err));
+
+#if UART_NEEDS_RX_PULLUP
+        gpio_set_pull_mode((gpio_num_t)rxPin, GPIO_PULLUP_ONLY);
+#endif
+
+        uint32_t baud;
+        uart_get_baudrate(_uartNum, &baud);
+        uart_word_length_t data_bits_v;
+        uart_get_word_length(_uartNum, &data_bits_v);
+        uart_parity_t parity_v;
+        uart_get_parity(_uartNum, &parity_v);
+        LOG_INFO("[CN105] Verified: baud=%lu, data_bits=%d, parity=%d", baud, data_bits_v, parity_v);
+
+        uart_flush_input(_uartNum);
+    }
+
+    int read(uint8_t *buf, size_t len) override {
+        return uart_read_bytes(_uartNum, buf, len, 0);
+    }
+
+    void write(const uint8_t *buf, size_t len) override {
+        uart_write_bytes(_uartNum, buf, len);
+        uart_wait_tx_done(_uartNum, pdMS_TO_TICKS(200));
+    }
+
+    size_t available() override {
+        size_t avail = 0;
+        uart_get_buffered_data_len(_uartNum, &avail);
+        return avail;
+    }
+
+    void flush() override {
+        uart_flush_input(_uartNum);
+    }
+
+private:
+    uart_port_t _uartNum;
+};
+
+#endif // UNIT_TEST
