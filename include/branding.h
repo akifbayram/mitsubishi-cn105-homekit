@@ -1,7 +1,7 @@
 #pragma once
 
-// Build-time branding — override via PlatformIO -D flags
-// See platformio.ini [env:nanoc6-serin] for branded build example
+// Build-time branding — override via CMake cache variables (-DBRAND_*)
+// Set in sdkconfig.defaults or pass to idf.py build
 
 #ifndef BRAND_NAME
 #define BRAND_NAME "Mini Split"
@@ -32,7 +32,7 @@
 #endif
 
 // Build-time WiFi credentials (dev convenience, no defaults)
-// Define via -DWIFI_SSID=\"...\" -DWIFI_PASSWORD=\"...\" in platformio_override.ini
+// Define via -DWIFI_SSID=\"...\" -DWIFI_PASSWORD=\"...\" in CMake cache or sdkconfig
 #ifdef WIFI_SSID
   #ifndef WIFI_PASSWORD
     #error "WIFI_PASSWORD must be defined when WIFI_SSID is set"

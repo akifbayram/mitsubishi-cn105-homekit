@@ -1,22 +1,22 @@
 #pragma once
 
 // ── Board Profile System ────────────────────────────────────────────────────
-// Hardware configuration selected at build time via PlatformIO environment.
+// Hardware configuration selected at build time via CMake cache variables.
 //
-// Predefined boards:
-//   pio run -e nanoc6          M5Stack NanoC6 (ESP32-C6) — default
-//   pio run -e esp32-devkit    Generic ESP32 DevKit v1
-//   pio run -e esp32s3-devkit  ESP32-S3-DevKitC-1
-//   pio run -e esp32c3-mini    ESP32-C3 SuperMini / XIAO
-//   pio run -e m5atoms3-lite   M5Stack AtomS3 Lite
+// Predefined boards (set -DBOARD_PROFILE_* in sdkconfig.defaults.<chip>):
+//   idf.py -DIDF_TARGET=esp32c6 build   M5Stack NanoC6 (ESP32-C6) — default
+//   idf.py -DIDF_TARGET=esp32   build   Generic ESP32 DevKit v1
+//   idf.py -DIDF_TARGET=esp32s3 build   ESP32-S3-DevKitC-1
+//   idf.py -DIDF_TARGET=esp32c3 build   ESP32-C3 SuperMini / XIAO
+//   idf.py -DIDF_TARGET=esp32s3 build   M5Stack AtomS3 Lite
 //
 // Custom board (override individual pins, no profile header needed):
-//   build_flags = -DBOARD_PROFILE_CUSTOM -DPIN_CN105_RX=16 -DPIN_CN105_TX=17 ...
+//   idf.py build -DBOARD_PROFILE_CUSTOM -DPIN_CN105_RX=16 -DPIN_CN105_TX=17 ...
 //
 // To add a new predefined board:
 //   1. Create include/boards/board_<name>.h (see existing profiles for format)
 //   2. Add #elif in the selector below
-//   3. Add [env:<name>] in platformio.ini
+//   3. Add target entry in CMakeLists.txt or sdkconfig.defaults.<chip>
 
 // ── Board profile selector ──────────────────────────────────────────────────
 #if defined(BOARD_PROFILE_NANOC6)
