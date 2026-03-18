@@ -148,7 +148,7 @@ void dns_captive_start(uint32_t redirect_ip) {
     s_redirectIP = redirect_ip;  // already in network byte order
     s_running = true;
 
-    xTaskCreate(dns_task, "dns_captive", 2048, nullptr, 2, &s_taskHandle);
+    xTaskCreate(dns_task, "dns_captive", 4096, nullptr, 2, &s_taskHandle);
 }
 
 void dns_captive_stop() {

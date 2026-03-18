@@ -152,6 +152,12 @@ extern "C" void app_main(void)
     // ── 11. WiFi recovery (AP fallback + button handler) ─────────────────
     wifiRecovery.begin(apName);
 
+    // If no WiFi credentials exist, activate recovery AP immediately
+    if (!WifiManager::isConnected()) {
+        LOG_INFO("Starting recovery AP immediately (no credentials or connection failed)");
+        wifiRecovery.activateNow();
+    }
+
     // ── 12. BLE sensor init ──────────────────────────────────────────────
     // BLE is started later, after web UI is up (same as Arduino version)
 
