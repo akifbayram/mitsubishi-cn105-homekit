@@ -10,9 +10,14 @@ idf_component_register(
          "web_server.cpp"
          "web_ws.cpp"
          "web_ota.cpp"
-         "homekit_stub.cpp"
+         "homekit_setup.cpp"
+         "homekit_services_glue.cpp"
+         "homekit_thermostat.cpp"
+         "homekit_fan.cpp"
+         "homekit_switches.cpp"
     INCLUDE_DIRS "." "../include"
     REQUIRES nvs_flash esp_wifi esp_netif esp_http_server esp_timer driver bt app_update mbedtls
+             esp_hap_core esp_hap_apple_profiles esp_hap_platform
 )
 
 # ── Brand defaults (overridable via -DBRAND_NAME=... on cmake command line) ──

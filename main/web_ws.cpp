@@ -2,7 +2,7 @@
 #include "cn105_strings.h"
 #include "json_utils.h"
 #include "wifi_manager.h"
-#include "homekit_stub.h"
+#include "homekit_setup.h"
 #include "compat_arduino.h"
 // BLE sensor support — disabled until Task 13 ports ble_sensor.h to ESP-IDF.
 // Task 13 will remove BLE_DISABLE and provide a native ble_sensor.h.

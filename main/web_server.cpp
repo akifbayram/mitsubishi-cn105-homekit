@@ -2,7 +2,7 @@
 #include "json_utils.h"
 #include "branding.h"
 #include "wifi_manager.h"
-#include "homekit_stub.h"
+#include "homekit_setup.h"
 #include "logging.h"
 #include "compat_arduino.h"
 #include <cstring>
