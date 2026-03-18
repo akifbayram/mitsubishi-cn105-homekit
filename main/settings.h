@@ -5,6 +5,7 @@
 #include <nvs_flash.h>
 #include "logging.h"
 #include "branding.h"
+#include "ble_config.h"
 
 struct DeviceSettings {
     LogLevel logLevel    = LOG_LEVEL_INFO;

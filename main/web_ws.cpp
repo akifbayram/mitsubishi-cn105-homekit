@@ -4,9 +4,7 @@
 #include "wifi_manager.h"
 #include "homekit_setup.h"
 #include "compat_arduino.h"
-// BLE sensor support — disabled until Task 13 ports ble_sensor.h to ESP-IDF.
-// Task 13 will remove BLE_DISABLE and provide a native ble_sensor.h.
-#define BLE_DISABLE
+#include <cmath>
 #include "ble_config.h"
 #ifdef BLE_ENABLE
 #include "ble_sensor.h"
@@ -464,8 +462,8 @@ void WebUI::pushState() {
         if (staleMs == UINT32_MAX) staleMs = 0;
 
         char bleTStr[8] = "null", bleHStr[8] = "null";
-        if (!isnan(bleT)) snprintf(bleTStr, sizeof(bleTStr), "%.1f", bleT);
-        if (!isnan(bleH)) snprintf(bleHStr, sizeof(bleHStr), "%.0f", bleH);
+        if (!std::isnan(bleT)) snprintf(bleTStr, sizeof(bleTStr), "%.1f", bleT);
+        if (!std::isnan(bleH)) snprintf(bleHStr, sizeof(bleHStr), "%.0f", bleH);
 
         const char* sType = BleSensor::sensorType();
 
