@@ -1,7 +1,7 @@
-# Firmware Release CI/CD
+# Firmware Release CI/CD (ESP-IDF)
 #
-# Builds firmware for all board targets and deploys to the serin-cn105
-# distribution repo for ESP Web Tools flashing.
+# Builds firmware for all chip targets using ESP-IDF and deploys to the
+# serin-cn105 distribution repo for ESP Web Tools flashing.
 #
 # Required secret:
 #   SERIN_CN105_PAT — GitHub Personal Access Token with `repo` scope
@@ -21,47 +21,49 @@ jobs:
     strategy:
       matrix:
         include:
-          - env: nanoc6
+          - target: esp32c6
+            name: nanoc6
             chip: ESP32-C6
-          - env: m5atoms3-lite
+          - target: esp32s3
+            name: m5atoms3-lite
             chip: ESP32-S3
-          - env: esp32-devkit
+          - target: esp32
+            name: esp32-devkit
             chip: ESP32
-          - env: esp32s3-devkit
-            chip: ESP32-S3
-          - env: esp32c3-mini
+          - target: esp32c3
+            name: esp32c3-mini
             chip: ESP32-C3
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          submodules: recursive
 
-      - name: Install PlatformIO
-        run: pip install platformio
-
-      - name: Build firmware
-        run: pio run -e ${{ matrix.env }}
+      - name: Set up ESP-IDF
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5
+          target: ${{ matrix.target }}
+          command: |
+            idf.py set-target ${{ matrix.target }}
+            idf.py build
 
       - name: Collect artifacts
         env:
-          BUILD_ENV: ${{ matrix.env }}
+          BUILD_NAME: ${{ matrix.name }}
         run: |
-          mkdir -p artifact/"${BUILD_ENV}"
-          cp .pio/build/"${BUILD_ENV}"/bootloader.bin artifact/"${BUILD_ENV}"/
-          cp .pio/build/"${BUILD_ENV}"/partitions.bin artifact/"${BUILD_ENV}"/
-          cp .pio/build/"${BUILD_ENV}"/firmware.bin artifact/"${BUILD_ENV}"/
-          cp ~/.platformio/packages/framework-arduinoespressif32/tools/partitions/boot_app0.bin artifact/"${BUILD_ENV}"/
+          mkdir -p artifact/"${BUILD_NAME}"
+          cp build/bootloader/bootloader.bin artifact/"${BUILD_NAME}"/bootloader.bin
+          cp build/partition_table/partition-table.bin artifact/"${BUILD_NAME}"/partitions.bin
+          cp build/ota_data_initial.bin artifact/"${BUILD_NAME}"/boot_app0.bin
+          cp build/mitsubishi-cn105-homekit.bin artifact/"${BUILD_NAME}"/firmware.bin
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: firmware-${{ matrix.env }}
-          path: artifact/${{ matrix.env }}/
+          name: firmware-${{ matrix.name }}
+          path: artifact/${{ matrix.name }}/
 
   deploy:
     needs: build
@@ -102,16 +104,15 @@ jobs:
           rm -rf firmware/homekit/nanoc6 \
                  firmware/homekit/m5atoms3-lite \
                  firmware/homekit/esp32-devkit \
-                 firmware/homekit/esp32s3-devkit \
                  firmware/homekit/esp32c3-mini
 
           # Remove legacy single merged bins if they exist
           rm -f firmware/homekit/*.bin
 
           # Copy new firmware files
-          for env in nanoc6 m5atoms3-lite esp32-devkit esp32s3-devkit esp32c3-mini; do
-            mkdir -p firmware/homekit/${env}
-            cp ../artifacts/firmware-${env}/* firmware/homekit/${env}/
+          for name in nanoc6 m5atoms3-lite esp32-devkit esp32c3-mini; do
+            mkdir -p firmware/homekit/${name}
+            cp ../artifacts/firmware-${name}/* firmware/homekit/${name}/
           done
 
       - name: Generate manifest.json
@@ -191,8 +192,8 @@ jobs:
       - name: Prepare release assets
         run: |
           mkdir -p release
-          for env in nanoc6 m5atoms3-lite esp32-devkit esp32s3-devkit esp32c3-mini; do
-            cp artifacts/firmware-${env}/firmware.bin release/firmware-${env}.bin
+          for name in nanoc6 m5atoms3-lite esp32-devkit esp32c3-mini; do
+            cp artifacts/firmware-${name}/firmware.bin release/firmware-${name}.bin
           done
 
       - name: Create GitHub Release
