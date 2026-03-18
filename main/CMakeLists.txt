@@ -5,8 +5,12 @@ idf_component_register(
          "status_led.cpp"
          "cn105_protocol.cpp"
          "wifi_manager.cpp"
+         "web_server.cpp"
+         "web_ws.cpp"
+         "web_ota.cpp"
+         "homekit_stub.cpp"
     INCLUDE_DIRS "." "../include"
-    REQUIRES nvs_flash esp_wifi esp_netif esp_http_server esp_timer driver bt
+    REQUIRES nvs_flash esp_wifi esp_netif esp_http_server esp_timer driver bt app_update mbedtls
 )
 
 # ── Brand defaults (overridable via -DBRAND_NAME=... on cmake command line) ──
