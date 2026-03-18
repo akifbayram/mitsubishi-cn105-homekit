@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="{{BRAND_THEME_COLOR}}">
@@ -313,15 +313,26 @@ input[type=range]::-moz-range-thumb{
 .fw-section{margin-top:16px;padding-top:16px;border-top:0.5px solid var(--border)}
 .fw-row{display:flex;gap:8px;align-items:center;margin-bottom:10px}
 .fw-row input[type=file]{flex:1;font-size:13px;color:var(--text2)}
+
+/* ── Heading Reset ────────────────────────────────────────────────────── */
+h1{font:inherit;margin:0}
+
+/* ── Focus ────────────────────────────────────────────────────────────── */
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+input:focus-visible,select:focus-visible{outline-offset:0}
+.collapse-header:focus-visible{outline-offset:-2px}
+
+/* ── Reduced Motion ───────────────────────────────────────────────────── */
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
 </style>
 </head>
 <body>
-<div class="container">
+<main class="container">
 
   <!-- Header -->
-  <div class="header">
+  <header class="header">
     <div class="header-left">
-      <div class="device-name" id="devName">{{BRAND_NAME}}</div>
+      <h1 class="device-name" id="devName">{{BRAND_NAME}}</h1>
       <div class="fw-version" id="fwVer">v0.1.1</div>
     </div>
     <div class="header-right">
@@ -329,13 +340,13 @@ input[type=range]::-moz-range-thumb{
         <svg class="icon-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
         <svg class="icon-moon" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3a7 7 0 0 0 9.79 9.79z"/></svg>
       </button>
-      <div class="conn-dot err" id="connDot" title="Disconnected"></div>
+      <div class="conn-dot err" id="connDot" role="status" aria-label="Disconnected" title="Disconnected"></div>
     </div>
-  </div>
+  </header>
 
   <!-- Mode -->
   <div class="card">
-    <div class="card-label">Mode</div>
+    <div class="card-label" role="heading" aria-level="2">Mode</div>
     <div class="seg" id="modeGrp">
       <div class="seg-bg"></div>
       <button data-v="off" onclick="setMode(this)">Off</button>
@@ -349,7 +360,7 @@ input[type=range]::-moz-range-thumb{
 
   <!-- Temperature -->
   <div class="card">
-    <div class="card-label">Temperature</div>
+    <div class="card-label" role="heading" aria-level="2">Temperature</div>
     <div class="temp-display">
       <div class="temp-reading">
         <span class="temp-lbl">Room</span>
@@ -383,7 +394,7 @@ input[type=range]::-moz-range-thumb{
 
   <!-- Fan Speed & Vanes -->
   <div class="card">
-    <div class="card-label">Fan Speed</div>
+    <div class="card-label" role="heading" aria-level="2">Fan Speed</div>
     <div class="seg" id="fanGrp">
       <div class="seg-bg"></div>
       <button data-v="auto" onclick="setFan(this)">Auto</button>
@@ -394,7 +405,7 @@ input[type=range]::-moz-range-thumb{
       <button data-v="4" onclick="setFan(this)">4</button>
     </div>
     <div id="vaneSection" style="margin-top:12px">
-      <div class="card-label">Vane Position</div>
+      <div class="card-label" role="heading" aria-level="2">Vane Position</div>
       <div class="seg" id="vaneGrp">
         <div class="seg-bg"></div>
         <button data-v="auto" onclick="setVane(this)">Auto</button>
@@ -407,7 +418,7 @@ input[type=range]::-moz-range-thumb{
       </div>
     </div>
     <div id="wideVaneSection" style="margin-top:12px">
-      <div class="card-label">Horizontal Vane</div>
+      <div class="card-label" role="heading" aria-level="2">Horizontal Vane</div>
       <div class="seg" id="wideVaneGrp">
         <div class="seg-bg"></div>
         <button data-v="ll" onclick="setWideVane(this)">&laquo;</button>
@@ -423,7 +434,7 @@ input[type=range]::-moz-range-thumb{
 
   <!-- CN105 Status -->
   <div class="card" style="padding:0">
-    <div class="collapse-header" onclick="togglePanel(this)">
+    <div class="collapse-header" onclick="togglePanel(this)" tabindex="0" role="button" aria-expanded="false">
       <span class="collapse-title">CN105</span>
       <span id="cn105StatusLabel" style="font-size:12px;color:var(--text2);font-weight:400"></span>
       <span class="status-dot idle" id="cn105Dot"></span>
@@ -470,7 +481,7 @@ input[type=range]::-moz-range-thumb{
 
   <!-- Remote Sensor (hidden when BLE not compiled in) -->
   <div class="card" style="padding:0;display:none" id="bleCard">
-    <div class="collapse-header" onclick="togglePanel(this)">
+    <div class="collapse-header" onclick="togglePanel(this)" tabindex="0" role="button" aria-expanded="false">
       <span class="collapse-title">Remote Sensor</span>
       <span id="bleStatusLabel" style="font-size:12px;color:var(--text2);font-weight:400"></span>
       <span class="status-dot idle" id="bleDot"></span>
@@ -537,7 +548,7 @@ input[type=range]::-moz-range-thumb{
 
   <!-- HomeKit -->
   <div class="card" style="padding:0">
-    <div class="collapse-header" onclick="togglePanel(this)">
+    <div class="collapse-header" onclick="togglePanel(this)" tabindex="0" role="button" aria-expanded="false">
       <span class="collapse-title">HomeKit</span>
       <span id="hkStatusLabel" style="font-size:12px;color:var(--text2);font-weight:400"></span>
       <span class="status-dot idle" id="hkDot"></span>
@@ -591,7 +602,7 @@ input[type=range]::-moz-range-thumb{
 
   <!-- WiFi -->
   <div class="card" style="padding:0">
-    <div class="collapse-header" onclick="togglePanel(this)">
+    <div class="collapse-header" onclick="togglePanel(this)" tabindex="0" role="button" aria-expanded="false">
       <span class="collapse-title">WiFi</span>
       <span class="collapse-chevron">&#8250;</span>
     </div>
@@ -627,7 +638,7 @@ input[type=range]::-moz-range-thumb{
 
   <!-- Settings -->
   <div class="card" style="padding:0">
-    <div class="collapse-header" onclick="togglePanel(this)">
+    <div class="collapse-header" onclick="togglePanel(this)" tabindex="0" role="button" aria-expanded="false">
       <span class="collapse-title">Settings</span>
       <span class="collapse-chevron">&#8250;</span>
     </div>
@@ -668,7 +679,7 @@ input[type=range]::-moz-range-thumb{
       </div>
       <button class="save-btn" onclick="saveConfig()">Save Settings</button>
       <div class="fw-section">
-        <div class="card-label">Firmware Update</div>
+        <div class="card-label" role="heading" aria-level="2">Firmware Update</div>
         <div class="fw-row">
           <input type="file" id="fwFile" accept=".bin">
           <button class="save-btn" style="width:auto;padding:10px 20px;margin:0" onclick="uploadFirmware()">Upload</button>
@@ -684,7 +695,7 @@ input[type=range]::-moz-range-thumb{
 
   <!-- Logs -->
   <div class="card" style="padding:0">
-    <div class="collapse-header" onclick="togglePanel(this)">
+    <div class="collapse-header" onclick="togglePanel(this)" tabindex="0" role="button" aria-expanded="false">
       <span class="collapse-title">Logs</span>
       <span class="collapse-chevron">&#8250;</span>
     </div>
@@ -697,7 +708,7 @@ input[type=range]::-moz-range-thumb{
     </div>
   </div>
 
-</div>
+</main>
 
 <script>
 (function(){
@@ -1000,12 +1011,14 @@ input[type=range]::-moz-range-thumb{
     ws.onopen=function(){
       connDot.className='conn-dot ok';
       connDot.title='Connected';
+      connDot.setAttribute('aria-label','Connected');
       if(reconnTimer){clearInterval(reconnTimer);reconnTimer=null}
     };
 
     ws.onclose=function(){
       connDot.className='conn-dot err';
       connDot.title='Disconnected';
+      connDot.setAttribute('aria-label','Disconnected');
       ws=null;
       scheduleReconnect();
     };
@@ -1300,7 +1313,9 @@ input[type=range]::-moz-range-thumb{
     var grp=document.getElementById(grpId);
     var btns=grp.querySelectorAll('button[data-v]');
     for(var i=0;i<btns.length;i++){
-      btns[i].classList.toggle('active', val!=null && btns[i].getAttribute('data-v')===val);
+      var isActive=val!=null && btns[i].getAttribute('data-v')===val;
+      btns[i].classList.toggle('active', isActive);
+      btns[i].setAttribute('aria-checked', isActive);
     }
     updateSegBg(grpId);
   }
@@ -1616,18 +1631,24 @@ input[type=range]::-moz-range-thumb{
     }
   };
 
+  function copyText(text){
+    if(navigator.clipboard&&navigator.clipboard.writeText){
+      navigator.clipboard.writeText(text).catch(function(){fallbackCopy(text)});
+    }else{fallbackCopy(text)}
+  }
+  function fallbackCopy(text){
+    var ta=document.createElement('textarea');
+    ta.value=text;ta.style.position='fixed';ta.style.opacity='0';
+    document.body.appendChild(ta);ta.select();
+    try{document.execCommand('copy')}catch(e){}
+    document.body.removeChild(ta);
+  }
+
   window.copySetupCode=function(){
     var code=$('hkSetupCode').textContent;
     if(!code||code==='--')return;
     var btn=$('hkCopyBtn');
-    var ta=document.createElement('textarea');
-    ta.value=code;
-    ta.style.position='fixed';
-    ta.style.opacity='0';
-    document.body.appendChild(ta);
-    ta.select();
-    document.execCommand('copy');
-    document.body.removeChild(ta);
+    copyText(code);
     btn.textContent='Copied!';
     setTimeout(function(){btn.textContent='Copy Code'},1500);
   };
@@ -1635,24 +1656,24 @@ input[type=range]::-moz-range-thumb{
   window.copyLogs=function(){
     var text=logBox.textContent;
     if(!text)return;
-    var ta=document.createElement('textarea');
-    ta.value=text;
-    ta.style.position='fixed';
-    ta.style.opacity='0';
-    document.body.appendChild(ta);
-    ta.select();
-    document.execCommand('copy');
-    document.body.removeChild(ta);
+    copyText(text);
   };
   window.clearLogs=function(){
     logBox.textContent='';
   };
 
   window.togglePanel=function(hdr){
-    hdr.classList.toggle('open');
+    var isOpen=hdr.classList.toggle('open');
+    hdr.setAttribute('aria-expanded',isOpen);
     var body=hdr.nextElementSibling;
     body.classList.toggle('open');
   };
+
+  document.addEventListener('keydown',function(e){
+    if(e.target.classList.contains('collapse-header')&&(e.key==='Enter'||e.key===' ')){
+      e.preventDefault();togglePanel(e.target);
+    }
+  });
 
   function checkWifiFields(){
     $('wifiSaveBtn').disabled=!($('cfgSSID').value.trim()&&$('cfgPass').value);
@@ -1662,8 +1683,20 @@ input[type=range]::-moz-range-thumb{
 
   // ── Init ───────────────────────────────────────────────────────────────────
   connect();
-  // Initialize segment indicators after layout
-  setTimeout(function(){segGroups.forEach(updateSegBg)},50);
+  // Initialize segment indicators and ARIA after layout
+  setTimeout(function(){
+    segGroups.forEach(function(id){
+      updateSegBg(id);
+      var grp=document.getElementById(id);
+      if(!grp)return;
+      grp.setAttribute('role','radiogroup');
+      var btns=grp.querySelectorAll('button[data-v]');
+      for(var i=0;i<btns.length;i++){
+        btns[i].setAttribute('role','radio');
+        btns[i].setAttribute('aria-checked',btns[i].classList.contains('active'));
+      }
+    });
+  },50);
 
 })();
 </script>
