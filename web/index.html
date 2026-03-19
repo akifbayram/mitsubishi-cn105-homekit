@@ -110,6 +110,7 @@ body{
   font-family:inherit;
 }
 .seg button.active{font-weight:600}
+#wideVaneGrp button{font-size:16px}
 .seg button:active{opacity:.6}
 .seg .seg-bg{
   position:absolute;top:2px;height:calc(100% - 4px);
@@ -117,6 +118,11 @@ body{
   box-shadow:var(--shadow-seg);
   transition:left .28s cubic-bezier(.4,0,.2,1),width .28s cubic-bezier(.4,0,.2,1),opacity .2s;
   z-index:0;opacity:0;pointer-events:none;
+}
+.vane-arrow{
+  display:inline-block;width:1em;height:1em;
+  transform:rotate(var(--vr));
+  line-height:1;text-align:center;font-size:1.3em;
 }
 
 /* ── Temperature ───────────────────────────────────────────────────────── */
@@ -395,21 +401,21 @@ input:focus-visible,select:focus-visible{outline-offset:0}
       <div class="seg-bg"></div>
       <button data-v="auto" onclick="setFan(this)">Auto</button>
       <button data-v="quiet" onclick="setFan(this)">Quiet</button>
-      <button data-v="1" onclick="setFan(this)">1</button>
-      <button data-v="2" onclick="setFan(this)">2</button>
-      <button data-v="3" onclick="setFan(this)">3</button>
-      <button data-v="4" onclick="setFan(this)">4</button>
+      <button data-v="1" onclick="setFan(this)">Low</button>
+      <button data-v="2" onclick="setFan(this)">Med</button>
+      <button data-v="3" onclick="setFan(this)">High</button>
+      <button data-v="4" onclick="setFan(this)">Max</button>
     </div>
     <div id="vaneSection" style="margin-top:12px">
-      <div class="card-label" role="heading" aria-level="2">Vane Position</div>
+      <div class="card-label" role="heading" aria-level="2">Vertical Vane</div>
       <div class="seg" id="vaneGrp">
         <div class="seg-bg"></div>
         <button data-v="auto" onclick="setVane(this)">Auto</button>
-        <button data-v="1" onclick="setVane(this)">1</button>
-        <button data-v="2" onclick="setVane(this)">2</button>
-        <button data-v="3" onclick="setVane(this)">3</button>
-        <button data-v="4" onclick="setVane(this)">4</button>
-        <button data-v="5" onclick="setVane(this)">5</button>
+        <button data-v="1" onclick="setVane(this)" title="Position 1 (horizontal)"><span class="vane-arrow" style="--vr:0deg">&larr;</span></button>
+        <button data-v="2" onclick="setVane(this)" title="Position 2"><span class="vane-arrow" style="--vr:-22deg">&larr;</span></button>
+        <button data-v="3" onclick="setVane(this)" title="Position 3"><span class="vane-arrow" style="--vr:-45deg">&larr;</span></button>
+        <button data-v="4" onclick="setVane(this)" title="Position 4"><span class="vane-arrow" style="--vr:-67deg">&larr;</span></button>
+        <button data-v="5" onclick="setVane(this)" title="Position 5 (down)"><span class="vane-arrow" style="--vr:-90deg">&larr;</span></button>
         <button data-v="swing" onclick="setVane(this)">Swing</button>
       </div>
     </div>
