@@ -527,8 +527,8 @@ input:focus-visible,select:focus-visible{outline-offset:0}
         </div>
       </div>
       <!-- Configuration -->
-      <hr class="ble-config-sep">
-      <div>
+      <hr class="ble-config-sep" id="bleConfigSep">
+      <div id="bleConfigDiv">
         <div class="ble-config-row">
           <label class="status-label" style="margin:0">Sensor MAC</label>
           <input type="text" id="bleMacInput" placeholder="AA:BB:CC:DD:EE:FF"
@@ -1207,8 +1207,8 @@ input:focus-visible,select:focus-visible{outline-offset:0}
       $('bleEnableToggle').checked=bleOn;
       // Hide all BLE content when disabled
       var bleGrid=$('bleStatusGrid');
-      var bleSep=bleGrid.nextElementSibling;  // <hr>
-      var bleConfig=bleSep.nextElementSibling; // config div
+      var bleSep=$('bleConfigSep');
+      var bleConfig=$('bleConfigDiv');
       bleGrid.style.display=bleOn?'':'none';
       bleSep.style.display=bleOn?'':'none';
       bleConfig.style.display=bleOn?'':'none';

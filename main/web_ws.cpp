@@ -242,6 +242,7 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
         if (jsonGetBool(msg, "bleEnabled", &bleEnabledVal)) {
             BleSensor::setBleEnabled(bleEnabledVal);
             LOG_INFO("[WebUI] Config bleEnabled=%s", bleEnabledVal ? "ON" : "OFF");
+            pushState();
         }
 
         char bleAddrVal[18];
