@@ -41,6 +41,7 @@ StatusLED statusLED(PIN_LED_DATA, PIN_LED_ENABLE);
 
 // ── State flags ─────────────────────────────────────────────────────────────
 static bool webUIStarted      = false;
+static bool homekitStarted    = false;
 static bool firmwareValidated = false;
 static bool lastAPState       = false;
 static uint32_t webUIStartTime = 0;
@@ -136,12 +137,10 @@ extern "C" void app_main(void)
 #endif
     }
 
-    // ── 9. HomeKit init ──────────────────────────────────────────────────
-    // homekit_init internally calls homekit_generate_setup_code() and
-    // homekit_services_create_all() which creates thermostat, fan, switches.
-    homekit_services_set_controller(&cn105);
-    homekit_init(displayName, BRAND_MANUFACTURER, BRAND_MODEL,
-                 serialNumber, FW_VERSION);
+    // ── 9. HomeKit init (deferred) ─────────────────────────────────────
+    // HomeKit is initialized in the main loop after WiFi connects.
+    // This keeps port 80 free for the captive portal redirect server
+    // during initial WiFi provisioning.
 
     // ── 10. CN105 UART init ──────────────────────────────────────────────
     cn105.setUpdateInterval(settings.get().pollMs);
@@ -170,10 +169,27 @@ extern "C" void app_main(void)
         // ── CN105 polling ────────────────────────────────────────────────
         cn105.loop();
 
+        // ── Deferred HomeKit init (one-shot after WiFi connects) ─────────
+        if (!homekitStarted && WifiManager::isConnected()) {
+            // Release port 80 if captive portal redirect server is running
+            if (lastAPState) {
+                webUI.setAPMode(false);
+                lastAPState = false;
+            }
+            homekit_services_set_controller(&cn105);
+            homekitStarted = homekit_init(displayName, BRAND_MANUFACTURER,
+                                           BRAND_MODEL, serialNumber, FW_VERSION);
+            if (!homekitStarted) {
+                LOG_ERROR("HomeKit init failed, will retry next loop");
+            }
+        }
+
         // ── Push state to HomeKit (throttled internally) ─────────────────
-        homekit_sync_thermostat(cn105);
-        homekit_sync_fan(cn105);
-        homekit_sync_switches(cn105);
+        if (homekitStarted) {
+            homekit_sync_thermostat(cn105);
+            homekit_sync_fan(cn105);
+            homekit_sync_switches(cn105);
+        }
         // ── WiFi recovery + AP mode tracking ─────────────────────────────
         wifiRecovery.loop();
 
@@ -192,9 +208,12 @@ extern "C" void app_main(void)
 
         if (webUIStarted) {
             // Track AP mode changes for web UI routing
+            // Don't start redirect server on port 80 once HAP owns it
             bool apNow = wifiRecovery.isAPActive();
             if (apNow != lastAPState) {
-                webUI.setAPMode(apNow);
+                if (!homekitStarted || !apNow) {
+                    webUI.setAPMode(apNow);
+                }
                 lastAPState = apNow;
             }
 

@@ -8,9 +8,11 @@
 extern "C" {
 #endif
 
-/// Initialize HAP framework: create accessory, services, register callbacks.
+/// Initialize HAP framework: create accessory, services, register callbacks,
+/// and start the HAP HTTP server on port 80.
 /// Call after NVS, WiFi, and CN105 are initialized.
-void homekit_init(const char* name, const char* manufacturer,
+/// Returns true on success, false if HAP failed to start.
+bool homekit_init(const char* name, const char* manufacturer,
                   const char* model, const char* serialNumber,
                   const char* fwRevision);
 

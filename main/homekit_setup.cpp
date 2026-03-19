@@ -84,7 +84,7 @@ static void homekit_set_setup_id(const char* setupId)
 
 // ── Public API ──────────────────────────────────────────────────────────────
 
-void homekit_init(const char* name, const char* manufacturer,
+bool homekit_init(const char* name, const char* manufacturer,
                   const char* model, const char* serialNumber,
                   const char* fwRevision)
 {
@@ -98,7 +98,7 @@ void homekit_init(const char* name, const char* manufacturer,
     int ret = hap_init(HAP_TRANSPORT_WIFI);
     if (ret != HAP_SUCCESS) {
         LOG_ERROR("[HK] hap_init failed: %d", ret);
-        return;
+        return false;
     }
 
     // Generate / load setup code before creating accessory
@@ -120,7 +120,7 @@ void homekit_init(const char* name, const char* manufacturer,
     hap_acc_t *accessory = hap_acc_create(&cfg);
     if (!accessory) {
         LOG_ERROR("[HK] hap_acc_create failed");
-        return;
+        return false;
     }
 
     // Add product data (dummy, required by spec)
@@ -144,11 +144,11 @@ void homekit_init(const char* name, const char* manufacturer,
     s_setupPayload = esp_hap_get_setup_payload(
         s_setupCode, const_cast<char*>(BRAND_QR_ID), false, s_cid);
 
-    // Start HAP
+    // Start HAP (binds port 80)
     ret = hap_start();
     if (ret != HAP_SUCCESS) {
         LOG_ERROR("[HK] hap_start failed: %d", ret);
-        return;
+        return false;
     }
 
     // Set initial status
@@ -162,6 +162,8 @@ void homekit_init(const char* name, const char* manufacturer,
              s_setupCode,
              s_setupPayload ? s_setupPayload : "N/A",
              hap_get_paired_controller_count());
+
+    return true;
 }
 
 void homekit_generate_setup_code(void)
