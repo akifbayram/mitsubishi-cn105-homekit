@@ -238,6 +238,12 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
         }
 
 #ifdef BLE_ENABLE
+        bool bleEnabledVal;
+        if (jsonGetBool(msg, "bleEnabled", &bleEnabledVal)) {
+            BleSensor::setBleEnabled(bleEnabledVal);
+            LOG_INFO("[WebUI] Config bleEnabled=%s", bleEnabledVal ? "ON" : "OFF");
+        }
+
         char bleAddrVal[18];
         if (jsonGetString(msg, "bleAddr", bleAddrVal, sizeof(bleAddrVal))) {
             BleSensor::setAddr(bleAddrVal);
@@ -268,7 +274,9 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
 
     } else if (strcmp(cmd, "bleScan") == 0) {
 #ifdef BLE_ENABLE
-        if (!BleSensor::isDiscovering()) {
+        if (!BleSensor::isBleEnabled()) {
+            LOG_WARN("[WebUI] BLE scan rejected — BLE not enabled");
+        } else if (!BleSensor::isDiscovering()) {
             BleSensor::startDiscovery();
             LOG_INFO("[WebUI] BLE discovery scan requested");
         }
@@ -351,7 +359,7 @@ void WebUI::pushState() {
 
     unsigned long wifiUptimeSec = wifiRecovery.getWifiUptimeSeconds();
 
-    char buf[1152];
+    char buf[1200];
     int n = snprintf(buf, sizeof(buf),
         "{\"type\":\"state\""
         ",\"power\":%s"
@@ -456,6 +464,7 @@ void WebUI::pushState() {
         const char* sType = BleSensor::sensorType();
 
         n += snprintf(buf + n, sizeof(buf) - n,
+            ",\"bleEnabled\":%s"
             ",\"bleTemp\":%s"
             ",\"bleHumidity\":%s"
             ",\"bleBattery\":%d"
@@ -468,6 +477,7 @@ void WebUI::pushState() {
             ",\"bleTimeout\":%u"
             ",\"bleDiscovering\":%s"
             ",\"bleSensorType\":%s%s%s",
+            BleSensor::isBleEnabled() ? "true" : "false",
             bleTStr,
             bleHStr,
             (int)bleB,
