@@ -30,15 +30,15 @@ private:
     void disableFallbackAP();
     void checkButton();
     void refreshCachedSSID();          // Re-read SSID from WifiManager NVS into _cachedSSID
-    static uint32_t safeMillis();      // millis() that never returns 0 (sentinel avoidance)
+    static uint32_t safeUptimeMs();    // uptime_ms() that never returns 0 (sentinel avoidance)
 
     char     _apName[32] = "";
     bool     _apActive = false;
     bool     _wasConnected = false;      // Track previous WiFi state
-    uint32_t _disconnectedSince = 0;     // millis() when WiFi was lost (0 = connected)
-    uint32_t _wifiConnectedSince = 0;    // millis() when WiFi connected (0 = not connected)
-    uint32_t _apShutdownAt = 0;          // millis() when AP should be disabled (0 = no pending shutdown)
-    uint32_t _buttonPressStart = 0;      // millis() when button was first pressed (0 = not pressed)
+    uint32_t _disconnectedSince = 0;     // uptime_ms() when WiFi was lost (0 = connected)
+    uint32_t _wifiConnectedSince = 0;    // uptime_ms() when WiFi connected (0 = not connected)
+    uint32_t _apShutdownAt = 0;          // uptime_ms() when AP should be disabled (0 = no pending shutdown)
+    uint32_t _buttonPressStart = 0;      // uptime_ms() when button was first pressed (0 = not pressed)
     bool     _buttonTriggered = false;   // Prevent repeat triggers
     char     _cachedSSID[33] = "";       // Cached SSID to avoid NVS reads on every status poll
 };

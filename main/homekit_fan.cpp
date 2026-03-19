@@ -1,7 +1,7 @@
 #include "homekit_services.h"
 #include "settings.h"
 #include "logging.h"
-#include "compat_arduino.h"
+#include "esp_utils.h"
 
 #include <cstring>
 #include <cmath>
@@ -149,7 +149,7 @@ static void sync_fan_auto(CN105Controller &cn105);
 
 void homekit_sync_fan(CN105Controller &cn105)
 {
-    uint32_t now = millis();
+    uint32_t now = uptime_ms();
     if (now - s_fanLastSync < 2000) return;
     s_fanLastSync = now;
 
@@ -288,7 +288,7 @@ void homekit_create_fan_auto_switch(hap_acc_t *acc)
 // Fan Auto sync — called from homekit_sync_fan to keep it grouped
 static void sync_fan_auto(CN105Controller &cn105)
 {
-    uint32_t now = millis();
+    uint32_t now = uptime_ms();
     if (now - s_fanAutoLastSync < 2000) return;
     s_fanAutoLastSync = now;
 

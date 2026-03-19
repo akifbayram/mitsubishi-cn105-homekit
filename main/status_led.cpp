@@ -1,6 +1,6 @@
 #include "status_led.h"
 #include "logging.h"
-#include "compat_arduino.h"
+#include "esp_utils.h"
 
 static const char *TAG = "led";
 
@@ -58,8 +58,8 @@ void StatusLED::setState(LEDState state) {
     if (state == _state) return;
     LOG_INFO("[LED] %s -> %s", stateName(_state), stateName(state));
     _state = state;
-    _stateStart = millis();
-    _lastToggle = millis();
+    _stateStart = uptime_ms();
+    _lastToggle = uptime_ms();
     _ledOn = false;
 
     switch (state) {
@@ -89,7 +89,7 @@ void StatusLED::setState(LEDState state) {
 }
 
 void StatusLED::loop() {
-    uint32_t now = millis();
+    uint32_t now = uptime_ms();
     uint32_t elapsed = now - _lastToggle;
     uint32_t stateAge = now - _stateStart;
 

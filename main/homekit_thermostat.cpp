@@ -1,7 +1,7 @@
 #include "homekit_services.h"
 #include "settings.h"
 #include "logging.h"
-#include "compat_arduino.h"
+#include "esp_utils.h"
 
 #include <cmath>
 #include <cstring>
@@ -272,7 +272,7 @@ void homekit_create_thermostat(hap_acc_t *acc)
 
 void homekit_sync_thermostat(CN105Controller &cn105)
 {
-    uint32_t now = millis();
+    uint32_t now = uptime_ms();
     if (now - s_lastSync < 2000) return;
     s_lastSync = now;
 

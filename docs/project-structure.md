@@ -30,7 +30,7 @@ main/
     board_esp32c3_mini.h      #   ESP32-C3 SuperMini / XIAO
     board_m5atoms3_lite.h     #   M5Stack AtomS3 Lite
   branding.h                  # Build-time branding defaults
-  compat_arduino.h            # millis(), delay(), constrain() shims
+  esp_utils.h                 # uptime_ms() — lightweight ESP-IDF timing utility
   uart_interface.h            # UART abstraction interface
   hardware_uart.h             # ESP-IDF UART driver implementation
   json_utils.h                # Lightweight JSON string parser

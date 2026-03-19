@@ -4,7 +4,6 @@
 #include "wifi_manager.h"
 #include "homekit_setup.h"
 #include "logging.h"
-#include "compat_arduino.h"
 #include <cstring>
 #include <cstdio>
 #include <lwip/sockets.h>

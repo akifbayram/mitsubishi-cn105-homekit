@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <cstddef>
 #include <cstring>
-#include "compat_arduino.h"
+#include "esp_utils.h"
 #include <driver/uart.h>
 #include <driver/gpio.h>
 #include "logging.h"
@@ -148,7 +148,7 @@ struct WantedSettings {
     bool hasWideVane = false;
 
     bool hasBeenSent = false;   // Set packet was transmitted to heat pump
-    uint32_t lastChange = 0;    // millis() of most recent user command
+    uint32_t lastChange = 0;    // uptime_ms() of most recent user command
 };
 
 // ── CN105 Controller Class ──────────────────────────────────────────────────
@@ -226,15 +226,15 @@ private:
     uint32_t _lastConnectAttempt = 0;
 
     // ── Communication health tracking ────────────────────────────────────────
-    // Timestamp (millis()) of the last valid CN105 response packet received.
+    // Timestamp (uptime_ms()) of the last valid CN105 response packet received.
     // Used by isHealthy() and the communication-loss detector in loop().
     uint32_t _lastSuccessfulResponse = 0;
 
     // ── Cycle-based polling state (matches MitsubishiCN105ESPHome approach) ─
     // A "cycle" sends all info requests (0x02, 0x03, 0x06) sequentially,
     // waiting for each response before sending the next request.
-    uint32_t _lastCycleEnd    = 0;   // millis() when last cycle completed
-    uint32_t _cycleStartMs    = 0;   // millis() when current cycle started
+    uint32_t _lastCycleEnd    = 0;   // uptime_ms() when last cycle completed
+    uint32_t _cycleStartMs    = 0;   // uptime_ms() when current cycle started
     bool     _cycleRunning    = false;
     uint8_t  _pollPhase       = 0;   // index into pollTypes[] within a cycle
     bool     _awaitingResponse = false; // waiting for response to current request

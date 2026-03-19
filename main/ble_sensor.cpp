@@ -5,7 +5,7 @@
 #include "ble_sensor.h"
 #include "settings.h"
 #include "logging.h"
-#include "compat_arduino.h"
+#include "esp_utils.h"
 
 #include <cstring>
 #include <cmath>
@@ -346,7 +346,7 @@ static int gap_event_cb(struct ble_gap_event *event, void *arg) {
             if (result.decoded) {
                 s_sensorType = result.type;
                 s_rssi = disc->rssi;
-                s_lastUpdate = millis();
+                s_lastUpdate = uptime_ms();
                 s_staleReverted = false;
             }
             taskEXIT_CRITICAL(&s_mux);
@@ -449,7 +449,7 @@ void BleSensor::begin() {
 }
 
 void BleSensor::loop(CN105Controller &cn105) {
-    uint32_t now = millis();
+    uint32_t now = uptime_ms();
     float temp = readLocked(s_temperature);
     uint32_t lastUpd = readLocked(s_lastUpdate);
 
@@ -480,19 +480,19 @@ int      BleSensor::rssi()         { return readLocked(s_rssi); }
 bool BleSensor::isActive() {
     uint32_t lu = readLocked(s_lastUpdate);
     uint32_t staleMs = (uint32_t)settings.get().bleStaleTimeoutS * 1000;
-    return lu > 0 && (millis() - lu) < staleMs;
+    return lu > 0 && (uptime_ms() - lu) < staleMs;
 }
 
 bool BleSensor::isStale() {
     uint32_t lu = readLocked(s_lastUpdate);
     uint32_t staleMs = (uint32_t)settings.get().bleStaleTimeoutS * 1000;
-    return lu > 0 && (millis() - lu) >= staleMs;
+    return lu > 0 && (uptime_ms() - lu) >= staleMs;
 }
 
 uint32_t BleSensor::lastUpdateAge() {
     uint32_t lu = readLocked(s_lastUpdate);
     if (lu == 0) return UINT32_MAX;
-    return millis() - lu;
+    return uptime_ms() - lu;
 }
 
 bool BleSensor::isEnabled() {
@@ -549,7 +549,7 @@ void BleSensor::startDiscovery() {
     s_discoveryCount = 0;
     s_lastPushedCount = 0;
     s_discoveryMode = true;
-    s_discoveryStart = millis();
+    s_discoveryStart = uptime_ms();
 
     // Start scanning if not already running (e.g., no MAC configured)
     if (!s_scanning) {
@@ -573,7 +573,7 @@ bool BleSensor::pollDiscoveryUpdate() {
 }
 
 bool BleSensor::pollDiscoveryComplete() {
-    if (s_discoveryMode && millis() - s_discoveryStart >= BLE_DISCOVERY_MS) {
+    if (s_discoveryMode && uptime_ms() - s_discoveryStart >= BLE_DISCOVERY_MS) {
         s_discoveryMode = false;
 
         // Stop scanning if no target configured

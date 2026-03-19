@@ -12,7 +12,7 @@
 #include "board_profile.h"
 #include "branding.h"
 #include "ble_config.h"
-#include "compat_arduino.h"
+#include "esp_utils.h"
 #include "status_led.h"
 #include "cn105_protocol.h"
 #include "wifi_manager.h"
@@ -198,7 +198,7 @@ extern "C" void app_main(void)
         if (!webUIStarted && (WifiManager::isConnected() || wifiRecovery.isAPActive())) {
             webUI.begin(&cn105);
             webUIStarted = true;
-            webUIStartTime = millis();
+            webUIStartTime = uptime_ms();
             LOG_INFO("Web UI started (port 8080)");
 
 #ifdef BLE_ENABLE
@@ -235,7 +235,7 @@ extern "C" void app_main(void)
                     statusLED.setState(SLED_WIFI_CONNECTED);
                 } else {
                     static bool bootBlinked = false;
-                    if (!bootBlinked && millis() > 2000) {
+                    if (!bootBlinked && uptime_ms() > 2000) {
                         statusLED.setState(SLED_WIFI_CONNECTING);
                         bootBlinked = true;
                     }
@@ -260,7 +260,7 @@ extern "C" void app_main(void)
         // ── OTA rollback validation (one-shot) ──────────────────────────
         // Validate firmware after WiFi + CN105 confirmed working, or 60s timeout
         if (!firmwareValidated && webUIStarted) {
-            if (cn105.isConnected() || (millis() - webUIStartTime > 60000)) {
+            if (cn105.isConnected() || (uptime_ms() - webUIStartTime > 60000)) {
                 esp_ota_mark_app_valid_cancel_rollback();
                 firmwareValidated = true;
                 LOG_INFO("Firmware validated (%s)",

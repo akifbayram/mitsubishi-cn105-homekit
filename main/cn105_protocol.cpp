@@ -1,5 +1,6 @@
 #include "cn105_protocol.h"
 #include "cn105_strings.h"
+#include <algorithm>
 #include <cmath>
 
 static const char *TAG = "cn105";
@@ -49,12 +50,12 @@ void CN105Controller::begin(UartInterface *uart) {
 bool CN105Controller::isHealthy() const {
     return _state.connected &&
            _lastSuccessfulResponse > 0 &&
-           (millis() - _lastSuccessfulResponse) < CN105_COMMS_TIMEOUT;
+           (uptime_ms() - _lastSuccessfulResponse) < CN105_COMMS_TIMEOUT;
 }
 
 uint32_t CN105Controller::getLastResponseAge() const {
     if (_lastSuccessfulResponse == 0) return UINT32_MAX;
-    return millis() - _lastSuccessfulResponse;
+    return uptime_ms() - _lastSuccessfulResponse;
 }
 
 bool CN105Controller::isFieldInGrace(bool hasField) const {
@@ -63,7 +64,7 @@ bool CN105Controller::isFieldInGrace(bool hasField) const {
     // until heat pump confirms). Safety timeout prevents stuck state if
     // confirmation never arrives (e.g. heat pump rejects the value).
     constexpr uint32_t GRACE_SAFETY_TIMEOUT = 10000;  // 10s max
-    return (millis() - _wanted.lastChange) < GRACE_SAFETY_TIMEOUT;
+    return (uptime_ms() - _wanted.lastChange) < GRACE_SAFETY_TIMEOUT;
 }
 
 CN105State CN105Controller::getEffectiveState() const {
@@ -82,7 +83,7 @@ CN105State CN105Controller::getEffectiveState() const {
 // ════════════════════════════════════════════════════════════════════════════
 
 void CN105Controller::loop() {
-    uint32_t now = millis();
+    uint32_t now = uptime_ms();
 
     // ── Read any incoming bytes ─────────────────────────────────────────────
     readSerial();
@@ -160,8 +161,8 @@ void CN105Controller::loop() {
     }
 
     // ── Detect communication loss ───────────────────────────────────────────
-    // Re-read millis() because readSerial() may have updated _lastSuccessfulResponse
-    uint32_t nowMs = millis();
+    // Re-read uptime_ms() because readSerial() may have updated _lastSuccessfulResponse
+    uint32_t nowMs = uptime_ms();
     if (_lastSuccessfulResponse > 0 &&
         (nowMs - _lastSuccessfulResponse) > CN105_COMMS_TIMEOUT) {
         LOG_ERROR("[CN105] COMMUNICATION LOST! No response for %lums (timeout=%dms)",
@@ -185,7 +186,7 @@ void CN105Controller::setPower(bool on) {
     _wanted.hasPower = true;
     _wanted.power = on;
     _wanted.hasBeenSent = false;
-    _wanted.lastChange = millis();
+    _wanted.lastChange = uptime_ms();
 }
 
 void CN105Controller::setMode(uint8_t mode) {
@@ -195,18 +196,18 @@ void CN105Controller::setMode(uint8_t mode) {
     _wanted.hasMode = true;
     _wanted.mode = mode;
     _wanted.hasBeenSent = false;
-    _wanted.lastChange = millis();
+    _wanted.lastChange = uptime_ms();
 }
 
 void CN105Controller::setTargetTemp(float tempC) {
-    float clamped = constrain(tempC, CN105_TEMP_MIN, CN105_TEMP_MAX);
+    float clamped = std::clamp(tempC, CN105_TEMP_MIN, CN105_TEMP_MAX);
     LOG_INFO("[CN105] CMD: setTargetTemp(%.1f%sC)", clamped, "\xC2\xB0");
     _setFlags1 |= CN105_FLAG_TEMP;
     _pendingTemp = clamped;
     _wanted.hasTemp = true;
     _wanted.targetTemp = clamped;
     _wanted.hasBeenSent = false;
-    _wanted.lastChange = millis();
+    _wanted.lastChange = uptime_ms();
 }
 
 void CN105Controller::setFanSpeed(uint8_t speed) {
@@ -216,7 +217,7 @@ void CN105Controller::setFanSpeed(uint8_t speed) {
     _wanted.hasFan = true;
     _wanted.fanSpeed = speed;
     _wanted.hasBeenSent = false;
-    _wanted.lastChange = millis();
+    _wanted.lastChange = uptime_ms();
 }
 
 void CN105Controller::setVane(uint8_t position) {
@@ -226,7 +227,7 @@ void CN105Controller::setVane(uint8_t position) {
     _wanted.hasVane = true;
     _wanted.vane = position;
     _wanted.hasBeenSent = false;
-    _wanted.lastChange = millis();
+    _wanted.lastChange = uptime_ms();
 }
 
 void CN105Controller::setWideVane(uint8_t position) {
@@ -236,7 +237,7 @@ void CN105Controller::setWideVane(uint8_t position) {
     _wanted.hasWideVane = true;
     _wanted.wideVane = position;
     _wanted.hasBeenSent = false;
-    _wanted.lastChange = millis();
+    _wanted.lastChange = uptime_ms();
 }
 
 void CN105Controller::sendPendingChanges() {
@@ -255,7 +256,7 @@ void CN105Controller::sendPendingChanges() {
     sendSetPacket();
     _setFlags1 = 0;
     _setFlags2 = 0;
-    _lastCycleEnd = millis() + CN105_DEFER_DELAY;
+    _lastCycleEnd = uptime_ms() + CN105_DEFER_DELAY;
 }
 
 void CN105Controller::sendRemoteTemperature(float tempC) {
@@ -368,7 +369,7 @@ void CN105Controller::sendSetPacket() {
     }
 
     if (_setFlags1 & CN105_FLAG_TEMP) {
-        float clamped = constrain(_pendingTemp, CN105_TEMP_MIN, CN105_TEMP_MAX);
+        float clamped = std::clamp(_pendingTemp, CN105_TEMP_MIN, CN105_TEMP_MAX);
         float rounded = round(clamped * 2.0f) / 2.0f;
         if (_tempMode) {
             // Enhanced mode: byte 19 carries 0.5C precision, byte 10 = 0
@@ -412,7 +413,7 @@ void CN105Controller::sendSetPacket() {
 // ════════════════════════════════════════════════════════════════════════════
 
 void CN105Controller::readSerial() {
-    uint32_t now = millis();
+    uint32_t now = uptime_ms();
 
     // Non-blocking bulk read via UART interface
     size_t available = _uart->available();
@@ -476,7 +477,7 @@ void CN105Controller::processPacket(const uint8_t *pkt, uint8_t len) {
         case CN105_PKT_CONNECT_OK:
             LOG_INFO("[CN105] Connected to heat pump");
             _state.connected = true;
-            _state.lastUpdate = millis();
+            _state.lastUpdate = uptime_ms();
             _lastSuccessfulResponse = _state.lastUpdate;
             _initialConnectDone = true;
             _connectRetries = 0;
@@ -484,7 +485,7 @@ void CN105Controller::processPacket(const uint8_t *pkt, uint8_t len) {
 
         case CN105_PKT_SET_ACK:
             LOG_INFO("[CN105] SET command acknowledged");
-            _state.lastUpdate = millis();
+            _state.lastUpdate = uptime_ms();
             _lastSuccessfulResponse = _state.lastUpdate;
             break;
 
@@ -507,9 +508,9 @@ void CN105Controller::processPacket(const uint8_t *pkt, uint8_t len) {
                     sendInfoRequest(POLL_TYPES[_pollPhase]);
                     _awaitingResponse = true;
                 } else {
-                    LOG_DEBUG("[CN105] Poll cycle complete (%lums)", (unsigned long)(millis() - _cycleStartMs));
+                    LOG_DEBUG("[CN105] Poll cycle complete (%lums)", (unsigned long)(uptime_ms() - _cycleStartMs));
                     _cycleRunning = false;
-                    _lastCycleEnd = millis();
+                    _lastCycleEnd = uptime_ms();
                 }
             }
             break;
@@ -526,7 +527,7 @@ void CN105Controller::handleInfoResponse(const uint8_t *data, uint8_t dataLen) {
         return;
     }
 
-    uint32_t now = millis();
+    uint32_t now = uptime_ms();
     _state.lastUpdate = now;
     _lastSuccessfulResponse = now;
 

@@ -4,7 +4,8 @@
 #include "wifi_manager.h"
 #include "wifi_recovery.h"
 #include "homekit_setup.h"
-#include "compat_arduino.h"
+#include "esp_utils.h"
+#include <algorithm>
 #include <cmath>
 #include "ble_config.h"
 #ifdef BLE_ENABLE
@@ -149,13 +150,13 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
         float heatT, coolT;
         bool heatSet = false, coolSet = false;
         if (jsonGetFloat(msg, "heatThresh", &heatT)) {
-            heatT = constrain(heatT, CN105_TEMP_MIN, CN105_TEMP_MAX);
+            heatT = std::clamp(heatT, CN105_TEMP_MIN, CN105_TEMP_MAX);
             settings.get().heatingThreshold = heatT;
             heatSet = true;
             LOG_INFO("[WebUI] Set heatingThreshold=%.1f", heatT);
         }
         if (jsonGetFloat(msg, "coolThresh", &coolT)) {
-            coolT = constrain(coolT, CN105_TEMP_MIN, CN105_TEMP_MAX);
+            coolT = std::clamp(coolT, CN105_TEMP_MIN, CN105_TEMP_MAX);
             settings.get().coolingThreshold = coolT;
             coolSet = true;
             LOG_INFO("[WebUI] Set coolingThreshold=%.1f", coolT);
@@ -385,7 +386,7 @@ void WebUI::pushState() {
         st.operating ? "true" : "false",
         st.compressorHz,
         _ctrl->isConnected() ? "true" : "false",
-        (unsigned long)(millis() / 1000),
+        (unsigned long)(uptime_ms() / 1000),
         (int)WifiManager::getRSSI(),
         wifiUptimeSec,
         subModeToWebStr(st.subMode),
@@ -549,7 +550,7 @@ void WebUI::pushDiscoveryResults(bool done) {
 void WebUI::loop() {
     if (_wsClientFd < 0) return;
 
-    uint32_t now = millis();
+    uint32_t now = uptime_ms();
     if (now - _lastStatePush >= 1000) {
         _lastStatePush = now;
         pushState();

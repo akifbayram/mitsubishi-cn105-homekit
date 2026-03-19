@@ -1,7 +1,7 @@
 #include "homekit_services.h"
 #include "settings.h"
 #include "logging.h"
-#include "compat_arduino.h"
+#include "esp_utils.h"
 
 #include <cstring>
 
@@ -92,7 +92,7 @@ void homekit_create_fan_mode_switch(hap_acc_t *acc)
 
 static void sync_fan_mode(CN105Controller &cn105)
 {
-    uint32_t now = millis();
+    uint32_t now = uptime_ms();
     if (now - s_fanModeLastSync < 2000) return;
     s_fanModeLastSync = now;
 
@@ -208,7 +208,7 @@ void homekit_create_dry_mode_switch(hap_acc_t *acc)
 
 static void sync_dry_mode(CN105Controller &cn105)
 {
-    uint32_t now = millis();
+    uint32_t now = uptime_ms();
     if (now - s_dryModeLastSync < 2000) return;
     s_dryModeLastSync = now;
 

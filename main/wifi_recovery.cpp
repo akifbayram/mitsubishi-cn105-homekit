@@ -4,7 +4,7 @@
 #include "logging.h"
 #include "branding.h"
 #include "wifi_manager.h"
-#include "compat_arduino.h"
+#include "esp_utils.h"
 
 #include <esp_netif.h>
 #include <driver/gpio.h>
@@ -14,8 +14,8 @@ static const char *TAG = "wifi_rec";
 
 WifiRecovery wifiRecovery;
 
-uint32_t WifiRecovery::safeMillis() {
-    uint32_t ms = millis();
+uint32_t WifiRecovery::safeUptimeMs() {
+    uint32_t ms = uptime_ms();
     return ms ? ms : 1;  // Avoid 0 sentinel
 }
 
@@ -42,7 +42,7 @@ void WifiRecovery::loop() {
         // Just connected
         LOG_INFO("[WiFiRecovery] WiFi connected");
         _disconnectedSince = 0;
-        _wifiConnectedSince = safeMillis();
+        _wifiConnectedSince = safeUptimeMs();
 
         if (settings.get().wifiChangePending) {
             setChangePending(false);
@@ -51,13 +51,13 @@ void WifiRecovery::loop() {
 
         if (_apActive && _apShutdownAt == 0) {
             // Delay AP shutdown so recovery page can confirm connection
-            _apShutdownAt = safeMillis() + WIFI_AP_LINGER_MS;
+            _apShutdownAt = safeUptimeMs() + WIFI_AP_LINGER_MS;
             LOG_INFO("[WiFiRecovery] AP shutdown in %lums (linger for recovery page)",
                      (unsigned long)WIFI_AP_LINGER_MS);
         }
     } else if (!connected && _wasConnected) {
         // Just disconnected
-        _disconnectedSince = safeMillis();
+        _disconnectedSince = safeUptimeMs();
         _wifiConnectedSince = 0;
         _apShutdownAt = 0;  // Cancel pending AP shutdown
         LOG_WARN("[WiFiRecovery] WiFi disconnected, starting recovery timer");
@@ -66,20 +66,20 @@ void WifiRecovery::loop() {
         uint32_t timeout = settings.get().wifiChangePending
             ? WIFI_RECOVERY_TIMEOUT_CHANGE
             : WIFI_RECOVERY_TIMEOUT_NORMAL;
-        if (millis() - _disconnectedSince >= timeout) {
+        if (uptime_ms() - _disconnectedSince >= timeout) {
             enableFallbackAP();
         }
     }
 
     // Handle first boot: if credentials exist but never connected, start timer
     if (!connected && !_wasConnected && _disconnectedSince == 0) {
-        _disconnectedSince = safeMillis();
+        _disconnectedSince = safeUptimeMs();
     }
 
     _wasConnected = connected;
 
     // ── Deferred AP shutdown ─────────────────────────────────────────────────
-    if (_apShutdownAt > 0 && millis() >= _apShutdownAt) {
+    if (_apShutdownAt > 0 && uptime_ms() >= _apShutdownAt) {
         _apShutdownAt = 0;
         if (_apActive && connected) {
             disableFallbackAP();
@@ -153,7 +153,7 @@ void WifiRecovery::getCachedSSID(char *buf, size_t bufLen) const {
 
 uint32_t WifiRecovery::getWifiUptimeSeconds() const {
     if (_wifiConnectedSince == 0) return 0;
-    return (safeMillis() - _wifiConnectedSince) / 1000;
+    return (safeUptimeMs() - _wifiConnectedSince) / 1000;
 }
 
 void WifiRecovery::checkButton() {
@@ -163,10 +163,10 @@ void WifiRecovery::checkButton() {
     bool pressed = (gpio_get_level((gpio_num_t)WIFI_RESET_BUTTON_PIN) == (BUTTON_ACTIVE_LOW ? 0 : 1));
 
     if (pressed && _buttonPressStart == 0) {
-        _buttonPressStart = safeMillis();
+        _buttonPressStart = safeUptimeMs();
         _buttonTriggered = false;
     } else if (pressed && !_buttonTriggered) {
-        if (millis() - _buttonPressStart >= WIFI_RESET_BUTTON_HOLD_MS) {
+        if (uptime_ms() - _buttonPressStart >= WIFI_RESET_BUTTON_HOLD_MS) {
             _buttonTriggered = true;
             LOG_WARN("[WiFiRecovery] Button held 10s — erasing WiFi credentials");
             WifiManager::eraseCredentials();
