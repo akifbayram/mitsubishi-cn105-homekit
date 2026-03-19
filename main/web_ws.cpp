@@ -22,8 +22,12 @@ esp_err_t WebUI::handleWebSocket(httpd_req_t *req) {
     // On first call (handshake), req->method == HTTP_GET
     if (req->method == HTTP_GET) {
         int fd = httpd_req_to_sockfd(req);
-        LOG_INFO("[WebUI] WebSocket client connected (fd=%d)", fd);
-        webUI._wsClientFd = fd;
+        int oldFd = webUI._wsClientFd.exchange(fd);
+        if (oldFd >= 0 && oldFd != fd) {
+            LOG_INFO("[WebUI] Replacing WS client fd=%d with fd=%d", oldFd, fd);
+        } else {
+            LOG_INFO("[WebUI] WebSocket client connected (fd=%d)", fd);
+        }
         // Push initial state immediately after connection
         webUI.pushState();
         return ESP_OK;
@@ -283,7 +287,7 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
 
     } else if (strcmp(cmd, "restart") == 0) {
         LOG_INFO("[WebUI] Restart requested");
-        sendWsText(_wsClientFd, "{\"type\":\"info\",\"msg\":\"Restarting...\"}");
+        sendWsText(httpd_req_to_sockfd(req), "{\"type\":\"info\",\"msg\":\"Restarting...\"}");
         vTaskDelay(pdMS_TO_TICKS(500));
         esp_restart();
 
@@ -309,10 +313,10 @@ void WebUI::sendWsText(int fd, const char *text) {
     // Verify the client is still a valid WebSocket connection
     httpd_ws_client_info_t info = httpd_ws_get_fd_info(_server, fd);
     if (info != HTTPD_WS_CLIENT_WEBSOCKET) {
-        // Client disconnected or is no longer a WS client
-        if (_wsClientFd == fd) {
-            _wsClientFd = -1;
-        }
+        // Client disconnected or is no longer a WS client — atomic CAS
+        // avoids clearing a newly-connected client's fd in a race
+        int expected = fd;
+        _wsClientFd.compare_exchange_strong(expected, -1);
         return;
     }
 
@@ -324,10 +328,10 @@ void WebUI::sendWsText(int fd, const char *text) {
 
     esp_err_t ret = httpd_ws_send_frame_async(_server, fd, &frame);
     if (ret != ESP_OK) {
-        // Reset fd BEFORE logging — prevents broadcastLog from retrying the dead socket
-        if (_wsClientFd == fd) {
-            _wsClientFd = -1;
-        }
+        // Reset fd BEFORE logging — prevents broadcastLog from retrying the dead socket.
+        // Atomic CAS: only clear if fd hasn't been replaced by a new client.
+        int expected = fd;
+        _wsClientFd.compare_exchange_strong(expected, -1);
         LOG_WARN("[WebUI] Failed to send WS frame to fd=%d: %d, client cleared", fd, ret);
     }
 }
@@ -483,7 +487,8 @@ void WebUI::pushState() {
     n += snprintf(buf + n, sizeof(buf) - n, "}");
 
     if (n >= (int)sizeof(buf)) {
-        LOG_WARN("[WebUI] pushState buffer truncated (%d >= %zu)", n, sizeof(buf));
+        LOG_WARN("[WebUI] pushState buffer truncated (%d >= %zu), skipping send", n, sizeof(buf));
+        return;
     }
 
     sendWsText(_wsClientFd, buf);
@@ -553,19 +558,23 @@ void WebUI::loop() {
     // Server-side WS ping every 15s to detect dead clients (half-open TCP)
     if (now - _lastWsPing >= 15000) {
         _lastWsPing = now;
-        httpd_ws_client_info_t info = httpd_ws_get_fd_info(_server, _wsClientFd);
+        int fd = _wsClientFd.load();
+        if (fd < 0) return;
+        httpd_ws_client_info_t info = httpd_ws_get_fd_info(_server, fd);
         if (info != HTTPD_WS_CLIENT_WEBSOCKET) {
-            LOG_INFO("[WebUI] Dead WS client detected (fd=%d), cleaning up", _wsClientFd);
-            _wsClientFd = -1;
+            LOG_INFO("[WebUI] Dead WS client detected (fd=%d), cleaning up", fd);
+            int expected = fd;
+            _wsClientFd.compare_exchange_strong(expected, -1);
             return;
         }
         httpd_ws_frame_t ping;
         memset(&ping, 0, sizeof(ping));
         ping.type = HTTPD_WS_TYPE_PING;
-        esp_err_t ret = httpd_ws_send_frame_async(_server, _wsClientFd, &ping);
+        esp_err_t ret = httpd_ws_send_frame_async(_server, fd, &ping);
         if (ret != ESP_OK) {
-            LOG_WARN("[WebUI] Ping failed (fd=%d): %d, cleaning up", _wsClientFd, ret);
-            _wsClientFd = -1;
+            LOG_WARN("[WebUI] Ping failed (fd=%d): %d, cleaning up", fd, ret);
+            int expected = fd;
+            _wsClientFd.compare_exchange_strong(expected, -1);
             return;
         }
     }

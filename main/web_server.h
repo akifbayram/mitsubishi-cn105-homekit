@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <esp_http_server.h>
 #include <esp_ota_ops.h>
 #include "cn105_protocol.h"
@@ -15,7 +16,7 @@ public:
 private:
     httpd_handle_t   _server = NULL;
     CN105Controller *_ctrl   = nullptr;
-    int  _wsClientFd         = -1;      // Track connected WS client (single client)
+    std::atomic<int> _wsClientFd{-1};    // Track connected WS client (single client, cross-task)
     uint32_t _lastStatePush  = 0;
     uint32_t _lastWsPing     = 0;      // Server-side WS ping for dead client detection
     bool _apMode = false;               // True when fallback AP is active
