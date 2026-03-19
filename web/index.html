@@ -93,8 +93,8 @@ body{
   padding:14px 16px;margin-bottom:10px;
 }
 .card-label{
-  font-size:13px;font-weight:500;color:var(--text2);
-  text-transform:uppercase;letter-spacing:0.3px;margin-bottom:8px;
+  font-size:13px;font-weight:500;color:var(--text);
+  letter-spacing:0.3px;margin-bottom:8px;
 }
 
 /* ── Segmented Control ────────────────────────────────────────────────── */
@@ -180,7 +180,7 @@ input[type=range]::-moz-range-thumb{
   margin-bottom:2px;user-select:none;
 }
 .collapse-header.open{border-radius:var(--radius) var(--radius) 0 0;margin-bottom:0}
-.collapse-title{font-size:15px;font-weight:500;flex:1}
+.collapse-title{font-size:15px;font-weight:500;flex:1;color:var(--text)}
 .collapse-chevron{
   font-size:16px;color:var(--text3);transition:transform .3s cubic-bezier(.4,0,.2,1);
   font-weight:300;
@@ -238,7 +238,7 @@ input[type=range]::-moz-range-thumb{
 .ble-scan-item .scan-addr{font-size:11px;color:var(--text2);font-family:monospace}
 @keyframes scan-pulse{0%,100%{opacity:1}50%{opacity:.5}}
 .scanning{animation:scan-pulse 1s infinite}
-.status-label{color:var(--text2);margin-right:auto}
+.status-label{font-size:14px;color:var(--text2);margin-right:auto}
 .ble-help{font-size:11px;color:var(--text2);line-height:1.45;margin-top:4px}
 
 /* ── Settings & Forms ──────────────────────────────────────────────────── */
@@ -247,7 +247,7 @@ input[type=range]::-moz-range-thumb{
   padding:10px 0;border-bottom:0.5px solid var(--border);
 }
 .setting-row:last-of-type{border-bottom:none}
-.setting-row label{font-size:15px;color:var(--text);min-width:90px}
+.setting-row label{font-size:14px;color:var(--text);min-width:90px}
 .setting-row select,.setting-row input[type=text],.setting-row input[type=password],.setting-row input[type=number]{
   flex:1;padding:8px 12px;border:none;border-radius:var(--radius-sm);
   background:var(--seg-bg);color:var(--text);font-size:15px;
@@ -519,6 +519,7 @@ input:focus-visible,select:focus-visible{outline-offset:0}
         </div>
       </div>
       <div class="ble-help" id="bleTimeoutHelp">Falls back to the internal sensor if no reading arrives within this time. Increase for sensors with slow update intervals.</div>
+      <hr class="ble-config-sep" id="bleConfigSep">
       <div id="bleBanner" class="ble-banner" style="display:none;margin-top:10px"></div>
       <!-- Status grid -->
       <div class="status-grid" id="bleStatusGrid" style="margin-top:10px">
