@@ -24,7 +24,16 @@ idf_component_register(
 # ── Auto-select board profile based on IDF_TARGET ────────────────────────────
 # Each chip gets a default board profile. Override by setting -DBOARD_PROFILE_*
 # on the cmake command line (e.g., idf.py build -DBOARD_PROFILE_M5ATOMS3_LITE=1).
-if(NOT DEFINED BOARD_PROFILE_CUSTOM)
+set(_explicit_profile_set FALSE)
+foreach(_prof CUSTOM NANOC6 ESP32S3_DEVKIT ESP32_DEVKIT ESP32C3_MINI M5ATOMS3_LITE)
+    if(DEFINED BOARD_PROFILE_${_prof})
+        target_compile_definitions(${COMPONENT_TARGET} PRIVATE BOARD_PROFILE_${_prof})
+        set(_explicit_profile_set TRUE)
+    endif()
+endforeach()
+
+if(NOT _explicit_profile_set)
+    # No override — auto-select by chip
     if(CONFIG_IDF_TARGET_ESP32C6)
         target_compile_definitions(${COMPONENT_TARGET} PRIVATE BOARD_PROFILE_NANOC6)
     elseif(CONFIG_IDF_TARGET_ESP32S3)

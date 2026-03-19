@@ -2,7 +2,8 @@
 
 // M5Stack NanoC6 (ESP32-C6)
 // Grove connector (HY2.0-4P): GPIO2=RX, GPIO1=TX
-// Onboard WS2812 RGB LED: data=GPIO20, enable=GPIO19
+// Onboard WS2812 RGB LED: data=GPIO20, power=GPIO19
+// Onboard blue LED: GPIO7
 // BOOT button: GPIO9 (active-low)
 
 #define BOARD_NAME              "M5Stack NanoC6"
@@ -12,10 +13,11 @@
 #define PIN_CN105_TX            1
 #define CN105_UART_NUM          UART_NUM_1
 
-// Status LED (onboard WS2812)
-#define PIN_LED_DATA            20
-#define PIN_LED_ENABLE          19
+// Status LEDs
+#define PIN_LED_DATA            20      // WS2812 RGB data
+#define PIN_LED_ENABLE          19      // WS2812 power enable
 #define HAS_NEOPIXEL            1
+#define PIN_BLUE_LED            7       // Simple blue indicator LED
 
 // Button (WiFi reset)
 #define PIN_BUTTON              9

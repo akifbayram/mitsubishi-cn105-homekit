@@ -36,7 +36,7 @@ static const char *TAG = "main";
 CN105Controller cn105;
 
 #if PIN_LED_DATA >= 0
-StatusLED statusLED(PIN_LED_DATA, PIN_LED_ENABLE);
+StatusLED statusLED(PIN_LED_DATA, PIN_LED_ENABLE, PIN_BLUE_LED);
 #endif
 
 // ── State flags ─────────────────────────────────────────────────────────────
@@ -44,6 +44,7 @@ static bool webUIStarted      = false;
 static bool homekitStarted    = false;
 static bool firmwareValidated = false;
 static bool lastAPState       = false;
+static bool lastWifiState     = true;   // force initial setWifi() call
 static uint32_t webUIStartTime = 0;
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -127,14 +128,8 @@ extern "C" void app_main(void)
     bool wifiOk = WifiManager::waitForConnection(15000);
     if (wifiOk) {
         LOG_INFO("WiFi connected");
-#if PIN_LED_DATA >= 0
-        statusLED.setState(SLED_WIFI_CONNECTED);
-#endif
     } else {
         LOG_WARN("WiFi connection timed out");
-#if PIN_LED_DATA >= 0
-        statusLED.setState(SLED_WIFI_CONNECTING);
-#endif
     }
 
     // ── 9. HomeKit init (deferred) ─────────────────────────────────────
@@ -245,31 +240,28 @@ extern "C" void app_main(void)
 
         // ── Status LED priority evaluation ───────────────────────────────
 #if PIN_LED_DATA >= 0
+        // Blue LED tracks WiFi independently
+        {
+            bool wifiNow = WifiManager::isConnected();
+            if (wifiNow != lastWifiState) {
+                statusLED.setWifi(wifiNow);
+                lastWifiState = wifiNow;
+            }
+        }
+
+        // RGB LED: boot → device status
         if (statusLED.getState() != SLED_OTA) {
-            if (!webUIStarted) {
-                // Boot phase — show WiFi status
-                if (WifiManager::isConnected()) {
-                    statusLED.setState(SLED_WIFI_CONNECTED);
-                } else {
-                    static bool bootBlinked = false;
-                    if (!bootBlinked && uptime_ms() > 2000) {
-                        statusLED.setState(SLED_WIFI_CONNECTING);
-                        bootBlinked = true;
-                    }
-                }
-            } else {
-                // Normal operation: OTA handled by OTA handler setting SLED_OTA
+            if (webUIStarted) {
                 const CN105State &st = cn105.getState();
                 if (st.hasError) {
                     statusLED.setState(SLED_ERROR_CODE);
                 } else if (!cn105.isConnected()) {
                     statusLED.setState(SLED_CN105_DISCONNECTED);
-                } else if (!WifiManager::isConnected()) {
-                    statusLED.setState(SLED_WIFI_CONNECTING);
                 } else {
                     statusLED.setState(SLED_OFF);
                 }
             }
+            // Boot phase: SLED_BOOT continues until webUIStarted
         }
         statusLED.loop();
 #endif

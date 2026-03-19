@@ -63,6 +63,9 @@
 #ifndef HAS_NEOPIXEL
 #define HAS_NEOPIXEL            0
 #endif
+#ifndef PIN_BLUE_LED
+#define PIN_BLUE_LED            -1
+#endif
 
 // Button (-1 = no button)
 #ifndef PIN_BUTTON
