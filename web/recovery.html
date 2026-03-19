@@ -2,26 +2,23 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>{{BRAND_NAME}} - WiFi Setup</title>
 <style>
-/* ── Design System (shared with main UI) ─────────────────────────────── */
+/* ── Design System ───────────────────────────────────────────────────── */
 :root{
   --bg:#000;--surface:#1C1C1E;--surface2:#2C2C2E;--surface3:#3A3A3C;
   --border:#38383A;--text:#fff;--text2:#8E8E93;--text3:#636366;
-  --seg-bg:rgba(118,118,128,0.24);--seg-active:#636366;
-  --accent:#007AFF;--accent-dim:#0055CC;
-  --red:#FF3B30;--green:#34C759;--orange:#FF9500;
+  --seg-bg:rgba(118,118,128,0.24);
+  --accent:#007AFF;--red:#FF3B30;--green:#34C759;--orange:#FF9500;
   --radius:16px;--radius-sm:10px;
-  --shadow:0 1px 3px rgba(0,0,0,0.3);
 }
 [data-theme="light"]{
   --bg:#F2F2F7;--surface:#fff;--surface2:#E5E5EA;--surface3:#D1D1D6;
   --border:#C6C6C8;--text:#000;--text2:#8E8E93;--text3:#AEAEB2;
-  --seg-bg:rgba(118,118,128,0.12);--seg-active:#fff;
-  --shadow:0 1px 3px rgba(0,0,0,0.08);
+  --seg-bg:rgba(118,118,128,0.12);
 }
 
 /* ── Base ─────────────────────────────────────────────────────────────── */
@@ -68,22 +65,68 @@ body{
   background:var(--surface);border-radius:var(--radius);
   padding:14px 16px;margin-bottom:10px;
 }
+.card-hdr{
+  display:flex;align-items:center;justify-content:space-between;
+  margin-bottom:6px;
+}
 .card-label{
   font-size:13px;font-weight:500;color:var(--text2);
-  text-transform:uppercase;letter-spacing:0.3px;margin-bottom:8px;
+  text-transform:uppercase;letter-spacing:0.3px;
 }
 
 /* ── Status Banner ────────────────────────────────────────────────────── */
 .status{
   padding:10px 12px;border-radius:var(--radius-sm);font-size:13px;
-  margin-bottom:12px;text-align:center;font-weight:500;
+  margin-bottom:10px;text-align:center;font-weight:500;
   transition:all .3s;
 }
 .status.err{background:rgba(255,59,48,0.15);color:var(--red)}
 .status.ok{background:rgba(52,199,89,0.15);color:var(--green)}
 .status.warn{background:rgba(255,149,0,0.15);color:var(--orange)}
+.current-ssid{font-size:13px;color:var(--text2)}
+.current-ssid strong{color:var(--text)}
 
-/* ── Form ─────────────────────────────────────────────────────────────── */
+/* ── Refresh button ───────────────────────────────────────────────────── */
+.refresh-btn{
+  width:28px;height:28px;border:none;border-radius:50%;
+  background:var(--seg-bg);color:var(--text2);cursor:pointer;
+  display:flex;align-items:center;justify-content:center;padding:0;
+  transition:transform .15s;
+}
+.refresh-btn:active{transform:scale(.88)}
+.refresh-btn svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.refresh-btn.spin svg{animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ── Network list ─────────────────────────────────────────────────────── */
+.net-row{
+  display:flex;align-items:center;gap:10px;
+  padding:11px 0;border-bottom:0.5px solid var(--border);
+  cursor:pointer;transition:background .1s;
+  -webkit-user-select:none;user-select:none;
+}
+.net-row:last-child{border-bottom:none}
+.net-row:active{background:var(--seg-bg);border-radius:var(--radius-sm)}
+.net-row.selected .net-name{color:var(--accent);font-weight:600}
+.net-name{flex:1;font-size:15px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.net-other .net-name{color:var(--accent)}
+
+/* Signal bars */
+.signal{display:flex;align-items:flex-end;gap:1.5px;width:14px;height:11px;flex-shrink:0}
+.signal i{display:block;width:3px;border-radius:.5px;background:var(--border)}
+.signal i.on{background:var(--text2)}
+.signal i:nth-child(1){height:3px}
+.signal i:nth-child(2){height:5px}
+.signal i:nth-child(3){height:8px}
+.signal i:nth-child(4){height:11px}
+
+/* Lock icon */
+.lock{width:10px;height:12px;color:var(--text3);flex-shrink:0}
+
+/* Scan states */
+.scan-msg{text-align:center;padding:20px 0;color:var(--text2);font-size:14px}
+
+/* ── Join card ────────────────────────────────────────────────────────── */
 .setting-row{
   display:flex;align-items:center;gap:12px;
   padding:10px 0;border-bottom:0.5px solid var(--border);
@@ -101,22 +144,23 @@ body{
 .pw-toggle{position:absolute;right:8px;top:50%;transform:translateY(-50%);
   background:none;border:none;color:var(--text2);cursor:pointer;font-size:14px;
   padding:4px;line-height:1}
-.help-text{font-size:13px;color:var(--text2);line-height:1.5;margin-bottom:10px}
-.current-ssid{font-size:13px;color:var(--text2);margin-bottom:0}
-.current-ssid strong{color:var(--text)}
-.steps{font-size:13px;color:var(--text2);line-height:1.7;padding-left:20px}
-.steps li{margin-bottom:4px}
-.steps li::marker{color:var(--accent)}
+.join-name{font-size:15px;font-weight:500;color:var(--text);margin-bottom:4px}
 
 /* ── Button ───────────────────────────────────────────────────────────── */
-.save-btn{
+.join-btn{
   width:100%;padding:12px;border:none;border-radius:var(--radius-sm);
-  background:var(--accent);color:#fff;font-size:15px;font-weight:600;
+  background:var(--green);color:#fff;font-size:15px;font-weight:600;
   cursor:pointer;margin-top:8px;font-family:inherit;
   transition:transform .15s,opacity .15s;
 }
-.save-btn:active{transform:scale(.97);opacity:.8}
-.save-btn:disabled{opacity:.4;cursor:default}
+.join-btn:active{transform:scale(.97);opacity:.8}
+.join-btn:disabled{opacity:.4;cursor:default}
+
+/* ── Help ─────────────────────────────────────────────────────────────── */
+.help-text{font-size:13px;color:var(--text2);line-height:1.5}
+.steps{font-size:13px;color:var(--text2);line-height:1.7;padding-left:20px}
+.steps li{margin-bottom:4px}
+.steps li::marker{color:var(--accent)}
 
 /* ── Scrollbar ────────────────────────────────────────────────────────── */
 ::-webkit-scrollbar{width:4px}
@@ -140,7 +184,7 @@ input:focus-visible{outline-offset:0}
       <div class="device-name" id="devName">{{BRAND_NAME}}</div>
     </div>
     <div class="header-right">
-      <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="Toggle theme">
+      <button class="theme-toggle" id="themeToggle" title="Toggle theme">
         <svg class="icon-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
         <svg class="icon-moon" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3a7 7 0 0 0 9.79 9.79z"/></svg>
       </button>
@@ -148,82 +192,243 @@ input:focus-visible{outline-offset:0}
     </div>
   </header>
 
-  <!-- Guidance -->
+  <!-- Status -->
   <div class="card">
-    <div class="card-label">WiFi Recovery</div>
+    <div class="card-label">WiFi Setup</div>
     <div class="status err" id="statusBox">Not connected to WiFi</div>
-    <p class="help-text" id="helpText">This device could not connect to your WiFi network and has started its own temporary hotspot. Enter your WiFi credentials below to reconnect it.</p>
     <div class="current-ssid" id="currentSSID"></div>
   </div>
 
-  <!-- WiFi Setup -->
-  <div class="card">
-    <div class="card-label">Network Credentials</div>
-    <div class="setting-row">
-      <label>SSID</label>
-      <input type="text" id="ssid" placeholder="Network name" maxlength="32" autocomplete="off">
+  <!-- Network list -->
+  <div class="card" id="netCard">
+    <div class="card-hdr">
+      <div class="card-label">Choose a Network</div>
+      <button class="refresh-btn" id="refreshBtn" title="Refresh">
+        <svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.2-5.9"/><path d="M21 3v5h-5"/></svg>
+      </button>
     </div>
-    <div class="setting-row" style="border-bottom:none">
-      <label>Password</label>
+    <div id="netList">
+      <div class="scan-msg">Scanning for networks...</div>
+    </div>
+  </div>
+
+  <!-- Join card (hidden until network selected) -->
+  <div class="card" id="joinCard" style="display:none">
+    <div class="card-label" id="joinLabel">Join Network</div>
+    <div class="join-name" id="joinName"></div>
+    <div class="setting-row" id="ssidRow" style="display:none">
+      <label for="ssidInput">SSID</label>
+      <input type="text" id="ssidInput" placeholder="Network name" maxlength="32" autocomplete="off">
+    </div>
+    <div class="setting-row" id="passRow" style="border-bottom:none">
+      <label for="passInput">Password</label>
       <div class="pw-wrap">
-        <input type="password" id="pass" placeholder="Password" maxlength="64" autocapitalize="off">
-        <button type="button" class="pw-toggle" onclick="togglePw('pass',this)" aria-label="Show password">&#x1F441;&#x200D;&#x1F5E8;</button>
+        <input type="password" id="passInput" placeholder="Enter password" maxlength="64" autocapitalize="off">
+        <button type="button" class="pw-toggle" id="pwToggle" aria-label="Show password">
+          <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor" fill="none" stroke-width="2" stroke-linecap="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+        </button>
       </div>
     </div>
-    <button class="save-btn" id="saveBtn" onclick="saveWifi()" disabled>Save &amp; Connect</button>
+    <button class="join-btn" id="joinBtn" disabled>Join</button>
   </div>
 
   <!-- Help -->
-  <div class="card" id="helpCard">
+  <div class="card">
     <div class="card-label">What to expect</div>
     <ol class="steps">
-      <li>Enter your home WiFi network name and password above</li>
-      <li>The device will attempt to connect to your network</li>
-      <li>If successful, this hotspot will turn off and the device will reboot</li>
-      <li>Reconnect your phone to your home WiFi to continue using the device</li>
+      <li>Select your home WiFi network above</li>
+      <li>Enter the password and tap Join</li>
+      <li>The device will connect to your network</li>
+      <li>This hotspot will turn off automatically</li>
     </ol>
-    <p class="help-text" style="margin-top:10px">If the connection fails, the hotspot will remain active so you can try again. Make sure the SSID and password are correct and that the network is within range.</p>
+    <p class="help-text" style="margin-top:10px">If the connection fails, the hotspot will remain active so you can try again.</p>
   </div>
 
 </main>
 <script>
 (function(){
-  /* ── Theme ─────────────────────────────────────────────────────────── */
+  /* ── Theme ──────────────────────────────────────────────────────────── */
   function applyTheme(t){document.documentElement.setAttribute('data-theme',t);localStorage.setItem('theme',t)}
   var saved=localStorage.getItem('theme');
   if(saved)applyTheme(saved);
-  window.toggleTheme=function(){
+  document.getElementById('themeToggle').onclick=function(){
     var cur=document.documentElement.getAttribute('data-theme');
-    applyTheme(cur==='light'?'dark':'dark'===cur?'light':'light');
+    applyTheme(cur==='light'?'dark':'light');
   };
 
-  /* ── Password toggle ───────────────────────────────────────────────── */
-  window.togglePw=function(id,btn){
-    var el=document.getElementById(id);
-    var show=el.type==='password';
-    el.type=show?'text':'password';
-    btn.textContent='\u{1F441}\u200D\u{1F5E8}';
-    btn.setAttribute('aria-label',show?'Hide password':'Show password');
-  };
-
-  var ssidEl=document.getElementById('ssid');
-  var passEl=document.getElementById('pass');
-  var saveBtn=document.getElementById('saveBtn');
+  /* ── Elements ────────────────────────────────────────────────────────── */
+  var netList=document.getElementById('netList');
+  var joinCard=document.getElementById('joinCard');
+  var joinLabel=document.getElementById('joinLabel');
+  var joinName=document.getElementById('joinName');
+  var ssidRow=document.getElementById('ssidRow');
+  var passRow=document.getElementById('passRow');
+  var ssidInput=document.getElementById('ssidInput');
+  var passInput=document.getElementById('passInput');
+  var joinBtn=document.getElementById('joinBtn');
   var statusBox=document.getElementById('statusBox');
-  var helpText=document.getElementById('helpText');
+  var connDot=document.getElementById('connDot');
   var currentSSID=document.getElementById('currentSSID');
   var devName=document.getElementById('devName');
-  var connDot=document.getElementById('connDot');
+  var refreshBtn=document.getElementById('refreshBtn');
+  var pwToggle=document.getElementById('pwToggle');
 
-  function checkFields(){
-    saveBtn.disabled=!(ssidEl.value.trim()&&passEl.value);
+  var selSSID='';
+  var selSecure=true;
+  var isOther=false;
+  var scanning=false;
+
+  /* ── Password toggle ──────────────────────────────────────────────── */
+  pwToggle.onclick=function(){
+    var show=passInput.type==='password';
+    passInput.type=show?'text':'password';
+    pwToggle.setAttribute('aria-label',show?'Hide password':'Show password');
+  };
+
+  /* ── Create signal bars element ─────────────────────────────────────── */
+  function makeSigBars(rssi){
+    var bars=rssi>-50?4:rssi>-60?3:rssi>-70?2:1;
+    var wrap=document.createElement('div');
+    wrap.className='signal';
+    for(var b=1;b<=4;b++){
+      var bar=document.createElement('i');
+      bar.setAttribute('aria-hidden','true');
+      if(b<=bars)bar.className='on';
+      wrap.appendChild(bar);
+    }
+    return wrap;
   }
-  ssidEl.addEventListener('input',checkFields);
-  passEl.addEventListener('input',checkFields);
 
-  /* ── Load current WiFi status ──────────────────────────────────────── */
+  /* ── Create lock icon element ───────────────────────────────────────── */
+  function makeLockIcon(){
+    var ns='http://www.w3.org/2000/svg';
+    var svg=document.createElementNS(ns,'svg');
+    svg.setAttribute('class','lock');
+    svg.setAttribute('viewBox','0 0 12 14');
+    svg.setAttribute('aria-label','Secured');
+    var rect=document.createElementNS(ns,'rect');
+    rect.setAttribute('x','1');rect.setAttribute('y','6');
+    rect.setAttribute('width','10');rect.setAttribute('height','7');
+    rect.setAttribute('rx','1.5');rect.setAttribute('fill','currentColor');
+    var path=document.createElementNS(ns,'path');
+    path.setAttribute('d','M3 6V4a3 3 0 0 1 6 0v2');
+    path.setAttribute('fill','none');path.setAttribute('stroke','currentColor');
+    path.setAttribute('stroke-width','1.5');path.setAttribute('stroke-linecap','round');
+    svg.appendChild(rect);svg.appendChild(path);
+    return svg;
+  }
+
+  /* ── Set scan message (safe text) ───────────────────────────────────── */
+  function setScanMsg(text){
+    netList.textContent='';
+    var div=document.createElement('div');
+    div.className='scan-msg';
+    div.textContent=text;
+    netList.appendChild(div);
+  }
+
+  /* ── Render network list (DOM-based, XSS-safe) ──────────────────────── */
+  function renderNets(nets){
+    netList.textContent='';
+    if(!nets||nets.length===0){
+      setScanMsg('No networks found. Tap refresh to scan again.');
+      return;
+    }
+    for(var i=0;i<nets.length;i++){
+      (function(n){
+        var row=document.createElement('div');
+        row.className='net-row'+(n.ssid===selSSID&&!isOther?' selected':'');
+        row.appendChild(makeSigBars(n.rssi));
+        var name=document.createElement('div');
+        name.className='net-name';
+        name.textContent=n.ssid;
+        row.appendChild(name);
+        if(n.secure)row.appendChild(makeLockIcon());
+        row.addEventListener('click',function(){selectNetwork(n.ssid,n.secure)});
+        netList.appendChild(row);
+      })(nets[i]);
+    }
+    /* "Join Other Network" row */
+    var otherRow=document.createElement('div');
+    otherRow.className='net-row net-other';
+    var otherName=document.createElement('div');
+    otherName.className='net-name';
+    otherName.textContent='Join Other Network\u2026';
+    otherRow.appendChild(otherName);
+    otherRow.addEventListener('click',selectOther);
+    netList.appendChild(otherRow);
+  }
+
+  /* ── Select network from list ───────────────────────────────────────── */
+  function selectNetwork(ssid,secure){
+    selSSID=ssid;selSecure=secure;isOther=false;
+    joinLabel.textContent='Join Network';
+    joinName.textContent=ssid;
+    joinName.style.display='block';
+    ssidRow.style.display='none';
+    passRow.style.display=secure?'flex':'none';
+    passInput.value='';
+    joinCard.style.display='block';
+    joinBtn.disabled=secure;
+    if(secure)passInput.focus();
+    /* Highlight selected row */
+    var rows=netList.querySelectorAll('.net-row');
+    for(var i=0;i<rows.length;i++){
+      var r=rows[i];
+      r.classList.toggle('selected',!r.classList.contains('net-other')&&r.querySelector('.net-name').textContent===ssid);
+    }
+    joinCard.scrollIntoView({behavior:'smooth',block:'nearest'});
+    checkFields();
+  }
+
+  /* ── Select "Other Network" ─────────────────────────────────────────── */
+  function selectOther(){
+    selSSID='';selSecure=true;isOther=true;
+    joinLabel.textContent='Join Other Network';
+    joinName.style.display='none';
+    ssidRow.style.display='flex';
+    passRow.style.display='flex';
+    ssidInput.value='';passInput.value='';
+    joinCard.style.display='block';
+    joinBtn.disabled=true;
+    var rows=netList.querySelectorAll('.net-row');
+    for(var i=0;i<rows.length;i++)rows[i].classList.remove('selected');
+    ssidInput.focus();
+    joinCard.scrollIntoView({behavior:'smooth',block:'nearest'});
+  }
+
+  /* ── Field validation ───────────────────────────────────────────────── */
+  function checkFields(){
+    if(isOther){
+      joinBtn.disabled=!(ssidInput.value.trim()&&passInput.value);
+    }else if(selSecure){
+      joinBtn.disabled=!passInput.value;
+    }else{
+      joinBtn.disabled=false;
+    }
+  }
+  passInput.addEventListener('input',checkFields);
+  ssidInput.addEventListener('input',checkFields);
+
+  /* ── Scan ────────────────────────────────────────────────────────────── */
+  refreshBtn.onclick=doScan;
+  function doScan(){
+    if(scanning)return;
+    scanning=true;
+    refreshBtn.classList.add('spin');
+    setScanMsg('Scanning for networks\u2026');
+    fetch('/wifi-scan').then(function(r){return r.json()}).then(function(d){
+      scanning=false;refreshBtn.classList.remove('spin');
+      renderNets(d);
+    }).catch(function(){
+      scanning=false;refreshBtn.classList.remove('spin');
+      setScanMsg('Scan failed. Tap refresh to try again.');
+    });
+  }
+
+  /* ── Load status ────────────────────────────────────────────────────── */
   fetch('/wifi-status').then(function(r){return r.json()}).then(function(d){
-    if(d.deviceName) devName.textContent=d.deviceName;
+    if(d.deviceName)devName.textContent=d.deviceName;
     if(d.ssid){
       currentSSID.textContent='';
       var prefix=document.createTextNode('Current network: ');
@@ -235,49 +440,60 @@ input:focus-visible{outline-offset:0}
     if(d.connected){
       statusBox.className='status ok';
       statusBox.textContent='Connected to WiFi';
-      helpText.textContent='The device is connected to WiFi. You can update the network credentials below if needed, or reconnect to your home WiFi.';
       connDot.className='conn-dot ok';
       connDot.title='Connected';
       connDot.setAttribute('aria-label','Connected');
     }
   }).catch(function(){});
 
-  /* ── Save WiFi ─────────────────────────────────────────────────────── */
-  window.saveWifi=function(){
-    var ssid=ssidEl.value.trim();
-    var pass=passEl.value;
-    if(!ssid||!pass) return;
+  /* ── Initial scan ───────────────────────────────────────────────────── */
+  doScan();
 
-    saveBtn.disabled=true;
-    saveBtn.textContent='Saving...';
+  /* ── Join ────────────────────────────────────────────────────────────── */
+  joinBtn.onclick=function(){
+    var ssid=isOther?ssidInput.value.trim():selSSID;
+    var pass=passInput.value;
+    if(!ssid)return;
+    if((isOther||selSecure)&&!pass)return;
+
+    joinBtn.disabled=true;
+    joinBtn.textContent='Connecting\u2026';
 
     fetch('/wifi-setup',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({ssid:ssid,password:pass})
-    }).then(function(r){return r.json()}).then(function(d){
+    }).then(function(r){return r.json()}).then(function(){
       statusBox.className='status warn';
-      statusBox.textContent='Credentials saved. Connecting to '+ssid+'...';
-      saveBtn.textContent='Saved';
+      statusBox.textContent='Connecting to '+ssid+'\u2026';
       var attempts=0;
       var poll=setInterval(function(){
         attempts++;
-        if(attempts>30){clearInterval(poll);statusBox.className='status err';statusBox.textContent='Connection timeout. Try again or check credentials.';saveBtn.disabled=false;saveBtn.textContent='Save & Connect';return}
+        if(attempts>30){
+          clearInterval(poll);
+          statusBox.className='status err';
+          statusBox.textContent='Connection timeout. Check credentials and try again.';
+          joinBtn.disabled=false;
+          joinBtn.textContent='Join';
+          return;
+        }
         fetch('/wifi-status').then(function(r){return r.json()}).then(function(s){
           if(s.connected){
             clearInterval(poll);
             statusBox.className='status ok';
-            statusBox.textContent='Connected! The device is now on your network. Rebooting...';
+            statusBox.textContent='Connected! This hotspot will turn off shortly.';
             connDot.className='conn-dot ok';
             connDot.title='Connected';
+            connDot.setAttribute('aria-label','Connected');
+            joinBtn.textContent='Connected';
           }
         }).catch(function(){});
       },3000);
     }).catch(function(){
       statusBox.className='status err';
-      statusBox.textContent='Failed to save. Check connection to device AP.';
-      saveBtn.disabled=false;
-      saveBtn.textContent='Save & Connect';
+      statusBox.textContent='Failed to save. Check connection to device hotspot.';
+      joinBtn.disabled=false;
+      joinBtn.textContent='Join';
     });
   };
 })();

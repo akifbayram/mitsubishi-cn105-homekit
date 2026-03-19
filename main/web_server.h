@@ -27,6 +27,7 @@ private:
     static esp_err_t handleRedirect80(httpd_req_t *req);
     static esp_err_t handleWifiStatus(httpd_req_t *req);
     static esp_err_t handleWifiSetup(httpd_req_t *req);
+    static esp_err_t handleWifiScan(httpd_req_t *req);
     static esp_err_t handleOtaUpload(httpd_req_t *req);
     static esp_err_t handleWebSocket(httpd_req_t *req);
     static esp_err_t handleManifest(httpd_req_t *req);

@@ -22,6 +22,7 @@ static constexpr int CONNECTED_BIT = BIT0;
 // ── Static state ────────────────────────────────────────────────────────────
 static bool                 s_connected      = false;
 static bool                 s_apActive       = false;
+static bool                 s_wifiScanning   = false;
 static EventGroupHandle_t   s_wifiEventGroup = nullptr;
 static esp_netif_t*         s_staNetif       = nullptr;
 static esp_netif_t*         s_apNetif        = nullptr;
@@ -45,8 +46,10 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
                 if (s_wifiEventGroup) {
                     xEventGroupClearBits(s_wifiEventGroup, CONNECTED_BIT);
                 }
-                LOG_WARN("[WiFi] STA disconnected — reconnecting...");
-                esp_wifi_connect();
+                if (!s_wifiScanning) {
+                    LOG_WARN("[WiFi] STA disconnected — reconnecting...");
+                    esp_wifi_connect();
+                }
                 break;
             }
 
@@ -129,9 +132,10 @@ bool WifiManager::connect(const char* ssid, const char* password)
     if (password && password[0] != '\0') {
         strncpy(reinterpret_cast<char*>(wifi_config.sta.password), password,
                 sizeof(wifi_config.sta.password) - 1);
+        wifi_config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+    } else {
+        wifi_config.sta.threshold.authmode = WIFI_AUTH_OPEN;
     }
-    // Use WPA2/WPA3 threshold for security
-    wifi_config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
     wifi_config.sta.pmf_cfg.capable    = true;
     wifi_config.sta.pmf_cfg.required   = false;
 
@@ -289,4 +293,87 @@ void WifiManager::eraseCredentials()
     nvs_close(handle);
 
     LOG_WARN("[WiFi] Credentials erased");
+}
+
+// ── WiFi scanning ──────────────────────────────────────────────────────────
+
+// Resume STA connection after scan if credentials are configured
+static void resumeStaConnection()
+{
+    wifi_config_t cfg = {};
+    if (esp_wifi_get_config(WIFI_IF_STA, &cfg) == ESP_OK && cfg.sta.ssid[0] != '\0') {
+        LOG_DEBUG("[WiFi] Resuming STA connection after scan");
+        esp_err_t err = esp_wifi_connect();
+        if (err != ESP_OK) {
+            LOG_WARN("[WiFi] Failed to resume connection: %s", esp_err_to_name(err));
+        }
+    }
+}
+
+int WifiManager::scanNetworks(ScannedNetwork* results, int maxResults)
+{
+    // Stop the STA reconnect loop so the radio is free to channel-hop
+    s_wifiScanning = true;
+    esp_wifi_disconnect();
+    vTaskDelay(pdMS_TO_TICKS(100));
+
+    wifi_scan_config_t scanConf = {};
+    scanConf.show_hidden = false;
+
+    esp_err_t err = esp_wifi_scan_start(&scanConf, true);  // blocking scan
+    s_wifiScanning = false;
+    if (err != ESP_OK) {
+        LOG_ERROR("[WiFi] Scan failed: %s", esp_err_to_name(err));
+        resumeStaConnection();
+        return 0;
+    }
+
+    uint16_t apCount = 0;
+    esp_wifi_scan_get_ap_num(&apCount);
+    if (apCount == 0) {
+        resumeStaConnection();
+        return 0;
+    }
+
+    uint16_t fetchCount = (apCount > 15) ? 15 : apCount;
+    wifi_ap_record_t apRecords[15];
+    esp_wifi_scan_get_ap_records(&fetchCount, apRecords);
+
+    // Deduplicate by SSID, keeping the strongest signal
+    int count = 0;
+    for (int i = 0; i < fetchCount && count < maxResults; i++) {
+        if (apRecords[i].ssid[0] == '\0') continue;  // skip hidden networks
+
+        bool dup = false;
+        for (int j = 0; j < count; j++) {
+            if (strcmp(results[j].ssid, (const char *)apRecords[i].ssid) == 0) {
+                if (apRecords[i].rssi > results[j].rssi)
+                    results[j].rssi = apRecords[i].rssi;
+                dup = true;
+                break;
+            }
+        }
+        if (dup) continue;
+
+        strncpy(results[count].ssid, (const char *)apRecords[i].ssid, 32);
+        results[count].ssid[32] = '\0';
+        results[count].rssi = apRecords[i].rssi;
+        results[count].secure = (apRecords[i].authmode != WIFI_AUTH_OPEN);
+        count++;
+    }
+
+    // Sort by RSSI descending (strongest first)
+    for (int i = 0; i < count - 1; i++) {
+        for (int j = i + 1; j < count; j++) {
+            if (results[j].rssi > results[i].rssi) {
+                ScannedNetwork tmp = results[i];
+                results[i] = results[j];
+                results[j] = tmp;
+            }
+        }
+    }
+
+    LOG_INFO("[WiFi] Scan found %d unique networks", count);
+    resumeStaConnection();
+    return count;
 }

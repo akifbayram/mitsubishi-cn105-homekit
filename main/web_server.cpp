@@ -88,21 +88,37 @@ esp_err_t WebUI::handleRecoveryPage(httpd_req_t *req) {
                         (size_t)(recovery_html_gz_end - recovery_html_gz_start));
 }
 
-static constexpr char AP_REDIRECT_URL[] = "http://192.168.4.1:8080/";
+// ── CNA (Captive Network Assistant) detection page ──────────────────────────
+// Served on port 80 to trigger captive portal popups on iOS/macOS/Android/Windows.
+// Returns 200 with HTML (not 302) so all platforms detect the captive portal.
+static const char CNA_PAGE[] =
+    "<!DOCTYPE html><html><head>"
+    "<meta http-equiv=\"refresh\" content=\"0;url=http://192.168.4.1:8080/\">"
+    "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
+    "<title>WiFi Setup</title>"
+    "<style>body{font-family:-apple-system,system-ui,sans-serif;background:#000;"
+    "color:#fff;display:flex;justify-content:center;align-items:center;"
+    "min-height:100vh;margin:0;text-align:center}"
+    "a{color:#007AFF;font-size:17px;text-decoration:none}</style>"
+    "</head><body><div>"
+    "<p style=\"font-size:15px;color:#8E8E93;margin-bottom:16px\">"
+    "Redirecting to WiFi setup&hellip;</p>"
+    "<a href=\"http://192.168.4.1:8080/\">Tap here if not redirected</a>"
+    "</div></body></html>";
 
-static void doRedirect(httpd_req_t *req) {
-    httpd_resp_set_status(req, "302 Found");
-    httpd_resp_set_hdr(req, "Location", AP_REDIRECT_URL);
-    httpd_resp_sendstr(req, "Redirecting...");
+static void serveCNAPage(httpd_req_t *req) {
+    httpd_resp_set_type(req, "text/html");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    httpd_resp_sendstr(req, CNA_PAGE);
 }
 
 esp_err_t WebUI::handleRedirect80(httpd_req_t *req) {
-    doRedirect(req);
+    serveCNAPage(req);
     return ESP_OK;
 }
 
 static esp_err_t handleRedirect404(httpd_req_t *req, httpd_err_code_t) {
-    doRedirect(req);
+    serveCNAPage(req);
     return ESP_OK;
 }
 
@@ -133,6 +149,32 @@ esp_err_t WebUI::handleWifiStatus(httpd_req_t *req) {
     return ESP_OK;
 }
 
+esp_err_t WebUI::handleWifiScan(httpd_req_t *req) {
+    WifiManager::ScannedNetwork networks[15];
+    int count = WifiManager::scanNetworks(networks, 15);
+
+    char buf[1200];
+    int pos = 0;
+    pos += snprintf(buf + pos, sizeof(buf) - pos, "[");
+    for (int i = 0; i < count; i++) {
+        char escSSID[67];
+        jsonEscape(networks[i].ssid, escSSID, sizeof(escSSID));
+        pos += snprintf(buf + pos, sizeof(buf) - pos,
+            "%s{\"ssid\":\"%s\",\"rssi\":%d,\"secure\":%s}",
+            i > 0 ? "," : "",
+            escSSID,
+            (int)networks[i].rssi,
+            networks[i].secure ? "true" : "false");
+        if (pos >= (int)sizeof(buf) - 80) break;
+    }
+    snprintf(buf + pos, sizeof(buf) - pos, "]");
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    httpd_resp_sendstr(req, buf);
+    return ESP_OK;
+}
+
 bool WebUI::applyWifiCredentials(const char *json, const char **outError) {
     char ssid[33] = {0};
     char password[65] = {0};
@@ -140,10 +182,8 @@ bool WebUI::applyWifiCredentials(const char *json, const char **outError) {
         *outError = "SSID is required";
         return false;
     }
-    if (!jsonGetString(json, "password", password, sizeof(password)) || strlen(password) == 0) {
-        *outError = "Password is required";
-        return false;
-    }
+    // Password is optional (open networks send empty password)
+    jsonGetString(json, "password", password, sizeof(password));
     LOG_INFO("[WebUI] Saving WiFi credentials (SSID: %s)", ssid);
     // Mark change pending in settings (for WiFi recovery shorter timeout)
     settings.get().wifiChangePending = true;
@@ -340,6 +380,18 @@ void WebUI::begin(CN105Controller *ctrl) {
         .supported_subprotocol = NULL
     };
     httpd_register_uri_handler(_server, &wifiSetupUri);
+
+    // Register GET /wifi-scan handler
+    const httpd_uri_t wifiScanUri = {
+        .uri       = "/wifi-scan",
+        .method    = HTTP_GET,
+        .handler   = handleWifiScan,
+        .user_ctx  = this,
+        .is_websocket = false,
+        .handle_ws_control_frames = false,
+        .supported_subprotocol = NULL
+    };
+    httpd_register_uri_handler(_server, &wifiScanUri);
 
     // Register PWA manifest and icon handlers
     const httpd_uri_t manifestUri = {

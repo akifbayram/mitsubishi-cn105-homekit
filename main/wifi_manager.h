@@ -41,4 +41,15 @@ namespace WifiManager {
     /// Erase WiFi credentials from NVS namespace "wifi-creds".
     void eraseCredentials();
 
+    /// WiFi network found during scan
+    struct ScannedNetwork {
+        char ssid[33];
+        int8_t rssi;
+        bool secure;
+    };
+
+    /// Perform a blocking WiFi scan. Returns number of unique networks found
+    /// (up to maxResults). Deduplicates by SSID and sorts by signal strength.
+    int scanNetworks(ScannedNetwork* results, int maxResults);
+
 } // namespace WifiManager

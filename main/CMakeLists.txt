@@ -38,7 +38,7 @@ endif()
 
 # ── Brand defaults (overridable via -DBRAND_NAME=... on cmake command line) ──
 if(NOT DEFINED BRAND_NAME)
-    set(BRAND_NAME "Serin")
+    set(BRAND_NAME "Mini Split")
 endif()
 if(NOT DEFINED BRAND_AP_PREFIX)
     set(BRAND_AP_PREFIX "Serin")
