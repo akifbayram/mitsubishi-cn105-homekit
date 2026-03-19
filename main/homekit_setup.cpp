@@ -9,6 +9,7 @@
 #include <esp_event.h>
 #include <esp_random.h>
 #include <nvs_flash.h>
+#include <mdns.h>
 
 extern "C" {
 #include <hap.h>
@@ -86,7 +87,7 @@ static void homekit_set_setup_id(const char* setupId)
 
 bool homekit_init(const char* name, const char* manufacturer,
                   const char* model, const char* serialNumber,
-                  const char* fwRevision)
+                  const char* fwRevision, const char* mdnsHostname)
 {
     // Disable HAP internal WiFi management (we manage WiFi ourselves)
     hap_cfg_t hap_cfg;
@@ -149,6 +150,13 @@ bool homekit_init(const char* name, const char* manufacturer,
     if (ret != HAP_SUCCESS) {
         LOG_ERROR("[HK] hap_start failed: %d", ret);
         return false;
+    }
+
+    // Override the hardcoded "MyHost" mDNS hostname from esp-homekit-sdk
+    // with our unique per-device hostname (e.g. "Serin-AB12")
+    if (mdnsHostname && mdnsHostname[0] != '\0') {
+        mdns_hostname_set(mdnsHostname);
+        LOG_INFO("[HK] mDNS hostname set to %s", mdnsHostname);
     }
 
     // Set initial status

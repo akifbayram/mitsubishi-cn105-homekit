@@ -14,7 +14,7 @@ extern "C" {
 /// Returns true on success, false if HAP failed to start.
 bool homekit_init(const char* name, const char* manufacturer,
                   const char* model, const char* serialNumber,
-                  const char* fwRevision);
+                  const char* fwRevision, const char* mdnsHostname);
 
 /// Generate (or load from NVS) the 8-digit setup code, then set it on HAP.
 void homekit_generate_setup_code(void);

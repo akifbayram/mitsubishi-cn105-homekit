@@ -178,7 +178,8 @@ extern "C" void app_main(void)
             }
             homekit_services_set_controller(&cn105);
             homekitStarted = homekit_init(displayName, BRAND_MANUFACTURER,
-                                           BRAND_MODEL, serialNumber, FW_VERSION);
+                                           BRAND_MODEL, serialNumber, FW_VERSION,
+                                           apName);
             if (!homekitStarted) {
                 LOG_ERROR("HomeKit init failed, will retry next loop");
             }

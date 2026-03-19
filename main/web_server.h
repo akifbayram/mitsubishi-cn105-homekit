@@ -32,6 +32,7 @@ private:
     static esp_err_t handleManifest(httpd_req_t *req);
     static esp_err_t handleIcon192(httpd_req_t *req);
     static esp_err_t handleIcon512(httpd_req_t *req);
+    static esp_err_t handleFavicon(httpd_req_t *req);
 
     // ── WebSocket message handling ──────────────────────────────────────────
     void handleWsMessage(httpd_req_t *req, const char *msg);
