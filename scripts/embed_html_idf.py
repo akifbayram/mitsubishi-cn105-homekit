@@ -10,7 +10,49 @@ Usage:
 import argparse
 import gzip
 import os
+import re
 import sys
+
+
+def _minify_css(css: str) -> str:
+    """Remove comments, collapse whitespace, strip unnecessary chars."""
+    css = re.sub(r"/\*.*?\*/", "", css, flags=re.DOTALL)
+    css = re.sub(r"\s+", " ", css)
+    css = re.sub(r"\s*([{}:;,>~+])\s*", r"\1", css)
+    css = re.sub(r";\s*}", "}", css)
+    return css.strip()
+
+
+def _minify_js(js: str) -> str:
+    """Strip leading whitespace, blank lines, and line comments."""
+    out = []
+    for line in js.split("\n"):
+        s = line.strip()
+        if not s:
+            continue
+        # Remove full-line // comments (but not URLs like http://)
+        if re.match(r"^//(?!/)", s):
+            continue
+        out.append(s)
+    return "\n".join(out)
+
+
+def _minify_html(html: str) -> str:
+    """Minify inline CSS/JS and collapse inter-tag whitespace."""
+    html = re.sub(
+        r"<style>(.*?)</style>",
+        lambda m: "<style>" + _minify_css(m.group(1)) + "</style>",
+        html,
+        flags=re.DOTALL,
+    )
+    html = re.sub(
+        r"<script>(.*?)</script>",
+        lambda m: "<script>" + _minify_js(m.group(1)) + "</script>",
+        html,
+        flags=re.DOTALL,
+    )
+    html = re.sub(r">\s+<", "><", html)
+    return html
 
 
 # Defaults matching branding.h
@@ -35,6 +77,10 @@ def embed(input_file: str, output_file: str, brand_vars: dict) -> None:
     text = raw.decode("utf-8")
     for key, val in brand_vars.items():
         text = text.replace("{{" + key + "}}", val)
+
+    # Minify inline CSS, JS, and inter-tag whitespace
+    pre_min = len(text)
+    text = _minify_html(text)
     raw = text.encode("utf-8")
 
     compressed = gzip.compress(raw, compresslevel=9)
@@ -46,9 +92,10 @@ def embed(input_file: str, output_file: str, brand_vars: dict) -> None:
         f.write(compressed)
 
     print(f"Embedded {input_file}")
-    print(f"  Raw size:    {raw_size:,} bytes")
+    print(f"  Original:    {pre_min:,} bytes")
+    print(f"  Minified:    {raw_size:,} bytes ({pre_min - raw_size:,} saved)")
     print(f"  Gzipped:     {gz_size:,} bytes")
-    print(f"  Ratio:       {gz_size / raw_size * 100:.1f}%")
+    print(f"  Ratio:       {gz_size / pre_min * 100:.1f}%")
     print(f"  Output:      {output_file}")
 
 

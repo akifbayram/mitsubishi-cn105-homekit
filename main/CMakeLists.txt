@@ -94,3 +94,4 @@ target_add_binary_data(${COMPONENT_TARGET} ${CMAKE_CURRENT_BINARY_DIR}/web_ui.ht
 target_add_binary_data(${COMPONENT_TARGET} ${CMAKE_CURRENT_BINARY_DIR}/recovery.html.gz BINARY)
 target_add_binary_data(${COMPONENT_TARGET} ${PROJECT_DIR}/web/icon-192.png BINARY)
 target_add_binary_data(${COMPONENT_TARGET} ${PROJECT_DIR}/web/icon-512.png BINARY)
+target_add_binary_data(${COMPONENT_TARGET} ${PROJECT_DIR}/web/favicon.png BINARY)

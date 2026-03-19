@@ -10,6 +10,14 @@
 
 static const char *TAG = "web";
 
+// Disable Nagle on every new connection — eliminates up-to-200ms delay on small
+// writes (WebSocket state pushes, log lines).  Called by esp_http_server via open_fn.
+static esp_err_t setTcpNoDelay(httpd_handle_t, int sockfd) {
+    int flag = 1;
+    setsockopt(sockfd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag));
+    return ESP_OK;
+}
+
 // ── Build-time ETag — changes on every recompile (assets are embedded) ──────
 static const char ASSET_ETAG[] = "\"" __DATE__ " " __TIME__ "\"";
 
@@ -34,6 +42,8 @@ extern const uint8_t icon_192_png_start[] asm("_binary_icon_192_png_start");
 extern const uint8_t icon_192_png_end[]   asm("_binary_icon_192_png_end");
 extern const uint8_t icon_512_png_start[] asm("_binary_icon_512_png_start");
 extern const uint8_t icon_512_png_end[]   asm("_binary_icon_512_png_end");
+extern const uint8_t favicon_png_start[]  asm("_binary_favicon_png_start");
+extern const uint8_t favicon_png_end[]    asm("_binary_favicon_png_end");
 
 // ── Global instance ──────────────────────────────────────────────────────────
 WebUI webUI;
@@ -293,8 +303,12 @@ esp_err_t WebUI::handleIcon512(httpd_req_t *req) {
 }
 
 esp_err_t WebUI::handleFavicon(httpd_req_t *req) {
-    httpd_resp_set_status(req, "204 No Content");
-    httpd_resp_send(req, NULL, 0);
+    if (sendNotModified(req)) return ESP_OK;
+    httpd_resp_set_type(req, "image/png");
+    httpd_resp_set_hdr(req, "Cache-Control", "public, max-age=86400");
+    httpd_resp_set_hdr(req, "ETag", ASSET_ETAG);
+    httpd_resp_send(req, (const char *)favicon_png_start,
+                    (ssize_t)(favicon_png_end - favicon_png_start));
     return ESP_OK;
 }
 
@@ -312,6 +326,7 @@ void WebUI::begin(CN105Controller *ctrl) {
     config.max_uri_handlers = 10;     // Default 8 too few for all endpoints
     config.max_open_sockets = 7;
     config.lru_purge_enable = true;
+    config.open_fn          = setTcpNoDelay;
 
     LOG_INFO("[WebUI] Starting HTTP server on port %d", config.server_port);
 
@@ -416,7 +431,7 @@ void WebUI::begin(CN105Controller *ctrl) {
     httpd_register_uri_handler(_server, &icon512Uri);
 
     const httpd_uri_t faviconUri = {
-        .uri = "/favicon.ico", .method = HTTP_GET, .handler = handleFavicon,
+        .uri = "/favicon.png", .method = HTTP_GET, .handler = handleFavicon,
         .user_ctx = this, .is_websocket = false,
         .handle_ws_control_frames = false, .supported_subprotocol = NULL
     };

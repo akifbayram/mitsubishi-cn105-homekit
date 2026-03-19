@@ -111,6 +111,7 @@ void WifiManager::init(const char* hostname, const char* apName, const char* apP
     }
 
     ESP_ERROR_CHECK(esp_wifi_start());
+    esp_wifi_set_ps(WIFI_PS_NONE);  // Disable power save — mains-powered, lower latency
 
     LOG_INFO("[WiFi] Initialized (hostname=%s, AP=%s)", hostname ? hostname : "?", s_apName);
 }
