@@ -81,6 +81,13 @@ void SettingsStore::begin() {
     }
 
 #ifdef BLE_ENABLE
+    // bleEnabled — bool stored as uint8_t
+    {
+        uint8_t val = 0;
+        nvs_get_u8(_handle, "bleOn", &val);
+        _settings.bleEnabled = (val != 0);
+    }
+
     // bleSensorAddr — string
     {
         size_t len = sizeof(_settings.bleSensorAddr);
@@ -109,7 +116,8 @@ void SettingsStore::begin() {
     if (_settings.bleStaleTimeoutS < 30) _settings.bleStaleTimeoutS = 30;
     if (_settings.bleStaleTimeoutS > 600) _settings.bleStaleTimeoutS = 600;
 
-    LOG_INFO("[Settings] BLE: addr=%s feed=%s timeout=%us",
+    LOG_INFO("[Settings] BLE: enabled=%s addr=%s feed=%s timeout=%us",
+             _settings.bleEnabled ? "ON" : "OFF",
              strlen(_settings.bleSensorAddr) > 0 ? _settings.bleSensorAddr : "(none)",
              _settings.bleFeedEnabled ? "ON" : "OFF",
              _settings.bleStaleTimeoutS);
@@ -131,6 +139,7 @@ void SettingsStore::save() {
     nvs_set_u8(_handle, "wifiChgPend", _settings.wifiChangePending ? 1 : 0);
     nvs_set_u8(_handle, "vaneConfig", _settings.vaneConfig);
 #ifdef BLE_ENABLE
+    nvs_set_u8(_handle, "bleOn", _settings.bleEnabled ? 1 : 0);
     nvs_set_str(_handle, "bleAddr", _settings.bleSensorAddr);
     nvs_set_u8(_handle, "bleFeed", _settings.bleFeedEnabled ? 1 : 0);
     nvs_set_u16(_handle, "bleTimeout", _settings.bleStaleTimeoutS);
