@@ -212,7 +212,6 @@ extern "C" void app_main(void)
 
 #ifdef BLE_ENABLE
             BleSensor::begin();
-            LOG_INFO("BLE sensor scanning started");
 #endif
         }
 
