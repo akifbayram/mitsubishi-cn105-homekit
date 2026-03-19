@@ -501,7 +501,7 @@ input:focus-visible,select:focus-visible{outline-offset:0}
           <span class="ios-toggle-slider"></span>
         </label>
       </div>
-      <div class="ble-help">Scans for a nearby BLE temperature sensor. Disable to save power when no external sensor is in use.</div>
+      <div class="ble-help">Scans for a nearby BLE temperature sensor.</div>
       <div class="ble-config-row" style="margin-top:10px" id="bleFeedRow">
         <label class="status-label" style="margin:0">Use as Room Temp</label>
         <label class="ios-toggle">
@@ -509,7 +509,7 @@ input:focus-visible,select:focus-visible{outline-offset:0}
           <span class="ios-toggle-slider"></span>
         </label>
       </div>
-      <div class="ble-help" id="bleFeedHelp">Sends the remote sensor's reading to the heat pump as the room temperature. Enable if the sensor is closer to where you spend time than the indoor unit.</div>
+      <div class="ble-help" id="bleFeedHelp">Sends the reading to the heat pump as the room temperature.</div>
       <div class="ble-config-row" style="margin-top:10px" id="bleTimeoutRow">
         <label class="status-label" style="margin:0">Sensor Timeout</label>
         <div style="display:flex;align-items:center;gap:8px">
@@ -556,7 +556,7 @@ input:focus-visible,select:focus-visible{outline-offset:0}
                  maxlength="17" spellcheck="false" autocomplete="off"
                  style="flex:1;min-width:0;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 10px;color:var(--text);font-family:monospace;font-size:13px">
         </div>
-        <div class="ble-help">The Bluetooth address of the sensor to pair with. Use Scan to discover nearby sensors automatically.</div>
+        <div class="ble-help">The Bluetooth address of the sensor to pair with.</div>
         <div style="margin-top:8px">
           <button class="save-btn" id="bleScanBtn" style="margin:0;width:100%;background:var(--surface3);color:var(--text);font-size:13px" onclick="startBleScan()">Scan for Sensors</button>
         </div>

@@ -134,9 +134,12 @@ body{
 .setting-row:last-of-type{border-bottom:none}
 .setting-row label{font-size:15px;color:var(--text);min-width:70px}
 .setting-row input[type=text],.setting-row input[type=password]{
-  flex:1;padding:8px 12px;border:none;border-radius:var(--radius-sm);
+  flex:1;padding:8px 12px;border:1.5px solid transparent;border-radius:var(--radius-sm);
   background:var(--seg-bg);color:var(--text);font-size:15px;
   font-family:inherit;outline:none;
+}
+.setting-row input[type=text]:focus,.setting-row input[type=password]:focus{
+  border-color:var(--accent);
 }
 .setting-row input::placeholder{color:var(--text3)}
 .pw-wrap{flex:1;position:relative}
