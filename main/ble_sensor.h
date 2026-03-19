@@ -25,6 +25,9 @@ namespace BleSensor {
     void begin();                        // Init NimBLE + start scanning
     void loop(CN105Controller &cn105);   // Keepalive + stale detection
 
+    void setBleEnabled(bool on);         // Master enable/disable (lazy NimBLE init)
+    bool isBleEnabled();                 // Current master toggle state
+
     float    temperature();   // NAN if no data
     float    humidity();      // NAN if not supported
     int8_t   battery();       // -1 if not supported

@@ -9,6 +9,7 @@
 
 #include <cstring>
 #include <cmath>
+#include <atomic>
 
 // Native NimBLE headers
 #include "nimble/nimble_port.h"
@@ -32,6 +33,11 @@ static char     s_targetLower[18] = {0};  // lowercase "aa:bb:cc:dd:ee:ff"
 static bool     s_addrValid     = false;
 static bool     s_scanning      = false;
 static bool     s_staleReverted = false;
+
+static std::atomic<bool> s_nimbleInitialized{false};
+static std::atomic<bool> s_pendingInit{false};
+static std::atomic<bool> s_pendingClear{false};   // Deferred clearRemoteTemperature
+static std::atomic<bool> s_bleEnabled{false};      // Mirror of settings.bleEnabled
 
 // ── Keepalive state ─────────────────────────────────────────────────────────
 static uint32_t s_lastKeepalive = 0;
@@ -365,7 +371,7 @@ static int gap_event_cb(struct ble_gap_event *event, void *arg) {
     if (event->type == BLE_GAP_EVENT_DISC_COMPLETE) {
         // Scan ended (duration expired or was cancelled) — restart if needed
         s_scanning = false;
-        if (s_addrValid || s_discoveryMode) {
+        if (s_nimbleInitialized.load() && s_bleEnabled.load() && (s_addrValid || s_discoveryMode)) {
             startScan();
             LOG_DEBUG("Scan restarted");
         }
@@ -380,6 +386,7 @@ static int gap_event_cb(struct ble_gap_event *event, void *arg) {
 // ══════════════════════════════════════════════════════════════════════════════
 
 static void startScan() {
+    if (!s_nimbleInitialized.load()) return;
     if (s_scanning) return;
 
     struct ble_gap_disc_params params;
@@ -398,6 +405,7 @@ static void startScan() {
 }
 
 static void stopScan() {
+    if (!s_nimbleInitialized.load()) return;
     if (!s_scanning) return;
     ble_gap_disc_cancel();
     s_scanning = false;
@@ -406,6 +414,34 @@ static void stopScan() {
 // ══════════════════════════════════════════════════════════════════════════════
 // Public API
 // ══════════════════════════════════════════════════════════════════════════════
+
+static bool initNimble() {
+    if (s_nimbleInitialized.load()) return true;
+
+    uint32_t heapBefore = esp_get_free_heap_size();
+
+    esp_err_t ret = nimble_port_init();
+    if (ret != ESP_OK) {
+        LOG_ERROR("nimble_port_init failed: %d", ret);
+        return false;
+    }
+
+    nimble_port_freertos_init([](void *param) {
+        nimble_port_run();
+        nimble_port_freertos_deinit();
+    });
+
+    vTaskDelay(pdMS_TO_TICKS(200));
+    s_nimbleInitialized.store(true);
+
+    uint32_t heapAfter = esp_get_free_heap_size();
+    LOG_INFO("NimBLE initialized. Heap: %u -> %u (-%u bytes)",
+             heapBefore, heapAfter, heapBefore - heapAfter);
+    if (heapAfter < 30000) {
+        LOG_WARN("Low heap after BLE init: %u bytes remaining", heapAfter);
+    }
+    return true;
+}
 
 void BleSensor::begin() {
     const char* addr = settings.get().bleSensorAddr;
@@ -417,38 +453,71 @@ void BleSensor::begin() {
         LOG_INFO("No sensor MAC configured — scanning deferred");
     }
 
-    uint32_t heapBefore = esp_get_free_heap_size();
+    s_bleEnabled.store(settings.get().bleEnabled);
 
-    // Initialize NimBLE stack (controller + host)
-    esp_err_t ret = nimble_port_init();
-    if (ret != ESP_OK) {
-        LOG_ERROR("nimble_port_init failed: %d", ret);
+    if (!s_bleEnabled.load()) {
+        LOG_INFO("BLE disabled, skipping NimBLE init");
         return;
     }
 
-    // Start the NimBLE host task
-    nimble_port_freertos_init([](void *param) {
-        nimble_port_run();
-        nimble_port_freertos_deinit();
-    });
-
-    // Give the host task time to sync with the controller
-    vTaskDelay(pdMS_TO_TICKS(200));
+    if (!initNimble()) return;
 
     if (s_addrValid) {
         startScan();
         LOG_INFO("Scanning started (auto-detect all sensor types)");
     }
+}
 
-    uint32_t heapAfter = esp_get_free_heap_size();
-    LOG_INFO("Init complete (NimBLE native). Heap: %u -> %u (-%u bytes)",
-             heapBefore, heapAfter, heapBefore - heapAfter);
-    if (heapAfter < 30000) {
-        LOG_WARN("Low heap after BLE init: %u bytes remaining", heapAfter);
+void BleSensor::setBleEnabled(bool on) {
+    s_bleEnabled.store(on);
+    settings.get().bleEnabled = on;
+    settings.save();
+
+    if (on) {
+        if (s_nimbleInitialized.load()) {
+            // Already initialized — just start scanning
+            if (s_addrValid) startScan();
+        } else {
+            // Defer NimBLE init to main loop (avoid blocking httpd task)
+            s_pendingInit.store(true);
+        }
+        LOG_INFO("BLE enabled");
+    } else {
+        stopScan();
+        // Defer clearRemoteTemperature to loop() (needs cn105 reference)
+        s_pendingClear.store(true);
+        s_staleReverted = false;
+        LOG_INFO("BLE disabled");
     }
 }
 
+bool BleSensor::isBleEnabled() {
+    return s_bleEnabled.load();
+}
+
 void BleSensor::loop(CN105Controller &cn105) {
+    // Handle deferred NimBLE init (requested from httpd task)
+    if (s_pendingInit.exchange(false)) {
+        if (!s_nimbleInitialized.load()) {
+            if (initNimble() && s_addrValid) {
+                startScan();
+                LOG_INFO("Scanning started (deferred init)");
+            }
+        } else if (s_addrValid) {
+            startScan();
+        }
+    }
+
+    // Handle deferred clearRemoteTemperature (BLE was disabled from httpd task)
+    if (s_pendingClear.exchange(false)) {
+        if (cn105.isConnected()) {
+            cn105.sendRemoteTemperature(0);
+            LOG_INFO("Cleared remote temp — HP reverts to internal sensor");
+        }
+    }
+
+    if (!s_bleEnabled.load()) return;
+
     uint32_t now = uptime_ms();
     float temp = readLocked(s_temperature);
     uint32_t lastUpd = readLocked(s_lastUpdate);
@@ -546,12 +615,15 @@ const char* BleSensor::sensorType() {
 }
 
 void BleSensor::startDiscovery() {
+    if (!s_bleEnabled.load() || !s_nimbleInitialized.load()) {
+        LOG_WARN("BLE discovery rejected — BLE not enabled");
+        return;
+    }
     s_discoveryCount = 0;
     s_lastPushedCount = 0;
     s_discoveryMode = true;
     s_discoveryStart = uptime_ms();
 
-    // Start scanning if not already running (e.g., no MAC configured)
     if (!s_scanning) {
         startScan();
     }
