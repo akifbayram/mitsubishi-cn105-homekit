@@ -8,6 +8,7 @@ enum LEDState {
     SLED_OFF,                // Normal operation — LED dark
     SLED_BOOT,               // Startup — white quick blink (500ms)
     SLED_CN105_DISCONNECTED, // CN105 UART lost — red steady
+    SLED_WIFI_DISCONNECTED,  // WiFi lost — blue steady (WIFI_ON_RGB boards only)
     SLED_ERROR_CODE,         // AC error code (non-0x80) — red fast blink (200ms)
     SLED_OTA                 // Firmware upload — blue slow pulse (~2s)
 };

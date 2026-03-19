@@ -67,6 +67,15 @@
 #define PIN_BLUE_LED            -1
 #endif
 
+// WiFi status on RGB LED (auto: when no blue LED but RGB exists; override per board)
+#ifndef WIFI_ON_RGB
+  #if PIN_BLUE_LED < 0 && PIN_LED_DATA >= 0
+    #define WIFI_ON_RGB         1
+  #else
+    #define WIFI_ON_RGB         0
+  #endif
+#endif
+
 // Button (-1 = no button)
 #ifndef PIN_BUTTON
 #define PIN_BUTTON              -1

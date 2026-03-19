@@ -306,9 +306,10 @@ void WebUI::begin(CN105Controller *ctrl) {
     _ctrl = ctrl;
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.server_port    = 8080;
-    config.ctrl_port      = 32769;  // Different from default to avoid conflict
-    config.stack_size     = 8192;   // Default 4096 too small for WS handlers + log buffers
+    config.server_port      = 8080;
+    config.ctrl_port        = 32769;  // Different from default to avoid conflict
+    config.stack_size       = 8192;   // Default 4096 too small for WS handlers + log buffers
+    config.max_uri_handlers = 10;     // Default 8 too few for all endpoints
     config.max_open_sockets = 7;
     config.lru_purge_enable = true;
 

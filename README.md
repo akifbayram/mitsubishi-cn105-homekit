@@ -157,6 +157,10 @@ Once connected to WiFi:
 3. Select **Mini Split XXXX** (or tap **More options…** if it doesn't appear)
 4. Enter the setup code shown in the web UI (HomeKit panel > Setup Code)
 
+### 5. Status LEDs
+
+On boards with LEDs, the RGB LED shows device status: white blink during boot, red steady when CN105 is disconnected, red fast blink on error, blue pulse during OTA, and off during normal operation. On boards with a dedicated blue LED (NanoC6), it indicates WiFi status (on = disconnected, off = connected). On boards without a blue LED, WiFi disconnect is shown as steady blue on the RGB LED (vs pulsing blue for OTA).
+
 ## Remote Temperature Sensor (BLE)
 
 Wall-mounted units measure temperature at ceiling height near the indoor unit, which often reads warmer than the actual living space. An external BLE sensor placed at a better location gives the heat pump a more accurate room temperature to work with.
@@ -169,9 +173,9 @@ The firmware auto-detects the sensor type from the BLE advertisement format.
 
 | Protocol | Devices | Tested |
 |----------|---------|:------:|
-| Govee V2 | H5074, H5051, H5052, H5071 | ✅ |
 | Govee V3 | H5072, H5075 | ❌ |
-| Govee V1 | H5100, H5101, H5102, H5103, H5104, H5105, H5108, H5110, H5174, H5177, GV5179 | ❌ |
+| Govee V2 | H5074, H5051, H5052, H5071 | ✅ |
+| Govee V1 | H5100, H5101, H5102, H5103, H5104, H5105, H5108, H5110, H5174, H5177, GV5179 | ✅ |
 | PVVX | Xiaomi LYWSD03MMC, CGG1 (requires [PVVX custom firmware](https://github.com/pvvx/ATC_MiThermometer)) | ❌ |
 | BTHome v2 | SwitchBot, Shelly, or any BTHome v2 device | ❌ |
 

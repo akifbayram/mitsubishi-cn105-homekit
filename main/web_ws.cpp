@@ -37,7 +37,6 @@ esp_err_t WebUI::handleWebSocket(httpd_req_t *req) {
     // First call with max_len=0 to get the frame length
     esp_err_t ret = httpd_ws_recv_frame(req, &frame, 0);
     if (ret != ESP_OK) {
-        LOG_ERROR("[WebUI] httpd_ws_recv_frame (len query) failed: %d", ret);
         return ret;
     }
 
@@ -60,7 +59,6 @@ esp_err_t WebUI::handleWebSocket(httpd_req_t *req) {
     frame.payload = buf;
     ret = httpd_ws_recv_frame(req, &frame, frame.len);
     if (ret != ESP_OK) {
-        LOG_ERROR("[WebUI] httpd_ws_recv_frame (data) failed: %d", ret);
         free(buf);
         return ret;
     }
@@ -326,10 +324,11 @@ void WebUI::sendWsText(int fd, const char *text) {
 
     esp_err_t ret = httpd_ws_send_frame_async(_server, fd, &frame);
     if (ret != ESP_OK) {
-        LOG_WARN("[WebUI] Failed to send WS frame to fd=%d: %d", fd, ret);
+        // Reset fd BEFORE logging — prevents broadcastLog from retrying the dead socket
         if (_wsClientFd == fd) {
             _wsClientFd = -1;
         }
+        LOG_WARN("[WebUI] Failed to send WS frame to fd=%d: %d, client cleared", fd, ret);
     }
 }
 
@@ -497,10 +496,13 @@ void WebUI::pushState() {
 void WebUI::broadcastLog(const char *msg, size_t len) {
     if (_wsClientFd < 0) return;
 
-    char escaped[280];
+    // Static buffers — safe because this is only called from the vprintf hook
+    // which runs under the ESP-IDF log lock (one task at a time).  Avoids
+    // ~600 bytes of stack pressure on constrained tasks like the WiFi task.
+    static char escaped[280];
     jsonEscape(msg, escaped, sizeof(escaped));
 
-    char buf[320];
+    static char buf[320];
     snprintf(buf, sizeof(buf), "{\"type\":\"log\",\"msg\":\"%s\"}", escaped);
     sendWsText(_wsClientFd, buf);
 }

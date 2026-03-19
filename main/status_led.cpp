@@ -17,6 +17,7 @@ static const char* stateName(LEDState s) {
         case SLED_OFF:                return "OFF";
         case SLED_BOOT:               return "BOOT";
         case SLED_CN105_DISCONNECTED: return "CN105_DISC";
+        case SLED_WIFI_DISCONNECTED:  return "WIFI_DISC";
         case SLED_ERROR_CODE:         return "ERROR";
         case SLED_OTA:                return "OTA";
         default:                      return "?";
@@ -89,6 +90,9 @@ void StatusLED::setState(LEDState state) {
         case SLED_CN105_DISCONNECTED:
             setColor(MAX_BRIGHT, 0, 0);  // red steady
             break;
+        case SLED_WIFI_DISCONNECTED:
+            setColor(0, 0, MAX_BRIGHT);  // blue steady
+            break;
         case SLED_BOOT:
             _rgbOn = true;
             setColor(MAX_BRIGHT, MAX_BRIGHT, MAX_BRIGHT);  // white on immediately
@@ -120,6 +124,7 @@ void StatusLED::loop() {
     switch (_state) {
         case SLED_OFF:
         case SLED_CN105_DISCONNECTED:
+        case SLED_WIFI_DISCONNECTED:
             break;
 
         case SLED_BOOT: {

@@ -19,7 +19,7 @@ struct DeviceSettings {
     uint8_t  vaneConfig = 2;          // 0=no vanes, 1=vertical only, 2=vertical+horizontal
 #ifdef BLE_ENABLE
     char     bleSensorAddr[18] = "";   // "AA:BB:CC:DD:EE:FF" or empty
-    bool     bleFeedEnabled = true;    // Feed BLE temp to heat pump
+    bool     bleFeedEnabled = false;   // Feed BLE temp to heat pump
     uint16_t bleStaleTimeoutS = 90;    // Seconds before sensor marked stale (30-600)
 #endif
 };

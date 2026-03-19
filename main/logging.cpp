@@ -11,7 +11,10 @@ LogHookFn logHook = nullptr;
 // Installed via esp_log_set_vprintf(). Every ESP_LOG* call passes through here.
 // We format once, write to stdout, and optionally forward to the WebSocket hook.
 static int log_hook_vprintf(const char *fmt, va_list args) {
-    char buf[256];
+    // Static buffer — safe because esp_log_writev() holds a lock, so only one
+    // task at a time enters this function.  Avoids 256 bytes of stack pressure
+    // that would otherwise overflow constrained tasks (e.g. WiFi internal task).
+    static char buf[256];
     int len = vsnprintf(buf, sizeof(buf), fmt, args);
     if (len < 0) {
         return len;
@@ -23,9 +26,15 @@ static int log_hook_vprintf(const char *fmt, va_list args) {
     // Console output
     fputs(buf, stdout);
 
-    // Forward to WebSocket log hook if registered
-    if (logHook) {
+    // Forward to WebSocket log hook if registered.
+    // Reentrancy guard: if broadcastLog → sendWsText fails, the resulting
+    // LOG_WARN would re-enter this hook and cascade (each failed WS send
+    // triggers another log → send → fail → log…), blowing the stack.
+    static bool inHook = false;
+    if (logHook && !inHook) {
+        inHook = true;
         logHook(buf, written);
+        inHook = false;
     }
 
     return len;

@@ -202,7 +202,6 @@ input[type=range]::-moz-range-thumb{
 .ble-banner.info{background:rgba(0,122,255,0.12);color:var(--accent)}
 .ble-banner.muted{background:var(--seg-bg);color:var(--text2)}
 .ble-dimmed .status-grid{opacity:0.4}
-.ble-dimmed .ble-hero{opacity:0.4}
 /* ── iOS Toggle ───────────────────────────────────────────────────────────── */
 .ios-toggle{position:relative;display:inline-block;width:44px;height:26px;flex-shrink:0}
 .ios-toggle input{opacity:0;width:0;height:0}
@@ -220,9 +219,6 @@ input[type=range]::-moz-range-thumb{
 .signal-bars[data-strength="3"] i:nth-child(-n+3){background:var(--green)}
 .signal-bars[data-strength="4"] i{background:var(--green)}
 /* ── BLE Remote Sensor ────────────────────────────────────────────────────── */
-.ble-hero{text-align:center;padding:4px 0 8px}
-.ble-hero-temp{font-size:36px;font-weight:300;letter-spacing:-1px;line-height:1.1}
-.ble-hero-hum{font-size:13px;color:var(--text2);margin-top:2px}
 .ble-config-sep{border:none;border-top:0.5px solid var(--border);margin:10px 0 12px}
 .ble-config-row{display:flex;align-items:center;justify-content:space-between;gap:12px}
 .ble-scan-item{display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--seg-bg);border-radius:var(--radius-sm);cursor:pointer;margin-bottom:4px;transition:background .15s}
@@ -232,8 +228,6 @@ input[type=range]::-moz-range-thumb{
 .ble-scan-item .scan-addr{font-size:11px;color:var(--text2);font-family:monospace}
 @keyframes scan-pulse{0%,100%{opacity:1}50%{opacity:.5}}
 .scanning{animation:scan-pulse 1s infinite}
-@keyframes ble-live-pulse{0%,100%{opacity:1}50%{opacity:.6}}
-.ble-live .ble-hero-temp{animation:ble-live-pulse 2s ease-in-out infinite}
 .status-label{color:var(--text2);margin-right:auto}
 
 /* ── Settings & Forms ──────────────────────────────────────────────────── */
@@ -489,13 +483,16 @@ input:focus-visible,select:focus-visible{outline-offset:0}
     </div>
     <div class="collapse-body" id="bleBody">
       <div id="bleBanner" class="ble-banner" style="display:none"></div>
-      <!-- Hero temperature -->
-      <div class="ble-hero" id="bleHero">
-        <div class="ble-hero-temp"><span id="bleTemp">--</span><span class="temp-unit-label" style="font-size:16px">&deg;C</span></div>
-        <div class="ble-hero-hum" id="bleHumRow"><span id="bleHum">--</span></div>
-      </div>
       <!-- Status grid -->
       <div class="status-grid" id="bleStatusGrid">
+        <div class="status-item" id="bleTempRow">
+          <span class="status-label">Temp</span>
+          <span id="bleTemp">--</span>
+        </div>
+        <div class="status-item" id="bleHumRow">
+          <span class="status-label">Humidity</span>
+          <span id="bleHum">--</span>
+        </div>
         <div class="status-item" id="bleBattRow">
           <span class="status-label">Battery</span>
           <span id="bleBatt">--</span>
@@ -1120,7 +1117,7 @@ input:focus-visible,select:focus-visible{outline-offset:0}
 
       }
 
-      if(s.mode==='auto'){
+      if(s.mode==='auto'&&s.connected&&s.power){
         dualTemp.style.display='';
         if(!dualLocked){
           if(tempUnit==='F'){
@@ -1194,7 +1191,6 @@ input:focus-visible,select:focus-visible{outline-offset:0}
       var banner=$('bleBanner');
       var statusLbl=$('bleStatusLabel');
       var bleBody=$('bleBody');
-      var bleHero=$('bleHero');
       var noMac=!s.bleAddr;
       var waiting=!noMac&&!s.bleActive&&!s.bleStale;
       var stale=!!s.bleStale;
@@ -1222,14 +1218,12 @@ input:focus-visible,select:focus-visible{outline-offset:0}
       // Dim hero + health when no data available
       bleBody.classList.toggle('ble-dimmed',noMac||waiting);
 
-      // Live pulse on hero temp when actively receiving
-      bleHero.classList.toggle('ble-live',s.bleActive&&!stale);
+      // Temperature
+      var tempStr=s.bleTemp!=null?fmtReadingTemp(s.bleTemp):'--';
+      $('bleTemp').textContent=tempStr+(s.bleTemp!=null?(tempUnit==='F'?'°F':'°C'):'');
 
-      // Hero temperature
-      $('bleTemp').textContent=s.bleTemp!=null?fmtReadingTemp(s.bleTemp):'--';
-
-      // Humidity (inline below hero temp)
-      if(s.bleHumidity!=null&&s.bleHumidity>=0){$('bleHumRow').style.display='';$('bleHum').textContent=s.bleHumidity+'% humidity'}
+      // Humidity
+      if(s.bleHumidity!=null&&s.bleHumidity>=0){$('bleHumRow').style.display='';$('bleHum').textContent=s.bleHumidity+'%'}
       else{$('bleHumRow').style.display='none'}
 
       // Battery

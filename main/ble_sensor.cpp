@@ -384,10 +384,10 @@ static void startScan() {
 
     struct ble_gap_disc_params params;
     memset(&params, 0, sizeof(params));
-    params.passive = 1;              // Passive scan (no SCAN_REQ)
+    params.passive = 0;              // Active scan — required for sensors that put data in SCAN_RSP (e.g. Govee V2)
     params.filter_duplicates = 0;    // We want repeated advertisements
-    params.itvl = 80;               // 50ms in 0.625ms units
-    params.window = 48;             // 30ms in 0.625ms units
+    params.itvl = 160;              // 100ms in 0.625ms units
+    params.window = 144;            // 90ms in 0.625ms units (90% duty cycle)
 
     int rc = ble_gap_disc(BLE_OWN_ADDR_PUBLIC, BLE_HS_FOREVER, &params, gap_event_cb, NULL);
     if (rc == 0) {

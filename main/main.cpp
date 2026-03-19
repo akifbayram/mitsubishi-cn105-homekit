@@ -257,6 +257,10 @@ extern "C" void app_main(void)
                     statusLED.setState(SLED_ERROR_CODE);
                 } else if (!cn105.isConnected()) {
                     statusLED.setState(SLED_CN105_DISCONNECTED);
+#if WIFI_ON_RGB
+                } else if (!WifiManager::isConnected()) {
+                    statusLED.setState(SLED_WIFI_DISCONNECTED);
+#endif
                 } else {
                     statusLED.setState(SLED_OFF);
                 }
