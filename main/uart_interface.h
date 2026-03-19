@@ -19,4 +19,8 @@ public:
 
     /// Discard all buffered input
     virtual void flush() = 0;
+
+    /// Block until data is available or timeout expires.
+    /// Returns true if data arrived, false on timeout.
+    virtual bool waitForData(uint32_t timeoutMs) { (void)timeoutMs; return false; }
 };

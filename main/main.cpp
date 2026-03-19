@@ -157,17 +157,27 @@ extern "C" void app_main(void)
         wifiRecovery.activateNow();
     }
 
-    // ── 12. BLE sensor init ──────────────────────────────────────────────
+    // ── 12. Start CN105 dedicated task (event-driven UART) ───────────────
+    cn105.startTask();
+
+    // ── 13. BLE sensor init ──────────────────────────────────────────────
     // BLE is started later, after web UI is up
 
     // ════════════════════════════════════════════════════════════════════════
-    // Main loop
+    // Main loop — tiered polling
+    // CN105 UART runs in its own task; remaining subsystems polled at
+    // appropriate rates to reduce unnecessary work.
     // ════════════════════════════════════════════════════════════════════════
     LOG_INFO("Entering main loop");
 
+    uint32_t lastWifiCheck = 0;
+    uint32_t lastWebLoop   = 0;
+#ifdef BLE_ENABLE
+    uint32_t lastBleLoop   = 0;
+#endif
+
     while (true) {
-        // ── CN105 polling ────────────────────────────────────────────────
-        cn105.loop();
+        uint32_t now = uptime_ms();
 
         // ── Deferred HomeKit init (one-shot after WiFi connects) ─────────
         if (!homekitStarted && WifiManager::isConnected()) {
@@ -191,8 +201,12 @@ extern "C" void app_main(void)
             homekit_sync_fan(cn105);
             homekit_sync_switches(cn105);
         }
-        // ── WiFi recovery + AP mode tracking ─────────────────────────────
-        wifiRecovery.loop();
+
+        // ── WiFi recovery — 1 Hz ────────────────────────────────────────
+        if (now - lastWifiCheck >= 1000) {
+            wifiRecovery.loop();
+            lastWifiCheck = now;
+        }
 
         // ── Web server deferred init (one-shot after WiFi or AP active) ──
         if (!webUIStarted && (WifiManager::isConnected() || wifiRecovery.isAPActive())) {
@@ -207,9 +221,8 @@ extern "C" void app_main(void)
 #endif
         }
 
-        if (webUIStarted) {
-            // Track AP mode changes for web UI routing
-            // Don't start redirect server on port 80 once HAP owns it
+        // ── WebSocket state push + AP tracking — 10 Hz ──────────────────
+        if (webUIStarted && now - lastWebLoop >= 100) {
             bool apNow = wifiRecovery.isAPActive();
             if (apNow != lastAPState) {
                 if (!homekitStarted || !apNow) {
@@ -218,13 +231,17 @@ extern "C" void app_main(void)
                 lastAPState = apNow;
             }
 
-            // WebSocket state push + BLE discovery updates
             webUI.loop();
-
-#ifdef BLE_ENABLE
-            BleSensor::loop(cn105);
-#endif
+            lastWebLoop = now;
         }
+
+        // ── BLE keepalive — 1 Hz ────────────────────────────────────────
+#ifdef BLE_ENABLE
+        if (webUIStarted && now - lastBleLoop >= 1000) {
+            BleSensor::loop(cn105);
+            lastBleLoop = now;
+        }
+#endif
 
         // ── Status LED priority evaluation ───────────────────────────────
 #if PIN_LED_DATA >= 0

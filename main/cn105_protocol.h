@@ -6,6 +6,7 @@
 #include "esp_utils.h"
 #include <driver/uart.h>
 #include <driver/gpio.h>
+#include <freertos/task.h>
 #include "logging.h"
 #include "uart_interface.h"
 #ifndef UNIT_TEST
@@ -213,10 +214,18 @@ public:
     void setUpdateInterval(uint32_t ms) { _updateInterval = ms; }
     uint32_t getUpdateInterval() const { return _updateInterval; }
 
+#ifndef UNIT_TEST
+    /// Start a dedicated FreeRTOS task for UART I/O and protocol management.
+    /// After calling this, do not call loop() from other tasks.
+    void startTask(int priority = 5, int stackSize = 4096);
+#endif
+
 private:
     UartInterface* _uart = nullptr;
 #ifndef UNIT_TEST
     HardwareUart* _hwUart = nullptr;  // Owned, created by begin(uart_port_t,...)
+    TaskHandle_t _taskHandle = nullptr;
+    static void taskFunc(void *arg);
 #endif
     CN105State      _state;
 

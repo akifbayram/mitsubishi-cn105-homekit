@@ -47,6 +47,27 @@ void CN105Controller::begin(UartInterface *uart) {
     LOG_INFO("[CN105] Controller initialized, waiting for connection...");
 }
 
+#ifndef UNIT_TEST
+void CN105Controller::startTask(int priority, int stackSize) {
+    if (_taskHandle) return;
+    xTaskCreate(taskFunc, "cn105", stackSize, this, priority, &_taskHandle);
+    LOG_INFO("[CN105] Started dedicated UART task (priority=%d, stack=%d)", priority, stackSize);
+}
+
+void CN105Controller::taskFunc(void *arg) {
+    auto *self = static_cast<CN105Controller*>(arg);
+    while (true) {
+        self->loop();
+        // Block until UART data arrives or 100ms timeout for timer management
+        if (self->_uart) {
+            self->_uart->waitForData(100);
+        } else {
+            vTaskDelay(pdMS_TO_TICKS(100));
+        }
+    }
+}
+#endif
+
 bool CN105Controller::isHealthy() const {
     return _state.connected &&
            _lastSuccessfulResponse > 0 &&

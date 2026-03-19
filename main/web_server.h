@@ -17,6 +17,7 @@ private:
     CN105Controller *_ctrl   = nullptr;
     int  _wsClientFd         = -1;      // Track connected WS client (single client)
     uint32_t _lastStatePush  = 0;
+    uint32_t _lastWsPing     = 0;      // Server-side WS ping for dead client detection
     bool _apMode = false;               // True when fallback AP is active
 
     httpd_handle_t   _redirectServer = NULL;  // Port 80 redirect server for AP mode

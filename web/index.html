@@ -734,6 +734,8 @@ input:focus-visible,select:focus-visible{outline-offset:0}
   var ws = null;
   var state = {};
   var reconnTimer = null;
+  var reconnDelay = 0;
+  var hbTimer = null;
   var sliderDragging = false;
   var MAX_LOG_LINES = 200;
   var lastCmdTime = 0;
@@ -1002,32 +1004,62 @@ input:focus-visible,select:focus-visible{outline-offset:0}
   }
 
   // ── WebSocket ──────────────────────────────────────────────────────────────
+  var connectTimeout=null;
+
   function connect(){
-    if(ws && ws.readyState<=1) return;
+    // Kill stuck CONNECTING sockets (Safari iOS leaves these hanging)
+    if(ws){
+      if(ws.readyState===1) return; // Already open
+      try{ws.close();}catch(e){}
+      ws=null;
+    }
     var host=location.hostname||'192.168.1.1';
     var port=location.port||'8080';
     ws=new WebSocket('ws://'+host+':'+port+'/ws');
 
+    // Timeout: if not open within 5s, kill and retry (Safari CONNECTING hang)
+    if(connectTimeout) clearTimeout(connectTimeout);
+    connectTimeout=setTimeout(function(){
+      connectTimeout=null;
+      if(ws && ws.readyState===0){
+        try{ws.close();}catch(e){}
+        ws=null;
+        scheduleReconnect();
+      }
+    },5000);
+
     ws.onopen=function(){
+      if(connectTimeout){clearTimeout(connectTimeout);connectTimeout=null}
       connDot.className='conn-dot ok';
       connDot.title='Connected';
       connDot.setAttribute('aria-label','Connected');
-      if(reconnTimer){clearInterval(reconnTimer);reconnTimer=null}
+      if(reconnTimer){clearTimeout(reconnTimer);reconnTimer=null}
+      reconnDelay=0;
+      lastMsgTime=Date.now();
+      if(hbTimer) clearInterval(hbTimer);
+      hbTimer=setInterval(function(){
+        if(ws && Date.now()-lastMsgTime>5000){
+          try{ws.close();}catch(e){}
+        }
+      },2000);
     };
 
     ws.onclose=function(){
+      if(connectTimeout){clearTimeout(connectTimeout);connectTimeout=null}
       connDot.className='conn-dot err';
       connDot.title='Disconnected';
       connDot.setAttribute('aria-label','Disconnected');
       ws=null;
+      if(hbTimer){clearInterval(hbTimer);hbTimer=null}
       scheduleReconnect();
     };
 
     ws.onerror=function(){
-      if(ws)ws.close();
+      if(ws) try{ws.close();}catch(e){}
     };
 
     ws.onmessage=function(ev){
+      lastMsgTime=Date.now();
       try{
         var msg=JSON.parse(ev.data);
         if(msg.type==='state') onState(msg);
@@ -1042,8 +1074,19 @@ input:focus-visible,select:focus-visible{outline-offset:0}
 
   function scheduleReconnect(){
     if(reconnTimer) return;
-    reconnTimer=setInterval(function(){connect()},3000);
+    reconnDelay=reconnDelay?Math.min(reconnDelay*2,30000):1000;
+    reconnTimer=setTimeout(function(){reconnTimer=null;connect()},reconnDelay);
   }
+
+  document.addEventListener('visibilitychange',function(){
+    if(!document.hidden){
+      if(!ws||ws.readyState!==1){
+        if(reconnTimer){clearTimeout(reconnTimer);reconnTimer=null}
+        reconnDelay=0;
+        connect();
+      }
+    }
+  });
 
   function send(obj){
     if(ws&&ws.readyState===1) ws.send(JSON.stringify(obj));

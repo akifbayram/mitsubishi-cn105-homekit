@@ -7,6 +7,7 @@ static const char *TAG = "led";
 #if PIN_LED_DATA >= 0
 
 #include <driver/gpio.h>
+#include <esp_rom_sys.h>
 #include <led_strip.h>
 
 static constexpr uint8_t MAX_BRIGHT = 30;
@@ -33,7 +34,7 @@ void StatusLED::begin() {
         gpio_set_direction((gpio_num_t)_enablePin, GPIO_MODE_OUTPUT);
         gpio_set_level((gpio_num_t)_enablePin, 1);
         _enableHigh = true;
-        vTaskDelay(pdMS_TO_TICKS(1));  // Let LED chip power stabilize
+        esp_rom_delay_us(350);  // WS2812 needs ≥280μs after power-on
     }
 
     // Configure RMT-based WS2812 driver
@@ -147,6 +148,7 @@ void StatusLED::setColor(uint8_t r, uint8_t g, uint8_t b) {
     if (_enablePin >= 0 && !_enableHigh) {
         gpio_set_level((gpio_num_t)_enablePin, 1);
         _enableHigh = true;
+        esp_rom_delay_us(350);  // WS2812 needs ≥280μs after power-on
     }
     led_strip_set_pixel(_strip, 0, r, g, b);
     led_strip_refresh(_strip);
@@ -155,7 +157,6 @@ void StatusLED::setColor(uint8_t r, uint8_t g, uint8_t b) {
 void StatusLED::off() {
     if (_strip) {
         led_strip_clear(_strip);
-        led_strip_refresh(_strip);
     }
     if (_enablePin >= 0 && _enableHigh) {
         gpio_set_level((gpio_num_t)_enablePin, 0);

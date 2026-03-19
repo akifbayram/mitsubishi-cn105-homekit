@@ -42,12 +42,7 @@ esp_err_t WebUI::handleWebSocket(httpd_req_t *req) {
     }
 
     if (frame.len == 0) {
-        // Empty frame or control frame (CLOSE/PING/PONG)
-        if (frame.type == HTTPD_WS_TYPE_CLOSE) {
-            LOG_INFO("[WebUI] WebSocket client disconnected");
-            webUI._wsClientFd = -1;
-        }
-        return ESP_OK;
+        return ESP_OK;  // Control frames handled by ESP-IDF (handle_ws_control_frames=false)
     }
 
     // Allocate buffer and receive payload
@@ -76,9 +71,6 @@ esp_err_t WebUI::handleWebSocket(httpd_req_t *req) {
     if (frame.type == HTTPD_WS_TYPE_TEXT) {
         LOG_DEBUG("[WebUI] WS received: %s", (char *)buf);
         webUI.handleWsMessage(req, (const char *)buf);
-    } else if (frame.type == HTTPD_WS_TYPE_CLOSE) {
-        LOG_INFO("[WebUI] WebSocket client disconnected");
-        webUI._wsClientFd = -1;
     }
 
     free(buf);
@@ -554,6 +546,26 @@ void WebUI::loop() {
     if (now - _lastStatePush >= 1000) {
         _lastStatePush = now;
         pushState();
+    }
+
+    // Server-side WS ping every 15s to detect dead clients (half-open TCP)
+    if (now - _lastWsPing >= 15000) {
+        _lastWsPing = now;
+        httpd_ws_client_info_t info = httpd_ws_get_fd_info(_server, _wsClientFd);
+        if (info != HTTPD_WS_CLIENT_WEBSOCKET) {
+            LOG_INFO("[WebUI] Dead WS client detected (fd=%d), cleaning up", _wsClientFd);
+            _wsClientFd = -1;
+            return;
+        }
+        httpd_ws_frame_t ping;
+        memset(&ping, 0, sizeof(ping));
+        ping.type = HTTPD_WS_TYPE_PING;
+        esp_err_t ret = httpd_ws_send_frame_async(_server, _wsClientFd, &ping);
+        if (ret != ESP_OK) {
+            LOG_WARN("[WebUI] Ping failed (fd=%d): %d, cleaning up", _wsClientFd, ret);
+            _wsClientFd = -1;
+            return;
+        }
     }
 
 #ifdef BLE_ENABLE

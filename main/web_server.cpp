@@ -309,7 +309,7 @@ void WebUI::begin(CN105Controller *ctrl) {
     config.server_port    = 8080;
     config.ctrl_port      = 32769;  // Different from default to avoid conflict
     config.stack_size     = 8192;   // Default 4096 too small for WS handlers + log buffers
-    config.max_open_sockets = 4;
+    config.max_open_sockets = 7;
     config.lru_purge_enable = true;
 
     LOG_INFO("[WebUI] Starting HTTP server on port %d", config.server_port);
@@ -351,7 +351,7 @@ void WebUI::begin(CN105Controller *ctrl) {
         .handler   = handleWebSocket,
         .user_ctx  = this,
         .is_websocket = true,
-        .handle_ws_control_frames = true,
+        .handle_ws_control_frames = false,
         .supported_subprotocol = NULL
     };
     httpd_register_uri_handler(_server, &wsUri);
