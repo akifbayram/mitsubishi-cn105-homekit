@@ -491,6 +491,14 @@ input:focus-visible,select:focus-visible{outline-offset:0}
     </div>
     <div class="collapse-body" id="bleBody">
       <div id="bleBanner" class="ble-banner" style="display:none"></div>
+      <!-- Master BLE toggle -->
+      <div class="ble-config-row" style="padding:12px 16px 4px" id="bleEnableRow">
+        <label class="status-label" style="margin:0;font-weight:500">Enable BLE Sensor</label>
+        <label class="ios-toggle">
+          <input type="checkbox" id="bleEnableToggle" onchange="toggleBleEnabled()">
+          <span class="ios-toggle-slider"></span>
+        </label>
+      </div>
       <!-- Status grid -->
       <div class="status-grid" id="bleStatusGrid">
         <div class="status-item" id="bleTempRow">
@@ -1193,8 +1201,17 @@ input:focus-visible,select:focus-visible{outline-offset:0}
     }
 
     // BLE Remote Sensor
-    if(s.bleTemp!==undefined){
+    if(s.bleEnabled!==undefined){
       $('bleCard').style.display='';
+      var bleOn=!!s.bleEnabled;
+      $('bleEnableToggle').checked=bleOn;
+      // Hide all BLE content when disabled
+      var bleGrid=$('bleStatusGrid');
+      var bleSep=bleGrid.nextElementSibling;  // <hr>
+      var bleConfig=bleSep.nextElementSibling; // config div
+      bleGrid.style.display=bleOn?'':'none';
+      bleSep.style.display=bleOn?'':'none';
+      bleConfig.style.display=bleOn?'':'none';
       var bleDot=$('bleDot');
       var banner=$('bleBanner');
       var statusLbl=$('bleStatusLabel');
@@ -1271,6 +1288,14 @@ input:focus-visible,select:focus-visible{outline-offset:0}
       var scanBtn=$('bleScanBtn');
       if(s.bleDiscovering){scanBtn.textContent='Scanning\u2026';scanBtn.disabled=true;scanBtn.classList.add('scanning')}
       else if(scanBtn.classList.contains('scanning')){scanBtn.textContent='Scan for Sensors';scanBtn.disabled=false;scanBtn.classList.remove('scanning')}
+
+      // When BLE disabled, show status as "Disabled"
+      if(!bleOn){
+        bleDot.className='status-dot idle';
+        statusLbl.textContent='Disabled';
+        statusLbl.style.color='var(--text3)';
+        banner.style.display='none';
+      }
     }
 
     // CN105 header: glowing dot + status label
@@ -1401,6 +1426,9 @@ input:focus-visible,select:focus-visible{outline-offset:0}
     var t=parseInt($('bleTimeoutInput').value,10);
     if(isNaN(t)||t<30||t>600){alert('Timeout must be 30–600 seconds');return}
     ws.send(JSON.stringify({cmd:'config',bleAddr:mac,bleTimeout:t}));
+  };
+  window.toggleBleEnabled=function(){
+    ws.send(JSON.stringify({cmd:'config',bleEnabled:$('bleEnableToggle').checked}));
   };
   window.toggleBleFeed=function(){
     ws.send(JSON.stringify({cmd:'config',bleFeed:$('bleFeedToggle').checked}));
