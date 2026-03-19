@@ -625,6 +625,8 @@ input:focus-visible,select:focus-visible{outline-offset:0}
   <div class="card" style="padding:0">
     <div class="collapse-header" onclick="togglePanel(this)" tabindex="0" role="button" aria-expanded="false">
       <span class="collapse-title">WiFi</span>
+      <span id="wifiStatusLabel" style="font-size:12px;color:var(--text2);font-weight:400"></span>
+      <span class="status-dot idle" id="wifiDot"></span>
       <span class="collapse-chevron">&#8250;</span>
     </div>
     <div class="collapse-body" id="wifiBody">
@@ -1326,6 +1328,17 @@ input:focus-visible,select:focus-visible{outline-offset:0}
     rssiVal.textContent=(s.rssi!=null?s.rssi:'--')+' dBm';
     wifiUptimeVal.textContent=s.wifiUptime?fmtUptime(s.wifiUptime):'--:--:--';
     uptimeVal.textContent=s.uptime!=null?fmtUptime(s.uptime):'--:--:--';
+
+    // WiFi header: dot + status label
+    var wifiLbl=$('wifiStatusLabel'),wifiDot=$('wifiDot');
+    if(s.rssi!=null){
+      var a=Math.abs(s.rssi);
+      if(a<=67){wifiDot.className='status-dot active';wifiLbl.textContent=s.rssi+' dBm';wifiLbl.style.color='var(--green)'}
+      else if(a<=90){wifiDot.className='status-dot warning';wifiLbl.textContent=s.rssi+' dBm';wifiLbl.style.color='var(--orange)'}
+      else{wifiDot.className='status-dot error';wifiLbl.textContent=s.rssi+' dBm';wifiLbl.style.color='var(--red)'}
+    }else{
+      wifiDot.className='status-dot idle';wifiLbl.textContent='Disconnected';wifiLbl.style.color='var(--text3)';
+    }
 
     if(s.tempUnit && s.tempUnit!==tempUnit && !locked){
       tempUnit=s.tempUnit;
