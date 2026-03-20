@@ -38,7 +38,7 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
     if (event_base == WIFI_EVENT) {
         switch (event_id) {
             case WIFI_EVENT_STA_CONNECTED:
-                LOG_INFO("[WiFi] STA connected to AP");
+                LOG_INFO("STA connected to AP");
                 break;
 
             case WIFI_EVENT_STA_DISCONNECTED: {
@@ -47,7 +47,7 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
                     xEventGroupClearBits(s_wifiEventGroup, CONNECTED_BIT);
                 }
                 if (!s_wifiScanning) {
-                    LOG_WARN("[WiFi] STA disconnected — reconnecting...");
+                    LOG_WARN("STA disconnected — reconnecting...");
                     esp_wifi_connect();
                 }
                 break;
@@ -59,7 +59,7 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
     } else if (event_base == IP_EVENT) {
         if (event_id == IP_EVENT_STA_GOT_IP) {
             ip_event_got_ip_t* event = static_cast<ip_event_got_ip_t*>(event_data);
-            LOG_INFO("[WiFi] Got IP: " IPSTR, IP2STR(&event->ip_info.ip));
+            LOG_INFO("Got IP: " IPSTR, IP2STR(&event->ip_info.ip));
             s_connected = true;
             if (s_wifiEventGroup) {
                 xEventGroupSetBits(s_wifiEventGroup, CONNECTED_BIT);
@@ -113,13 +113,13 @@ void WifiManager::init(const char* hostname, const char* apName, const char* apP
     ESP_ERROR_CHECK(esp_wifi_start());
     esp_wifi_set_ps(WIFI_PS_NONE);  // Disable power save — mains-powered, lower latency
 
-    LOG_INFO("[WiFi] Initialized (hostname=%s, AP=%s)", hostname ? hostname : "?", s_apName);
+    LOG_INFO("Initialized (hostname=%s, AP=%s)", hostname ? hostname : "?", s_apName);
 }
 
 bool WifiManager::connect(const char* ssid, const char* password)
 {
     if (!ssid || ssid[0] == '\0') {
-        LOG_ERROR("[WiFi] connect() called with empty SSID");
+        LOG_ERROR("connect() called with empty SSID");
         return false;
     }
 
@@ -144,11 +144,11 @@ bool WifiManager::connect(const char* ssid, const char* password)
 
     esp_err_t err = esp_wifi_connect();
     if (err != ESP_OK) {
-        LOG_ERROR("[WiFi] esp_wifi_connect() failed: %s", esp_err_to_name(err));
+        LOG_ERROR("esp_wifi_connect() failed: %s", esp_err_to_name(err));
         return false;
     }
 
-    LOG_INFO("[WiFi] Connecting to SSID: %s", ssid);
+    LOG_INFO("Connecting to SSID: %s", ssid);
     return true;
 }
 
@@ -216,7 +216,7 @@ void WifiManager::enableAP(const char* apName, const char* apPassword)
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap_config));
 
     s_apActive = true;
-    LOG_INFO("[WiFi] AP enabled: %s", apName);
+    LOG_INFO("AP enabled: %s", apName);
 }
 
 void WifiManager::disableAP()
@@ -225,7 +225,7 @@ void WifiManager::disableAP()
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     s_apActive = false;
-    LOG_INFO("[WiFi] AP disabled");
+    LOG_INFO("AP disabled");
 }
 
 bool WifiManager::isAPActive()
@@ -240,7 +240,7 @@ bool WifiManager::loadCredentials(char* ssid, size_t ssidLen, char* password, si
     nvs_handle_t handle;
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &handle);
     if (err != ESP_OK) {
-        LOG_DEBUG("[WiFi] No saved credentials (nvs_open: %s)", esp_err_to_name(err));
+        LOG_DEBUG("No saved credentials (nvs_open: %s)", esp_err_to_name(err));
         return false;
     }
 
@@ -268,7 +268,7 @@ void WifiManager::saveCredentials(const char* ssid, const char* password)
     nvs_handle_t handle;
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle);
     if (err != ESP_OK) {
-        LOG_ERROR("[WiFi] Failed to open NVS for writing: %s", esp_err_to_name(err));
+        LOG_ERROR("Failed to open NVS for writing: %s", esp_err_to_name(err));
         return;
     }
 
@@ -277,7 +277,7 @@ void WifiManager::saveCredentials(const char* ssid, const char* password)
     nvs_commit(handle);
     nvs_close(handle);
 
-    LOG_INFO("[WiFi] Credentials saved (SSID: %s)", ssid);
+    LOG_INFO("Credentials saved (SSID: %s)", ssid);
 }
 
 void WifiManager::eraseCredentials()
@@ -285,7 +285,7 @@ void WifiManager::eraseCredentials()
     nvs_handle_t handle;
     esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle);
     if (err != ESP_OK) {
-        LOG_ERROR("[WiFi] Failed to open NVS for erase: %s", esp_err_to_name(err));
+        LOG_ERROR("Failed to open NVS for erase: %s", esp_err_to_name(err));
         return;
     }
 
@@ -293,7 +293,7 @@ void WifiManager::eraseCredentials()
     nvs_commit(handle);
     nvs_close(handle);
 
-    LOG_WARN("[WiFi] Credentials erased");
+    LOG_WARN("Credentials erased");
 }
 
 // ── WiFi scanning ──────────────────────────────────────────────────────────
@@ -303,10 +303,10 @@ static void resumeStaConnection()
 {
     wifi_config_t cfg = {};
     if (esp_wifi_get_config(WIFI_IF_STA, &cfg) == ESP_OK && cfg.sta.ssid[0] != '\0') {
-        LOG_DEBUG("[WiFi] Resuming STA connection after scan");
+        LOG_DEBUG("Resuming STA connection after scan");
         esp_err_t err = esp_wifi_connect();
         if (err != ESP_OK) {
-            LOG_WARN("[WiFi] Failed to resume connection: %s", esp_err_to_name(err));
+            LOG_WARN("Failed to resume connection: %s", esp_err_to_name(err));
         }
     }
 }
@@ -329,7 +329,7 @@ int WifiManager::scanNetworks(ScannedNetwork* results, int maxResults)
     esp_err_t err = esp_wifi_scan_start(&scanConf, true);  // blocking scan
     if (!wasConnected) s_wifiScanning = false;
     if (err != ESP_OK) {
-        LOG_ERROR("[WiFi] Scan failed: %s", esp_err_to_name(err));
+        LOG_ERROR("Scan failed: %s", esp_err_to_name(err));
         if (!wasConnected) resumeStaConnection();
         return 0;
     }
@@ -379,7 +379,7 @@ int WifiManager::scanNetworks(ScannedNetwork* results, int maxResults)
         }
     }
 
-    LOG_INFO("[WiFi] Scan found %d unique networks", count);
+    LOG_INFO("Scan found %d unique networks", count);
     if (!wasConnected) resumeStaConnection();
     return count;
 }

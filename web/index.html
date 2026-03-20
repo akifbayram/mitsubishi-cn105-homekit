@@ -62,7 +62,7 @@ body{
 .header{
   position:sticky;top:0;z-index:100;
   display:flex;align-items:center;justify-content:space-between;
-  padding:12px 16px;margin:0 -16px 0px;
+  padding:12px 16px;margin:0 -16px;
   background:var(--bg);
 }
 .header-left{display:flex;align-items:baseline;gap:6px}
@@ -79,8 +79,9 @@ body{
   width:34px;height:34px;border:none;border-radius:50%;
   background:var(--seg-bg);cursor:pointer;display:flex;
   align-items:center;justify-content:center;color:var(--text2);padding:0;
-  transition:transform .15s;
+  transition:transform .15s,background .15s;
 }
+.theme-toggle:hover{background:var(--surface2)}
 .theme-toggle:active{transform:scale(.88)}
 .theme-toggle svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 .icon-moon{display:none}
@@ -110,7 +111,6 @@ body{
   font-family:inherit;
 }
 .seg button.active{font-weight:600}
-#wideVaneGrp button{font-size:13px}
 .seg button:active{opacity:.6}
 .seg .seg-bg{
   position:absolute;top:2px;height:calc(100% - 4px);
@@ -146,7 +146,7 @@ body{
 .slider-row{display:flex;align-items:center;gap:8px}
 .slider-row input[type=range]{flex:1}
 .temp-step{
-  width:36px;height:36px;border:none;border-radius:50%;
+  width:40px;height:40px;border:none;border-radius:50%;
   background:var(--seg-bg);color:var(--text);font-size:18px;font-weight:400;
   cursor:pointer;display:flex;align-items:center;justify-content:center;
   transition:all .15s;flex-shrink:0;user-select:none;-webkit-user-select:none;
@@ -191,7 +191,7 @@ input[type=range]::-moz-range-thumb{
   padding:0 16px;max-height:0;overflow:hidden;
   transition:max-height .35s cubic-bezier(.4,0,.2,1),padding .35s cubic-bezier(.4,0,.2,1);
 }
-.collapse-body.open{max-height:700px;padding:0 16px 16px}
+.collapse-body.open{max-height:800px;padding:0 16px 16px}
 #wifiBody.open{max-height:1200px}
 
 /* ── Status Grid ───────────────────────────────────────────────────────── */
@@ -233,6 +233,7 @@ input[type=range]::-moz-range-thumb{
 .ble-config-row{display:flex;align-items:center;justify-content:space-between;gap:12px}
 .ble-config-row .status-label{color:var(--text)}
 .ble-scan-item{display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--seg-bg);border-radius:var(--radius-sm);cursor:pointer;margin-bottom:4px;transition:background .15s}
+.ble-scan-item:hover{background:var(--surface2)}
 .ble-scan-item:active{background:var(--surface3)}
 .ble-scan-item .scan-info{flex:1;min-width:0}
 .ble-scan-item .scan-type{font-size:13px;font-weight:500}
@@ -249,8 +250,9 @@ input[type=range]::-moz-range-thumb{
   width:28px;height:28px;border:none;border-radius:50%;
   background:var(--seg-bg);color:var(--text2);cursor:pointer;
   display:flex;align-items:center;justify-content:center;padding:0;
-  transition:transform .15s;
+  transition:transform .15s,background .15s;
 }
+.refresh-btn:hover{background:var(--surface2)}
 .refresh-btn:active{transform:scale(.88)}
 .refresh-btn svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 .refresh-btn.spin svg{animation:wifi-spin .8s linear infinite}
@@ -262,7 +264,8 @@ input[type=range]::-moz-range-thumb{
   -webkit-user-select:none;user-select:none;
 }
 .net-row:last-child{border-bottom:none}
-.net-row:active{background:var(--seg-bg);border-radius:var(--radius-sm)}
+.net-row:hover{background:var(--seg-bg);border-radius:var(--radius-sm)}
+.net-row:active{background:var(--surface2);border-radius:var(--radius-sm)}
 .net-row.selected .net-name{color:var(--accent);font-weight:600}
 .net-name{flex:1;font-size:14px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .net-signal{display:flex;align-items:flex-end;gap:1.5px;width:14px;height:11px;flex-shrink:0}
@@ -304,22 +307,25 @@ input[type=range]::-moz-range-thumb{
   cursor:pointer;margin-top:8px;font-family:inherit;
   transition:transform .15s,opacity .15s;
 }
+.save-btn:hover{opacity:.9}
 .save-btn:active{transform:scale(.97);opacity:.8}
 .save-btn:disabled{opacity:.4;cursor:default}
+.save-btn:disabled:hover{opacity:.4}
 
 /* ── Log Panel ─────────────────────────────────────────────────────────── */
 .log-toolbar{display:flex;gap:8px;margin-bottom:8px}
 .log-btn{
   flex:1;padding:12px;border:none;border-radius:var(--radius-sm);
   background:var(--seg-bg);color:var(--text2);font-size:15px;font-weight:600;cursor:pointer;
-  font-family:inherit;transition:transform .15s,opacity .15s;
+  font-family:inherit;transition:transform .15s,opacity .15s,background .15s;
 }
+.log-btn:hover{background:var(--surface2)}
 .log-btn:active{transform:scale(.97);opacity:.8}
 .log-box{
-  background:var(--bg);border:0.5px solid var(--border);border-radius:var(--radius-sm);
+  background:#1C1C2E;border:0.5px solid var(--border);border-radius:var(--radius-sm);
   padding:10px;height:200px;overflow-y:auto;
   font-family:'SF Mono',Menlo,Monaco,Consolas,monospace;font-size:11px;
-  line-height:1.6;color:var(--text2);white-space:pre-wrap;word-break:break-all;
+  line-height:1.6;color:#D4D4D8;white-space:pre-wrap;word-break:break-all;
 }
 
 /* ── HomeKit Label ─────────────────────────────────────────────────────── */
@@ -554,7 +560,7 @@ input:focus-visible,select:focus-visible{outline-offset:0}
         </div>
       </div>
       <div class="ble-help" id="bleTimeoutHelp">Falls back to the internal sensor if no reading arrives within this time. Increase for sensors with slow update intervals.</div>
-      <hr class="ble-config-sep" id="bleConfigSep">
+      <hr class="ble-config-sep" id="bleSettingsSep">
       <div id="bleBanner" class="ble-banner" style="display:none;margin-top:10px"></div>
       <!-- Status grid -->
       <div class="status-grid" id="bleStatusGrid" style="margin-top:10px">
@@ -1185,7 +1191,6 @@ input:focus-visible,select:focus-visible{outline-offset:0}
           tempSlider.value=s.target;
           sliderVal.textContent=s.target.toFixed(1);
         }
-
       }
 
       if(s.mode==='auto'&&s.connected&&s.power){
@@ -1263,6 +1268,7 @@ input:focus-visible,select:focus-visible{outline-offset:0}
       // Hide all BLE content when disabled
       var bleGrid=$('bleStatusGrid');
       var bleSep=$('bleConfigSep');
+      var bleSettingSep=$('bleSettingsSep');
       var bleConfig=$('bleConfigDiv');
       $('bleFeedRow').style.display=bleOn?'':'none';
       $('bleFeedHelp').style.display=bleOn?'':'none';
@@ -1270,6 +1276,7 @@ input:focus-visible,select:focus-visible{outline-offset:0}
       $('bleTimeoutHelp').style.display=bleOn?'':'none';
       bleGrid.style.display=bleOn?'':'none';
       bleSep.style.display=bleOn?'':'none';
+      if(bleSettingSep)bleSettingSep.style.display=bleOn?'':'none';
       bleConfig.style.display=bleOn?'':'none';
       var bleDot=$('bleDot');
       var banner=$('bleBanner');
@@ -1391,7 +1398,6 @@ input:focus-visible,select:focus-visible{outline-offset:0}
       configureSliders();
       var label=unitStr();
       for(var i=0;i<unitLabels.length;i++) unitLabels[i].textContent=label;
-  
     }
 
     if(s.deviceName){
@@ -1470,7 +1476,7 @@ input:focus-visible,select:focus-visible{outline-offset:0}
   // ── Log handler ────────────────────────────────────────────────────────────
   function onLog(msg){
     var atBottom=logBox.scrollHeight-logBox.scrollTop-logBox.clientHeight<30;
-    var line=document.createTextNode(msg+'\n');
+    var line=document.createTextNode(msg);
     logBox.appendChild(line);
     while(logBox.childNodes.length>MAX_LOG_LINES){
       logBox.removeChild(logBox.firstChild);
@@ -1681,7 +1687,6 @@ input:focus-visible,select:focus-visible{outline-offset:0}
       setSliderAttrs(heatSlider,16,31,0.5,heatSlider.min==61?fToCTable(parseFloat(heatSlider.value)):parseFloat(heatSlider.value));
       setSliderAttrs(coolSlider,16,31,0.5,coolSlider.min==61?fToCTable(parseFloat(coolSlider.value)):parseFloat(coolSlider.value));
     }
-
   }
 
   window.stepTemp=function(dir){
@@ -1692,7 +1697,6 @@ input:focus-visible,select:focus-visible{outline-offset:0}
     tempSlider.value=nv;
     onSliderInput();
     onSliderChange();
-
   };
 
   window.onSliderInput=function(){
@@ -1711,7 +1715,6 @@ input:focus-visible,select:focus-visible{outline-offset:0}
     sliderVal.textContent=display;
     targetTemp.textContent=display;
     send({cmd:'set',target:celsius});
-
   };
 
   heatSlider.oninput=function(){

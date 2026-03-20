@@ -24,9 +24,9 @@ esp_err_t WebUI::handleWebSocket(httpd_req_t *req) {
         int fd = httpd_req_to_sockfd(req);
         int oldFd = webUI._wsClientFd.exchange(fd);
         if (oldFd >= 0 && oldFd != fd) {
-            LOG_INFO("[WebUI] Replacing WS client fd=%d with fd=%d", oldFd, fd);
+            LOG_INFO("Replacing WS client fd=%d with fd=%d", oldFd, fd);
         } else {
-            LOG_INFO("[WebUI] WebSocket client connected (fd=%d)", fd);
+            LOG_INFO("WebSocket client connected (fd=%d)", fd);
         }
         // Push initial state immediately after connection
         webUI.pushState();
@@ -50,13 +50,13 @@ esp_err_t WebUI::handleWebSocket(httpd_req_t *req) {
 
     // Allocate buffer and receive payload
     if (frame.len > 1024) {
-        LOG_WARN("[WebUI] WS frame too large (%d bytes), ignoring", (int)frame.len);
+        LOG_WARN("WS frame too large (%d bytes), ignoring", (int)frame.len);
         return ESP_OK;
     }
 
     uint8_t *buf = (uint8_t *)malloc(frame.len + 1);
     if (!buf) {
-        LOG_ERROR("[WebUI] Failed to allocate WS receive buffer");
+        LOG_ERROR("Failed to allocate WS receive buffer");
         return ESP_ERR_NO_MEM;
     }
 
@@ -71,7 +71,7 @@ esp_err_t WebUI::handleWebSocket(httpd_req_t *req) {
     buf[frame.len] = '\0';
 
     if (frame.type == HTTPD_WS_TYPE_TEXT) {
-        LOG_DEBUG("[WebUI] WS received: %s", (char *)buf);
+        LOG_DEBUG("WS received: %s", (char *)buf);
         webUI.handleWsMessage(req, (const char *)buf);
     }
 
@@ -86,7 +86,7 @@ esp_err_t WebUI::handleWebSocket(httpd_req_t *req) {
 void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
     char cmd[16] = {0};
     if (!jsonGetString(msg, "cmd", cmd, sizeof(cmd))) {
-        LOG_WARN("[WebUI] WS message missing 'cmd' field");
+        LOG_WARN("WS message missing 'cmd' field");
         return;
     }
 
@@ -96,7 +96,7 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
 
         bool boolVal;
         if (jsonGetBool(msg, "power", &boolVal)) {
-            LOG_INFO("[WebUI] Set power=%s", boolVal ? "ON" : "OFF");
+            LOG_INFO("Set power=%s", boolVal ? "ON" : "OFF");
             _ctrl->setPower(boolVal);
             hasControlChange = true;
         }
@@ -104,35 +104,35 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
         char strVal[16];
         if (jsonGetString(msg, "mode", strVal, sizeof(strVal))) {
             uint8_t mode = strToMode(strVal);
-            LOG_INFO("[WebUI] Set mode=%s (0x%02X)", strVal, mode);
+            LOG_INFO("Set mode=%s (0x%02X)", strVal, mode);
             _ctrl->setMode(mode);
             hasControlChange = true;
         }
 
         float floatVal;
         if (jsonGetFloat(msg, "target", &floatVal)) {
-            LOG_INFO("[WebUI] Set target=%.1f", floatVal);
+            LOG_INFO("Set target=%.1f", floatVal);
             _ctrl->setTargetTemp(floatVal);
             hasControlChange = true;
         }
 
         if (jsonGetString(msg, "fan", strVal, sizeof(strVal))) {
             uint8_t fan = strToFan(strVal);
-            LOG_INFO("[WebUI] Set fan=%s (0x%02X)", strVal, fan);
+            LOG_INFO("Set fan=%s (0x%02X)", strVal, fan);
             _ctrl->setFanSpeed(fan);
             hasControlChange = true;
         }
 
         if (jsonGetString(msg, "vane", strVal, sizeof(strVal))) {
             uint8_t vane = strToVane(strVal);
-            LOG_INFO("[WebUI] Set vane=%s (0x%02X)", strVal, vane);
+            LOG_INFO("Set vane=%s (0x%02X)", strVal, vane);
             _ctrl->setVane(vane);
             hasControlChange = true;
         }
 
         if (jsonGetString(msg, "wideVane", strVal, sizeof(strVal))) {
             uint8_t wv = strToWideVane(strVal);
-            LOG_INFO("[WebUI] Set wideVane=%s (0x%02X)", strVal, wv);
+            LOG_INFO("Set wideVane=%s (0x%02X)", strVal, wv);
             _ctrl->setWideVane(wv);
             hasControlChange = true;
         }
@@ -147,13 +147,13 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
             heatT = std::clamp(heatT, CN105_TEMP_MIN, CN105_TEMP_MAX);
             settings.get().heatingThreshold = heatT;
             heatSet = true;
-            LOG_INFO("[WebUI] Set heatingThreshold=%.1f", heatT);
+            LOG_INFO("Set heatingThreshold=%.1f", heatT);
         }
         if (jsonGetFloat(msg, "coolThresh", &coolT)) {
             coolT = std::clamp(coolT, CN105_TEMP_MIN, CN105_TEMP_MAX);
             settings.get().coolingThreshold = coolT;
             coolSet = true;
-            LOG_INFO("[WebUI] Set coolingThreshold=%.1f", coolT);
+            LOG_INFO("Set coolingThreshold=%.1f", coolT);
         }
         if (heatSet || coolSet) {
             // Enforce minimum 2 deg C gap (bidirectional)
@@ -189,7 +189,7 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
                 settings.get().logLevel = (LogLevel)intVal;
                 currentLogLevel = (LogLevel)intVal;
                 logging_set_level((LogLevel)intVal);
-                LOG_INFO("[WebUI] Config logLevel=%d", intVal);
+                LOG_INFO("Config logLevel=%d", intVal);
                 changed = true;
             }
         }
@@ -198,7 +198,7 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
             if (intVal >= 500 && intVal <= 30000) {
                 settings.get().pollMs = (uint32_t)intVal;
                 _ctrl->setUpdateInterval((uint32_t)intVal);
-                LOG_INFO("[WebUI] Config pollInterval=%d", intVal);
+                LOG_INFO("Config pollInterval=%d", intVal);
                 changed = true;
             }
         }
@@ -206,7 +206,7 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
         if (jsonGetInt(msg, "vaneConfig", &intVal)) {
             if (intVal >= 0 && intVal <= 2) {
                 settings.get().vaneConfig = (uint8_t)intVal;
-                LOG_INFO("[WebUI] Config vaneConfig=%d", intVal);
+                LOG_INFO("Config vaneConfig=%d", intVal);
                 changed = true;
             }
         }
@@ -215,7 +215,7 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
         if (jsonGetString(msg, "tempUnit", unitVal, sizeof(unitVal))) {
             bool useF = (strcmp(unitVal, "F") == 0);
             settings.get().useFahrenheit = useF;
-            LOG_INFO("[WebUI] Config tempUnit=%s", useF ? "F" : "C");
+            LOG_INFO("Config tempUnit=%s", useF ? "F" : "C");
             changed = true;
         }
 
@@ -233,7 +233,7 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
             }
             strncpy(settings.get().deviceName, start, sizeof(settings.get().deviceName) - 1);
             settings.get().deviceName[sizeof(settings.get().deviceName) - 1] = '\0';
-            LOG_INFO("[WebUI] Config deviceName=%s", settings.get().deviceName);
+            LOG_INFO("Config deviceName=%s", settings.get().deviceName);
             changed = true;
         }
 
@@ -241,20 +241,20 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
         bool bleEnabledVal;
         if (jsonGetBool(msg, "bleEnabled", &bleEnabledVal)) {
             BleSensor::setBleEnabled(bleEnabledVal);
-            LOG_INFO("[WebUI] Config bleEnabled=%s", bleEnabledVal ? "ON" : "OFF");
+            LOG_INFO("Config bleEnabled=%s", bleEnabledVal ? "ON" : "OFF");
             pushState();
         }
 
         char bleAddrVal[18];
         if (jsonGetString(msg, "bleAddr", bleAddrVal, sizeof(bleAddrVal))) {
             BleSensor::setAddr(bleAddrVal);
-            LOG_INFO("[WebUI] Config bleAddr=%s", bleAddrVal);
+            LOG_INFO("Config bleAddr=%s", bleAddrVal);
         }
 
         bool bleFeedVal;
         if (jsonGetBool(msg, "bleFeed", &bleFeedVal)) {
             BleSensor::setEnabled(bleFeedVal);
-            LOG_INFO("[WebUI] Config bleFeed=%s", bleFeedVal ? "ON" : "OFF");
+            LOG_INFO("Config bleFeed=%s", bleFeedVal ? "ON" : "OFF");
         }
 
         int bleTimeoutVal;
@@ -262,7 +262,7 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
             if (bleTimeoutVal >= 30 && bleTimeoutVal <= 600) {
                 settings.get().bleStaleTimeoutS = (uint16_t)bleTimeoutVal;
                 settings.save();
-                LOG_INFO("[WebUI] Config bleTimeout=%ds", bleTimeoutVal);
+                LOG_INFO("Config bleTimeout=%ds", bleTimeoutVal);
             }
         }
 #endif
@@ -276,10 +276,10 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
     } else if (strcmp(cmd, "bleScan") == 0) {
 #ifdef BLE_ENABLE
         if (!BleSensor::isBleEnabled()) {
-            LOG_WARN("[WebUI] BLE scan rejected — BLE not enabled");
+            LOG_WARN("BLE scan rejected — BLE not enabled");
         } else if (!BleSensor::isDiscovering()) {
             BleSensor::startDiscovery();
-            LOG_INFO("[WebUI] BLE discovery scan requested");
+            LOG_INFO("BLE discovery scan requested");
         }
 #endif
 
@@ -295,20 +295,20 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
         sendWsText(httpd_req_to_sockfd(req), "{\"type\":\"wifiSaved\"}");
 
     } else if (strcmp(cmd, "restart") == 0) {
-        LOG_INFO("[WebUI] Restart requested");
+        LOG_INFO("Restart requested");
         sendWsText(httpd_req_to_sockfd(req), "{\"type\":\"info\",\"msg\":\"Restarting...\"}");
         vTaskDelay(pdMS_TO_TICKS(500));
         esp_restart();
 
     } else if (strcmp(cmd, "hkReset") == 0) {
-        LOG_WARN("[WebUI] HomeKit pairing reset requested");
+        LOG_WARN("HomeKit pairing reset requested");
         sendWsText(httpd_req_to_sockfd(req), "{\"type\":\"info\",\"msg\":\"Removing HomeKit pairings...\"}");
         homekit_reset_pairings();
         vTaskDelay(pdMS_TO_TICKS(500));
         esp_restart();
 
     } else {
-        LOG_WARN("[WebUI] Unknown command: %s", cmd);
+        LOG_WARN("Unknown command: %s", cmd);
     }
 }
 
@@ -341,7 +341,7 @@ void WebUI::sendWsText(int fd, const char *text) {
         // Atomic CAS: only clear if fd hasn't been replaced by a new client.
         int expected = fd;
         _wsClientFd.compare_exchange_strong(expected, -1);
-        LOG_WARN("[WebUI] Failed to send WS frame to fd=%d: %d, client cleared", fd, ret);
+        LOG_WARN("Failed to send WS frame to fd=%d: %d, client cleared", fd, ret);
     }
 }
 
@@ -498,7 +498,7 @@ void WebUI::pushState() {
     n += snprintf(buf + n, sizeof(buf) - n, "}");
 
     if (n >= (int)sizeof(buf)) {
-        LOG_WARN("[WebUI] pushState buffer truncated (%d >= %zu), skipping send", n, sizeof(buf));
+        LOG_WARN("pushState buffer truncated (%d >= %zu), skipping send", n, sizeof(buf));
         return;
     }
 
@@ -573,7 +573,7 @@ void WebUI::loop() {
         if (fd < 0) return;
         httpd_ws_client_info_t info = httpd_ws_get_fd_info(_server, fd);
         if (info != HTTPD_WS_CLIENT_WEBSOCKET) {
-            LOG_INFO("[WebUI] Dead WS client detected (fd=%d), cleaning up", fd);
+            LOG_INFO("Dead WS client detected (fd=%d), cleaning up", fd);
             int expected = fd;
             _wsClientFd.compare_exchange_strong(expected, -1);
             return;
@@ -583,7 +583,7 @@ void WebUI::loop() {
         ping.type = HTTPD_WS_TYPE_PING;
         esp_err_t ret = httpd_ws_send_frame_async(_server, fd, &ping);
         if (ret != ESP_OK) {
-            LOG_WARN("[WebUI] Ping failed (fd=%d): %d, cleaning up", fd, ret);
+            LOG_WARN("Ping failed (fd=%d): %d, cleaning up", fd, ret);
             int expected = fd;
             _wsClientFd.compare_exchange_strong(expected, -1);
             return;

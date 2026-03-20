@@ -44,14 +44,14 @@ void CN105Controller::begin(UartInterface *uart) {
     _initialConnectDone = false;
     _connectRetries = 0;
     _lastSuccessfulResponse = 0;
-    LOG_INFO("[CN105] Controller initialized, waiting for connection...");
+    LOG_INFO("Controller initialized, waiting for connection...");
 }
 
 #ifndef UNIT_TEST
 void CN105Controller::startTask(int priority, int stackSize) {
     if (_taskHandle) return;
     xTaskCreate(taskFunc, "cn105", stackSize, this, priority, &_taskHandle);
-    LOG_INFO("[CN105] Started dedicated UART task (priority=%d, stack=%d)", priority, stackSize);
+    LOG_INFO("Started dedicated UART task (priority=%d, stack=%d)", priority, stackSize);
 }
 
 void CN105Controller::taskFunc(void *arg) {
@@ -113,14 +113,14 @@ void CN105Controller::loop() {
     if (!_state.connected) {
         if (now - _lastConnectAttempt >= CN105_CONNECT_INTERVAL) {
             if (_connectRetries < CN105_MAX_CONNECT_RETRIES) {
-                LOG_INFO("[CN105] Sending connect packet (attempt %d/%d)",
+                LOG_INFO("Sending connect packet (attempt %d/%d)",
                          _connectRetries + 1, CN105_MAX_CONNECT_RETRIES);
                 sendConnectPacket();
                 _lastConnectAttempt = now;
                 _connectRetries++;
             } else {
                 if (now - _lastConnectAttempt >= CN105_CONNECT_INTERVAL * 3) {
-                    LOG_WARN("[CN105] Max retries reached, resetting connect counter");
+                    LOG_WARN("Max retries reached, resetting connect counter");
                     _connectRetries = 0;
                 }
             }
@@ -130,7 +130,7 @@ void CN105Controller::loop() {
 
     // ── Send pending changes (priority over polling, only outside a cycle) ──
     if ((_setFlags1 != 0 || _setFlags2 != 0) && !_cycleRunning) {
-        LOG_INFO("[CN105] Sending pending set command (flags=0x%02X flags2=0x%02X)", _setFlags1, _setFlags2);
+        LOG_INFO("Sending pending set command (flags=0x%02X flags2=0x%02X)", _setFlags1, _setFlags2);
         sendSetPacket();
         _setFlags1 = 0;
         _setFlags2 = 0;
@@ -149,7 +149,7 @@ void CN105Controller::loop() {
     // ── Cycle-based polling ─────────────────────────────────────────────────
     if (_cycleRunning) {
         if (now - _cycleStartMs > (2 * _updateInterval) + 1000) {
-            LOG_WARN("[CN105] Poll cycle TIMEOUT after %lums (phase %d/%d)",
+            LOG_WARN("Poll cycle TIMEOUT after %lums (phase %d/%d)",
                      (unsigned long)(now - _cycleStartMs), _pollPhase, CN105_POLL_PHASE_COUNT);
             _cycleRunning = false;
             _awaitingResponse = false;
@@ -159,7 +159,7 @@ void CN105Controller::loop() {
                 POLL_TYPES[_pollPhase] == CN105_INFO_ERRORCODE) {
                 _errorPollFailures++;
                 if (_errorPollFailures >= 3) {
-                    LOG_WARN("[CN105] Disabling 0x04 error code polling (3 consecutive timeouts)");
+                    LOG_WARN("Disabling 0x04 error code polling (3 consecutive timeouts)");
                     _errorPollDisabled = true;
                 }
             }
@@ -167,7 +167,7 @@ void CN105Controller::loop() {
     } else {
         if (now >= _lastCycleEnd &&
             (now - _lastCycleEnd) >= _updateInterval) {
-            LOG_DEBUG("[CN105] Starting new poll cycle");
+            LOG_DEBUG("Starting new poll cycle");
             _cycleRunning = true;
             _cycleStartMs = now;
             _pollPhase = 0;
@@ -186,7 +186,7 @@ void CN105Controller::loop() {
     uint32_t nowMs = uptime_ms();
     if (_lastSuccessfulResponse > 0 &&
         (nowMs - _lastSuccessfulResponse) > CN105_COMMS_TIMEOUT) {
-        LOG_ERROR("[CN105] COMMUNICATION LOST! No response for %lums (timeout=%dms)",
+        LOG_ERROR("COMMUNICATION LOST! No response for %lums (timeout=%dms)",
                   (unsigned long)(nowMs - _lastSuccessfulResponse), CN105_COMMS_TIMEOUT);
         _state.connected = false;
         _initialConnectDone = false;
@@ -201,7 +201,7 @@ void CN105Controller::loop() {
 // ════════════════════════════════════════════════════════════════════════════
 
 void CN105Controller::setPower(bool on) {
-    LOG_INFO("[CN105] CMD: setPower(%s)", on ? "ON" : "OFF");
+    LOG_INFO("CMD: setPower(%s)", on ? "ON" : "OFF");
     _setFlags1 |= CN105_FLAG_POWER;
     _pendingPower = on;
     _wanted.hasPower = true;
@@ -211,7 +211,7 @@ void CN105Controller::setPower(bool on) {
 }
 
 void CN105Controller::setMode(uint8_t mode) {
-    LOG_INFO("[CN105] CMD: setMode(%s / 0x%02X)", modeToLogStr(mode), mode);
+    LOG_INFO("CMD: setMode(%s / 0x%02X)", modeToLogStr(mode), mode);
     _setFlags1 |= CN105_FLAG_MODE;
     _pendingMode = mode;
     _wanted.hasMode = true;
@@ -222,7 +222,7 @@ void CN105Controller::setMode(uint8_t mode) {
 
 void CN105Controller::setTargetTemp(float tempC) {
     float clamped = std::clamp(tempC, CN105_TEMP_MIN, CN105_TEMP_MAX);
-    LOG_INFO("[CN105] CMD: setTargetTemp(%.1f%sC)", clamped, "\xC2\xB0");
+    LOG_INFO("CMD: setTargetTemp(%.1f%sC)", clamped, "\xC2\xB0");
     _setFlags1 |= CN105_FLAG_TEMP;
     _pendingTemp = clamped;
     _wanted.hasTemp = true;
@@ -232,7 +232,7 @@ void CN105Controller::setTargetTemp(float tempC) {
 }
 
 void CN105Controller::setFanSpeed(uint8_t speed) {
-    LOG_INFO("[CN105] CMD: setFanSpeed(%s / 0x%02X)", fanToLogStr(speed), speed);
+    LOG_INFO("CMD: setFanSpeed(%s / 0x%02X)", fanToLogStr(speed), speed);
     _setFlags1 |= CN105_FLAG_FAN;
     _pendingFan = speed;
     _wanted.hasFan = true;
@@ -242,7 +242,7 @@ void CN105Controller::setFanSpeed(uint8_t speed) {
 }
 
 void CN105Controller::setVane(uint8_t position) {
-    LOG_INFO("[CN105] CMD: setVane(%s / 0x%02X)", vaneToLogStr(position), position);
+    LOG_INFO("CMD: setVane(%s / 0x%02X)", vaneToLogStr(position), position);
     _setFlags1 |= CN105_FLAG_VANE;
     _pendingVane = position;
     _wanted.hasVane = true;
@@ -252,7 +252,7 @@ void CN105Controller::setVane(uint8_t position) {
 }
 
 void CN105Controller::setWideVane(uint8_t position) {
-    LOG_INFO("[CN105] CMD: setWideVane(%s / 0x%02X)", wideVaneToLogStr(position), position);
+    LOG_INFO("CMD: setWideVane(%s / 0x%02X)", wideVaneToLogStr(position), position);
     _setFlags2 |= CN105_FLAG2_WVANE;
     _pendingWideVane = position;
     _wanted.hasWideVane = true;
@@ -268,12 +268,12 @@ void CN105Controller::sendPendingChanges() {
     // commands while it's processing INFO_REQ/RESP exchanges.  Leave the
     // pending flags set; cn105.loop() will send once the cycle completes.
     if (_cycleRunning) {
-        LOG_DEBUG("[CN105] Deferring pending changes (cycle running, flags=0x%02X flags2=0x%02X)",
+        LOG_DEBUG("Deferring pending changes (cycle running, flags=0x%02X flags2=0x%02X)",
                   _setFlags1, _setFlags2);
         return;
     }
 
-    LOG_INFO("[CN105] Flushing pending changes (flags=0x%02X flags2=0x%02X)", _setFlags1, _setFlags2);
+    LOG_INFO("Flushing pending changes (flags=0x%02X flags2=0x%02X)", _setFlags1, _setFlags2);
     sendSetPacket();
     _setFlags1 = 0;
     _setFlags2 = 0;
@@ -283,7 +283,7 @@ void CN105Controller::sendPendingChanges() {
 void CN105Controller::sendRemoteTemperature(float tempC) {
     _pendingRemoteTemp = true;
     _pendingRemoteTempC = tempC;
-    LOG_INFO("[CN105] CMD: sendRemoteTemperature(%.1f%sC)", tempC, "\xC2\xB0");
+    LOG_INFO("CMD: sendRemoteTemperature(%.1f%sC)", tempC, "\xC2\xB0");
 }
 
 void CN105Controller::sendRemoteTempPacket() {
@@ -313,10 +313,10 @@ void CN105Controller::sendRemoteTempPacket() {
     pkt[21] = calcChecksum(pkt, 21);
     if (currentLogLevel >= LOG_LEVEL_DEBUG) {
         char hex[128]; logHex(hex, sizeof(hex), pkt, 22);
-        LOG_DEBUG("[CN105] TX REMOTE_TEMP (%d bytes): %s", 22, hex);
+        LOG_DEBUG("TX REMOTE_TEMP (%d bytes): %s", 22, hex);
     }
     _uart->write(pkt, 22);
-    LOG_INFO("[CN105] Remote temp %s (%.1f%sC)", tempC > 0.0f ? "SET" : "REVERTED", tempC, "\xC2\xB0");
+    LOG_INFO("Remote temp %s (%.1f%sC)", tempC > 0.0f ? "SET" : "REVERTED", tempC, "\xC2\xB0");
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -345,7 +345,7 @@ void CN105Controller::sendConnectPacket() {
 
     if (currentLogLevel >= LOG_LEVEL_DEBUG) {
         char hex[64]; logHex(hex, sizeof(hex), CONNECT_PKT, sizeof(CONNECT_PKT));
-        LOG_DEBUG("[CN105] TX CONNECT (%d bytes): %s", (int)sizeof(CONNECT_PKT), hex);
+        LOG_DEBUG("TX CONNECT (%d bytes): %s", (int)sizeof(CONNECT_PKT), hex);
     }
     _uart->write(CONNECT_PKT, sizeof(CONNECT_PKT));
 }
@@ -365,7 +365,7 @@ void CN105Controller::sendInfoRequest(uint8_t infoType) {
         else if (infoType == CN105_INFO_STANDBY) typeStr = "STANDBY";
         else if (infoType == CN105_INFO_ERRORCODE) typeStr = "ERRORCODE";
         char hex[128]; logHex(hex, sizeof(hex), pkt, 22);
-        LOG_DEBUG("[CN105] TX INFO_REQ type=%s phase=%d/%d (%d bytes): %s",
+        LOG_DEBUG("TX INFO_REQ type=%s phase=%d/%d (%d bytes): %s",
                   typeStr, _pollPhase + 1, CN105_POLL_PHASE_COUNT, 22, hex);
     }
     _uart->write(pkt, 22);
@@ -381,12 +381,12 @@ void CN105Controller::sendSetPacket() {
 
     if (_setFlags1 & CN105_FLAG_POWER) {
         pkt[8] = _pendingPower ? CN105_POWER_ON : CN105_POWER_OFF;
-        LOG_INFO("[CN105] SET power=%s", _pendingPower ? "ON" : "OFF");
+        LOG_INFO("SET power=%s", _pendingPower ? "ON" : "OFF");
     }
 
     if (_setFlags1 & CN105_FLAG_MODE) {
         pkt[9] = _pendingMode;
-        LOG_INFO("[CN105] SET mode=%s (0x%02X)", modeToLogStr(_pendingMode), _pendingMode);
+        LOG_INFO("SET mode=%s (0x%02X)", modeToLogStr(_pendingMode), _pendingMode);
     }
 
     if (_setFlags1 & CN105_FLAG_TEMP) {
@@ -400,30 +400,30 @@ void CN105Controller::sendSetPacket() {
             // Legacy mode: byte 10 carries integer temp, byte 19 = 0
             pkt[10] = (uint8_t)(31 - (int)rounded);
         }
-        LOG_INFO("[CN105] SET temp=%.1f%sC (tempMode=%s)", rounded, "\xC2\xB0", _tempMode ? "enhanced" : "legacy");
+        LOG_INFO("SET temp=%.1f%sC (tempMode=%s)", rounded, "\xC2\xB0", _tempMode ? "enhanced" : "legacy");
     }
 
     if (_setFlags1 & CN105_FLAG_FAN) {
         pkt[11] = _pendingFan;
-        LOG_INFO("[CN105] SET fan=%s (0x%02X)", fanToLogStr(_pendingFan), _pendingFan);
+        LOG_INFO("SET fan=%s (0x%02X)", fanToLogStr(_pendingFan), _pendingFan);
     }
 
     if (_setFlags1 & CN105_FLAG_VANE) {
         pkt[12] = _pendingVane;
-        LOG_INFO("[CN105] SET vane=%s (0x%02X)", vaneToLogStr(_pendingVane), _pendingVane);
+        LOG_INFO("SET vane=%s (0x%02X)", vaneToLogStr(_pendingVane), _pendingVane);
     }
 
     // Wide vane (horizontal) — uses second control flag byte (packet[7])
     pkt[7] = _setFlags2;
     if (_setFlags2 & CN105_FLAG2_WVANE) {
         pkt[18] = _pendingWideVane;
-        LOG_INFO("[CN105] SET wideVane=%s (0x%02X)", wideVaneToLogStr(_pendingWideVane), _pendingWideVane);
+        LOG_INFO("SET wideVane=%s (0x%02X)", wideVaneToLogStr(_pendingWideVane), _pendingWideVane);
     }
 
     pkt[21] = calcChecksum(pkt, 21);
     if (currentLogLevel >= LOG_LEVEL_DEBUG) {
         char hex[128]; logHex(hex, sizeof(hex), pkt, 22);
-        LOG_DEBUG("[CN105] TX SET (%d bytes): %s", 22, hex);
+        LOG_DEBUG("TX SET (%d bytes): %s", 22, hex);
     }
     _uart->write(pkt, 22);
     _wanted.hasBeenSent = true;
@@ -465,11 +465,11 @@ void CN105Controller::readSerial() {
                         if (chk == _rxBuf[expectedLen - 1]) {
                             if (currentLogLevel >= LOG_LEVEL_DEBUG) {
                                 char hex[128]; logHex(hex, sizeof(hex), _rxBuf, expectedLen);
-                                LOG_DEBUG("[CN105] RX VALID (%d bytes): %s", expectedLen, hex);
+                                LOG_DEBUG("RX VALID (%d bytes): %s", expectedLen, hex);
                             }
                             processPacket(_rxBuf, expectedLen);
                         } else {
-                            LOG_ERROR("[CN105] RX CHECKSUM FAIL: expected=0x%02X got=0x%02X",
+                            LOG_ERROR("RX CHECKSUM FAIL: expected=0x%02X got=0x%02X",
                                       chk, _rxBuf[expectedLen - 1]);
                         }
                         _rxLen = 0;
@@ -477,7 +477,7 @@ void CN105Controller::readSerial() {
                 }
 
                 if (_rxLen >= sizeof(_rxBuf)) {
-                    LOG_ERROR("[CN105] RX buffer overflow, resetting");
+                    LOG_ERROR("RX buffer overflow, resetting");
                     _rxLen = 0;
                 }
             }
@@ -486,7 +486,7 @@ void CN105Controller::readSerial() {
 
     // Reset RX buffer on timeout (incomplete packet)
     if (_rxLen > 0 && now - _rxLastByte > CN105_RESPONSE_TIMEOUT) {
-        LOG_WARN("[CN105] RX timeout (%d bytes incomplete), resetting buffer", _rxLen);
+        LOG_WARN("RX timeout (%d bytes incomplete), resetting buffer", _rxLen);
         _rxLen = 0;
     }
 }
@@ -496,7 +496,7 @@ void CN105Controller::processPacket(const uint8_t *pkt, uint8_t len) {
 
     switch (pktType) {
         case CN105_PKT_CONNECT_OK:
-            LOG_INFO("[CN105] Connected to heat pump");
+            LOG_INFO("Connected to heat pump");
             _state.connected = true;
             _state.lastUpdate = uptime_ms();
             _lastSuccessfulResponse = _state.lastUpdate;
@@ -505,7 +505,7 @@ void CN105Controller::processPacket(const uint8_t *pkt, uint8_t len) {
             break;
 
         case CN105_PKT_SET_ACK:
-            LOG_INFO("[CN105] SET command acknowledged");
+            LOG_INFO("SET command acknowledged");
             _state.lastUpdate = uptime_ms();
             _lastSuccessfulResponse = _state.lastUpdate;
             break;
@@ -529,7 +529,7 @@ void CN105Controller::processPacket(const uint8_t *pkt, uint8_t len) {
                     sendInfoRequest(POLL_TYPES[_pollPhase]);
                     _awaitingResponse = true;
                 } else {
-                    LOG_DEBUG("[CN105] Poll cycle complete (%lums)", (unsigned long)(uptime_ms() - _cycleStartMs));
+                    LOG_DEBUG("Poll cycle complete (%lums)", (unsigned long)(uptime_ms() - _cycleStartMs));
                     _cycleRunning = false;
                     _lastCycleEnd = uptime_ms();
                 }
@@ -537,14 +537,14 @@ void CN105Controller::processPacket(const uint8_t *pkt, uint8_t len) {
             break;
 
         default:
-            LOG_WARN("[CN105] RX unknown packet type 0x%02X", pktType);
+            LOG_WARN("RX unknown packet type 0x%02X", pktType);
             break;
     }
 }
 
 void CN105Controller::handleInfoResponse(const uint8_t *data, uint8_t dataLen) {
     if (dataLen < 6) {
-        LOG_WARN("[CN105] INFO_RESP too short (dataLen=%d, need >=6)", dataLen);
+        LOG_WARN("INFO_RESP too short (dataLen=%d, need >=6)", dataLen);
         return;
     }
 
@@ -558,7 +558,7 @@ void CN105Controller::handleInfoResponse(const uint8_t *data, uint8_t dataLen) {
                 _state.power = (data[3] != 0);
                 uint8_t rawMode = data[4];
                 if (rawMode > 0x08) {
-                    LOG_DEBUG("[CN105] SETTINGS: stripping iSee flag (0x%02X -> 0x%02X)",
+                    LOG_DEBUG("SETTINGS: stripping iSee flag (0x%02X -> 0x%02X)",
                               rawMode, rawMode - 0x08);
                     rawMode -= 0x08;
                 }
@@ -577,7 +577,7 @@ void CN105Controller::handleInfoResponse(const uint8_t *data, uint8_t dataLen) {
                 } else {
                     _state.targetTemp = 31.0f - (float)data[5];
                 }
-                LOG_DEBUG("[CN105] SETTINGS: power=%s mode=%s fan=%s vane=%s wvane=%s target=%.1f%sC",
+                LOG_DEBUG("SETTINGS: power=%s mode=%s fan=%s vane=%s wvane=%s target=%.1f%sC",
                           _state.power ? "ON" : "OFF", modeToLogStr(_state.mode),
                           fanToLogStr(_state.fanSpeed), vaneToLogStr(_state.vane),
                           wideVaneToLogStr(_state.wideVane), _state.targetTemp, "\xC2\xB0");
@@ -627,7 +627,7 @@ void CN105Controller::handleInfoResponse(const uint8_t *data, uint8_t dataLen) {
                 char outsideStr[8] = "N/A", runtimeStr[12] = "N/A";
                 if (_state.outsideTempValid) snprintf(outsideStr, sizeof(outsideStr), "%.1f", _state.outsideTemp);
                 if (_state.runtimeValid) snprintf(runtimeStr, sizeof(runtimeStr), "%.1f", _state.runtimeHours);
-                LOG_DEBUG("[CN105] ROOMTEMP: %.1f\xC2\xB0""C  outside=%s  runtime=%s",
+                LOG_DEBUG("ROOMTEMP: %.1f\xC2\xB0""C  outside=%s  runtime=%s",
                           _state.roomTemp, outsideStr, runtimeStr);
             }
             break;
@@ -636,7 +636,7 @@ void CN105Controller::handleInfoResponse(const uint8_t *data, uint8_t dataLen) {
             if (dataLen >= 5) {
                 _state.compressorHz = data[3];
                 _state.operating = (data[4] != 0);
-                LOG_DEBUG("[CN105] STATUS: compressor=%dHz operating=%s",
+                LOG_DEBUG("STATUS: compressor=%dHz operating=%s",
                           _state.compressorHz, _state.operating ? "YES" : "NO");
             }
             break;
@@ -646,7 +646,7 @@ void CN105Controller::handleInfoResponse(const uint8_t *data, uint8_t dataLen) {
                 _state.subMode = data[3];
                 _state.stage = data[4];
                 _state.autoSubMode = data[5];
-                LOG_DEBUG("[CN105] STANDBY: subMode=%s stage=%s autoSub=%s",
+                LOG_DEBUG("STANDBY: subMode=%s stage=%s autoSub=%s",
                           subModeToLogStr(_state.subMode),
                           stageToLogStr(_state.stage),
                           autoSubModeToLogStr(_state.autoSubMode));
@@ -659,15 +659,15 @@ void CN105Controller::handleInfoResponse(const uint8_t *data, uint8_t dataLen) {
                 _state.hasError = (data[4] != 0x80);
                 _errorPollFailures = 0;  // Reset failure counter on success
                 if (_state.hasError) {
-                    LOG_WARN("[CN105] ERROR CODE: 0x%02X", data[4]);
+                    LOG_WARN("ERROR CODE: 0x%02X", data[4]);
                 } else {
-                    LOG_DEBUG("[CN105] ERROR: normal (0x80)");
+                    LOG_DEBUG("ERROR: normal (0x80)");
                 }
             }
             break;
 
         default:
-            LOG_WARN("[CN105] INFO_RESP unknown type 0x%02X", data[0]);
+            LOG_WARN("INFO_RESP unknown type 0x%02X", data[0]);
             break;
     }
 }

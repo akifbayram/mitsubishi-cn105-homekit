@@ -193,7 +193,7 @@ bool WebUI::applyWifiCredentials(const char *json, const char **outError) {
     }
     // Password is optional (open networks send empty password)
     jsonGetString(json, "password", password, sizeof(password));
-    LOG_INFO("[WebUI] Saving WiFi credentials (SSID: %s)", ssid);
+    LOG_INFO("Saving WiFi credentials (SSID: %s)", ssid);
     // Mark change pending in settings (for WiFi recovery shorter timeout)
     settings.get().wifiChangePending = true;
     settings.save();
@@ -248,12 +248,12 @@ void WebUI::setAPMode(bool active) {
             httpd_register_uri_handler(_redirectServer, &rUri);
             // Catch all other URIs (OS captive portal checks: /generate_204, /connecttest.txt, etc.)
             httpd_register_err_handler(_redirectServer, HTTPD_404_NOT_FOUND, handleRedirect404);
-            LOG_INFO("[WebUI] Port 80 captive portal server started");
+            LOG_INFO("Port 80 captive portal server started");
         }
     } else if (!active && _redirectServer) {
         httpd_stop(_redirectServer);
         _redirectServer = NULL;
-        LOG_INFO("[WebUI] Port 80 redirect server stopped");
+        LOG_INFO("Port 80 redirect server stopped");
     }
 }
 
@@ -328,11 +328,11 @@ void WebUI::begin(CN105Controller *ctrl) {
     config.lru_purge_enable = true;
     config.open_fn          = setTcpNoDelay;
 
-    LOG_INFO("[WebUI] Starting HTTP server on port %d", config.server_port);
+    LOG_INFO("Starting HTTP server on port %d", config.server_port);
 
     esp_err_t ret = httpd_start(&_server, &config);
     if (ret != ESP_OK) {
-        LOG_ERROR("[WebUI] Failed to start HTTP server: %d", ret);
+        LOG_ERROR("Failed to start HTTP server: %d", ret);
         return;
     }
 
@@ -437,7 +437,7 @@ void WebUI::begin(CN105Controller *ctrl) {
     };
     httpd_register_uri_handler(_server, &faviconUri);
 
-    LOG_INFO("[WebUI] HTTP server started, WebSocket endpoint at /ws");
+    LOG_INFO("HTTP server started, WebSocket endpoint at /ws");
 
     // Register log hook to stream logs to WebSocket client
     logHook = [](const char *msg, size_t len) { webUI.broadcastLog(msg, len); };

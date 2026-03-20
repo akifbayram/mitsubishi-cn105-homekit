@@ -87,7 +87,7 @@ static void dns_task(void *arg) {
 
     s_sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (s_sock < 0) {
-        LOG_ERROR("[DNS] Failed to create socket");
+        LOG_ERROR("Failed to create socket");
         s_running = false;
         s_taskHandle = nullptr;
         vTaskDelete(nullptr);
@@ -104,7 +104,7 @@ static void dns_task(void *arg) {
     addr.sin_addr.s_addr = htonl(INADDR_ANY);
 
     if (bind(s_sock, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-        LOG_ERROR("[DNS] Failed to bind port %d", DNS_PORT);
+        LOG_ERROR("Failed to bind port %d", DNS_PORT);
         close(s_sock);
         s_sock = -1;
         s_running = false;
@@ -113,7 +113,7 @@ static void dns_task(void *arg) {
         return;
     }
 
-    LOG_INFO("[DNS] Captive portal DNS started on port %d", DNS_PORT);
+    LOG_INFO("Captive portal DNS started on port %d", DNS_PORT);
 
     while (s_running) {
         struct sockaddr_in client = {};
@@ -134,7 +134,7 @@ static void dns_task(void *arg) {
 
     close(s_sock);
     s_sock = -1;
-    LOG_INFO("[DNS] Captive portal DNS stopped");
+    LOG_INFO("Captive portal DNS stopped");
 
     s_taskHandle = nullptr;
     vTaskDelete(nullptr);

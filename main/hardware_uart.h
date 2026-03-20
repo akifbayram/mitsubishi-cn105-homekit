@@ -30,13 +30,13 @@ public:
 
         esp_err_t err;
         err = uart_param_config(_uartNum, &uart_config);
-        LOG_INFO("[CN105] uart_param_config: %s", esp_err_to_name(err));
+        LOG_INFO("uart_param_config: %s", esp_err_to_name(err));
 
         err = uart_set_pin(_uartNum, txPin, rxPin, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
-        LOG_INFO("[CN105] uart_set_pin(TX=%d, RX=%d): %s", txPin, rxPin, esp_err_to_name(err));
+        LOG_INFO("uart_set_pin(TX=%d, RX=%d): %s", txPin, rxPin, esp_err_to_name(err));
 
         err = uart_driver_install(_uartNum, 256, 256, 10, &_eventQueue, 0);
-        LOG_INFO("[CN105] uart_driver_install: %s", esp_err_to_name(err));
+        LOG_INFO("uart_driver_install: %s", esp_err_to_name(err));
 
 #if UART_NEEDS_RX_PULLUP
         gpio_set_pull_mode((gpio_num_t)rxPin, GPIO_PULLUP_ONLY);
@@ -48,7 +48,7 @@ public:
         uart_get_word_length(_uartNum, &data_bits_v);
         uart_parity_t parity_v;
         uart_get_parity(_uartNum, &parity_v);
-        LOG_INFO("[CN105] Verified: baud=%lu, data_bits=%d, parity=%d", baud, data_bits_v, parity_v);
+        LOG_INFO("Verified: baud=%lu, data_bits=%d, parity=%d", baud, data_bits_v, parity_v);
 
         uart_flush_input(_uartNum);
     }

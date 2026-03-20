@@ -16,7 +16,7 @@ extern StatusLED statusLED;
 esp_err_t WebUI::handleOtaUpload(httpd_req_t *req) {
     const esp_partition_t *partition = esp_ota_get_next_update_partition(NULL);
     if (!partition) {
-        LOG_ERROR("[OTA] No OTA partition found");
+        LOG_ERROR("No OTA partition found");
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "No OTA partition");
         return ESP_FAIL;
     }
@@ -31,7 +31,7 @@ esp_err_t WebUI::handleOtaUpload(httpd_req_t *req) {
         return ESP_FAIL;
     }
 
-    LOG_INFO("[OTA] Starting firmware upload: %u bytes -> partition '%s'",
+    LOG_INFO("Starting firmware upload: %u bytes -> partition '%s'",
              (unsigned)totalLen, partition->label);
 
     // Notify WS client
@@ -43,7 +43,7 @@ esp_err_t WebUI::handleOtaUpload(httpd_req_t *req) {
     esp_ota_handle_t otaHandle;
     esp_err_t err = esp_ota_begin(partition, totalLen, &otaHandle);
     if (err != ESP_OK) {
-        LOG_ERROR("[OTA] esp_ota_begin failed: %s", esp_err_to_name(err));
+        LOG_ERROR("esp_ota_begin failed: %s", esp_err_to_name(err));
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "OTA begin failed");
         return ESP_FAIL;
     }
@@ -60,7 +60,7 @@ esp_err_t WebUI::handleOtaUpload(httpd_req_t *req) {
         if (hdrLen == 64) {
             httpd_req_get_hdr_value_str(req, "X-Firmware-SHA256", expectedHash, sizeof(expectedHash));
             verifyHash = true;
-            LOG_INFO("[OTA] SHA256 verification enabled");
+            LOG_INFO("SHA256 verification enabled");
         }
     }
 
@@ -83,7 +83,7 @@ esp_err_t WebUI::handleOtaUpload(httpd_req_t *req) {
         int ret = httpd_req_recv(req, buf, 4096);
         if (ret <= 0) {
             if (ret == HTTPD_SOCK_ERR_TIMEOUT) continue;
-            LOG_ERROR("[OTA] Receive error at %u/%u bytes", (unsigned)received, (unsigned)totalLen);
+            LOG_ERROR("Receive error at %u/%u bytes", (unsigned)received, (unsigned)totalLen);
             mbedtls_sha256_free(&sha256_ctx);
             free(buf);
             esp_ota_abort(otaHandle);
@@ -94,7 +94,7 @@ esp_err_t WebUI::handleOtaUpload(httpd_req_t *req) {
         // Validate magic byte on first chunk
         if (firstChunk) {
             if ((uint8_t)buf[0] != 0xE9) {
-                LOG_ERROR("[OTA] Invalid firmware magic byte: 0x%02X (expected 0xE9)",
+                LOG_ERROR("Invalid firmware magic byte: 0x%02X (expected 0xE9)",
                           (uint8_t)buf[0]);
                 mbedtls_sha256_free(&sha256_ctx);
                 free(buf);
@@ -107,7 +107,7 @@ esp_err_t WebUI::handleOtaUpload(httpd_req_t *req) {
 
         err = esp_ota_write(otaHandle, buf, ret);
         if (err != ESP_OK) {
-            LOG_ERROR("[OTA] esp_ota_write failed at %u bytes: %s",
+            LOG_ERROR("esp_ota_write failed at %u bytes: %s",
                       (unsigned)received, esp_err_to_name(err));
             mbedtls_sha256_free(&sha256_ctx);
             free(buf);
@@ -122,7 +122,7 @@ esp_err_t WebUI::handleOtaUpload(httpd_req_t *req) {
         // Progress update every ~64KB
         if ((received % 65536) < 4096) {
             uint8_t pct = (uint8_t)((received * 100) / totalLen);
-            LOG_INFO("[OTA] Progress: %u/%u bytes (%u%%)", (unsigned)received, (unsigned)totalLen, pct);
+            LOG_INFO("Progress: %u/%u bytes (%u%%)", (unsigned)received, (unsigned)totalLen, pct);
             snprintf(otaMsg, sizeof(otaMsg),
                 "{\"type\":\"ota\",\"status\":\"progress\",\"pct\":%u}", pct);
             webUI.sendWsText(webUI._wsClientFd, otaMsg);
@@ -144,30 +144,30 @@ esp_err_t WebUI::handleOtaUpload(httpd_req_t *req) {
         computed[64] = '\0';
 
         if (strcmp(computed, expectedHash) != 0) {
-            LOG_ERROR("[OTA] SHA256 mismatch! Expected: %.16s... Got: %.16s...",
+            LOG_ERROR("SHA256 mismatch! Expected: %.16s... Got: %.16s...",
                       expectedHash, computed);
             esp_ota_abort(otaHandle);
             httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "SHA256 mismatch");
             return ESP_FAIL;
         }
-        LOG_INFO("[OTA] SHA256 verified: %.16s...", computed);
+        LOG_INFO("SHA256 verified: %.16s...", computed);
     }
 
     err = esp_ota_end(otaHandle);
     if (err != ESP_OK) {
-        LOG_ERROR("[OTA] esp_ota_end failed: %s", esp_err_to_name(err));
+        LOG_ERROR("esp_ota_end failed: %s", esp_err_to_name(err));
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Validation failed");
         return ESP_FAIL;
     }
 
     err = esp_ota_set_boot_partition(partition);
     if (err != ESP_OK) {
-        LOG_ERROR("[OTA] esp_ota_set_boot_partition failed: %s", esp_err_to_name(err));
+        LOG_ERROR("esp_ota_set_boot_partition failed: %s", esp_err_to_name(err));
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Set boot failed");
         return ESP_FAIL;
     }
 
-    LOG_INFO("[OTA] Firmware update successful (%u bytes). Restarting...", (unsigned)received);
+    LOG_INFO("Firmware update successful (%u bytes). Restarting...", (unsigned)received);
 
     httpd_resp_set_type(req, "application/json");
     httpd_resp_sendstr(req, "{\"status\":\"success\"}");

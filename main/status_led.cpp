@@ -70,13 +70,13 @@ void StatusLED::begin() {
     }
 
     off();
-    LOG_INFO("[LED] RGB on GPIO%d (pwr GPIO%d), blue on GPIO%d",
+    LOG_INFO("RGB on GPIO%d (pwr GPIO%d), blue on GPIO%d",
              _pin, _enablePin, _bluePin);
 }
 
 void StatusLED::setState(LEDState state) {
     if (state == _state) return;
-    LOG_INFO("[LED] %s -> %s", stateName(_state), stateName(state));
+    LOG_INFO("%s -> %s", stateName(_state), stateName(state));
     _state = state;
     uint32_t now = uptime_ms();
     _stateStart = now;
@@ -112,7 +112,7 @@ void StatusLED::setWifi(bool connected) {
     if (ledOn == _wifiOn) return;
     _wifiOn = ledOn;
     gpio_set_level((gpio_num_t)_bluePin, ledOn ? 1 : 0);
-    LOG_INFO("[LED] Blue %s (WiFi %s)", ledOn ? "ON" : "OFF",
+    LOG_INFO("Blue %s (WiFi %s)", ledOn ? "ON" : "OFF",
              connected ? "connected" : "disconnected");
 }
 
