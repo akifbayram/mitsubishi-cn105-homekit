@@ -192,6 +192,7 @@ input[type=range]::-moz-range-thumb{
   transition:max-height .35s cubic-bezier(.4,0,.2,1),padding .35s cubic-bezier(.4,0,.2,1);
 }
 .collapse-body.open{max-height:700px;padding:0 16px 16px}
+#wifiBody.open{max-height:1200px}
 
 /* ── Status Grid ───────────────────────────────────────────────────────── */
 .status-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
@@ -203,8 +204,8 @@ input[type=range]::-moz-range-thumb{
 .status-dot.running{background:var(--green)}
 .status-dot.idle{background:var(--text3)}
 .status-dot.active{background:var(--green);box-shadow:0 0 6px var(--green)}
-.status-dot.warning{background:var(--orange)}
-.status-dot.error{background:var(--red)}
+.status-dot.warning{background:var(--orange);box-shadow:0 0 6px var(--orange)}
+.status-dot.error{background:var(--red);box-shadow:0 0 6px var(--red)}
 .ble-banner{display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:var(--radius-sm);font-size:12px;font-weight:500;margin-bottom:8px;line-height:1.4}
 .ble-banner.warn{background:rgba(255,59,48,0.12);color:var(--red)}
 .ble-banner.caution{background:rgba(255,149,0,0.12);color:var(--orange)}
@@ -240,6 +241,40 @@ input[type=range]::-moz-range-thumb{
 .scanning{animation:scan-pulse 1s infinite}
 .status-label{font-size:14px;color:var(--text2);margin-right:auto}
 .ble-help{font-size:11px;color:var(--text2);line-height:1.45;margin-top:4px}
+
+/* ── WiFi Scanner ─────────────────────────────────────────────────────── */
+.wifi-scan-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.wifi-scan-hdr .card-label{margin-bottom:0}
+.refresh-btn{
+  width:28px;height:28px;border:none;border-radius:50%;
+  background:var(--seg-bg);color:var(--text2);cursor:pointer;
+  display:flex;align-items:center;justify-content:center;padding:0;
+  transition:transform .15s;
+}
+.refresh-btn:active{transform:scale(.88)}
+.refresh-btn svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.refresh-btn.spin svg{animation:wifi-spin .8s linear infinite}
+@keyframes wifi-spin{to{transform:rotate(360deg)}}
+.net-row{
+  display:flex;align-items:center;gap:10px;
+  padding:11px 0;border-bottom:0.5px solid var(--border);
+  cursor:pointer;transition:background .1s;
+  -webkit-user-select:none;user-select:none;
+}
+.net-row:last-child{border-bottom:none}
+.net-row:active{background:var(--seg-bg);border-radius:var(--radius-sm)}
+.net-row.selected .net-name{color:var(--accent);font-weight:600}
+.net-name{flex:1;font-size:14px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.net-signal{display:flex;align-items:flex-end;gap:1.5px;width:14px;height:11px;flex-shrink:0}
+.net-signal i{display:block;width:3px;border-radius:.5px;background:var(--border)}
+.net-signal i.on{background:var(--text2)}
+.net-signal i:nth-child(1){height:3px}
+.net-signal i:nth-child(2){height:5px}
+.net-signal i:nth-child(3){height:8px}
+.net-signal i:nth-child(4){height:11px}
+.net-lock{width:10px;height:12px;color:var(--text3);flex-shrink:0}
+.scan-msg{text-align:center;padding:16px 0;color:var(--text2);font-size:13px}
+.wifi-scan-sep{border:none;border-top:0.5px solid var(--border);margin:10px 0 2px}
 
 /* ── Settings & Forms ──────────────────────────────────────────────────── */
 .setting-row{
@@ -640,6 +675,16 @@ input:focus-visible,select:focus-visible{outline-offset:0}
           <span id="wifiUptimeVal">--:--:--</span>
         </div>
       </div>
+      <div class="wifi-scan-hdr">
+        <span class="card-label">Networks</span>
+        <button class="refresh-btn" id="wifiRefreshBtn" onclick="doWifiScan()" title="Scan for networks" aria-label="Scan for networks">
+          <svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.2-5.9"/><path d="M21 3v5h-5"/></svg>
+        </button>
+      </div>
+      <div id="wifiNetList">
+        <div class="scan-msg">Tap refresh to scan for networks</div>
+      </div>
+      <hr class="wifi-scan-sep">
       <div class="setting-row">
         <label>SSID</label>
         <input type="text" id="cfgSSID" placeholder="Network name" maxlength="32">
@@ -652,9 +697,9 @@ input:focus-visible,select:focus-visible{outline-offset:0}
         </div>
       </div>
       <button class="save-btn" id="wifiSaveBtn" onclick="saveWifi()" disabled>Save WiFi</button>
-      <div id="wifiBanner" style="display:none;margin-top:10px;padding:12px;background:var(--seg-bg);border:1px solid var(--green);border-radius:var(--radius-sm);font-size:14px;text-align:center">
+      <div id="wifiBanner" style="display:none;margin-top:10px;padding:12px;background:var(--seg-bg);border-radius:var(--radius-sm);font-size:14px;text-align:center">
         WiFi credentials saved. Reboot to connect to the new network.
-        <button class="save-btn" style="background:var(--orange);margin-top:8px" onclick="restartDevice()">Reboot Now</button>
+        <button class="save-btn" style="background:var(--red);margin-top:8px" onclick="restartDevice()">Reboot Now</button>
       </div>
     </div>
   </div>
@@ -1440,6 +1485,86 @@ input:focus-visible,select:focus-visible{outline-offset:0}
     $('wifiBanner').style.display='block';
   }
 
+  // ── WiFi Scanner ──────────────────────────────────────────────────────────
+  var wifiScanning=false;
+  function makeNetSignal(rssi){
+    var bars=rssi>-50?4:rssi>-60?3:rssi>-70?2:1;
+    var wrap=document.createElement('div');
+    wrap.className='net-signal';
+    for(var b=1;b<=4;b++){
+      var bar=document.createElement('i');
+      if(b<=bars)bar.className='on';
+      wrap.appendChild(bar);
+    }
+    return wrap;
+  }
+  function makeNetLock(){
+    var ns='http://www.w3.org/2000/svg';
+    var svg=document.createElementNS(ns,'svg');
+    svg.setAttribute('class','net-lock');
+    svg.setAttribute('viewBox','0 0 12 14');
+    var rect=document.createElementNS(ns,'rect');
+    rect.setAttribute('x','1');rect.setAttribute('y','6');
+    rect.setAttribute('width','10');rect.setAttribute('height','7');
+    rect.setAttribute('rx','1.5');rect.setAttribute('fill','currentColor');
+    var path=document.createElementNS(ns,'path');
+    path.setAttribute('d','M3 6V4a3 3 0 0 1 6 0v2');
+    path.setAttribute('fill','none');path.setAttribute('stroke','currentColor');
+    path.setAttribute('stroke-width','1.5');path.setAttribute('stroke-linecap','round');
+    svg.appendChild(rect);svg.appendChild(path);
+    return svg;
+  }
+  function setWifiScanMsg(text){
+    var el=$('wifiNetList');
+    el.textContent='';
+    var div=document.createElement('div');
+    div.className='scan-msg';
+    div.textContent=text;
+    el.appendChild(div);
+  }
+  function renderWifiNets(nets){
+    var el=$('wifiNetList');
+    el.textContent='';
+    if(!nets||nets.length===0){
+      setWifiScanMsg('No networks found. Tap refresh to scan again.');
+      return;
+    }
+    for(var i=0;i<nets.length;i++){
+      (function(n){
+        var row=document.createElement('div');
+        row.className='net-row';
+        row.appendChild(makeNetSignal(n.rssi));
+        var name=document.createElement('div');
+        name.className='net-name';
+        name.textContent=n.ssid;
+        row.appendChild(name);
+        if(n.secure)row.appendChild(makeNetLock());
+        row.addEventListener('click',function(){
+          $('cfgSSID').value=n.ssid;
+          $('cfgPass').value='';
+          checkWifiFields();
+          if(n.secure)$('cfgPass').focus();
+          var rows=el.querySelectorAll('.net-row');
+          for(var j=0;j<rows.length;j++)rows[j].classList.toggle('selected',rows[j]===row);
+        });
+        el.appendChild(row);
+      })(nets[i]);
+    }
+  }
+  window.doWifiScan=function(){
+    if(wifiScanning)return;
+    wifiScanning=true;
+    $('wifiRefreshBtn').classList.add('spin');
+    setWifiScanMsg('Scanning\u2026');
+    fetch('/wifi-scan').then(function(r){return r.json()}).then(function(d){
+      wifiScanning=false;$('wifiRefreshBtn').classList.remove('spin');
+      renderWifiNets(d);
+    }).catch(function(){
+      wifiScanning=false;$('wifiRefreshBtn').classList.remove('spin');
+      setWifiScanMsg('Scan failed. Tap refresh to try again.');
+    });
+  };
+
   window.saveBleConfig=function(){
     var mac=$('bleMacInput').value.trim().toUpperCase();
     if(mac&&!/^([0-9A-F]{2}:){5}[0-9A-F]{2}$/.test(mac)){alert('Invalid MAC format');return}
@@ -1635,7 +1760,7 @@ input:focus-visible,select:focus-visible{outline-offset:0}
   window.saveWifi=function(){
     var ssid=$('cfgSSID').value.trim();
     var pass=$('cfgPass').value;
-    if(!ssid||!pass) return;
+    if(!ssid) return;
     send({cmd:'wifi',ssid:ssid,password:pass});
   };
 
@@ -1769,7 +1894,7 @@ input:focus-visible,select:focus-visible{outline-offset:0}
   });
 
   function checkWifiFields(){
-    $('wifiSaveBtn').disabled=!($('cfgSSID').value.trim()&&$('cfgPass').value);
+    $('wifiSaveBtn').disabled=!$('cfgSSID').value.trim();
   }
   $('cfgSSID').addEventListener('input',checkWifiFields);
   $('cfgPass').addEventListener('input',checkWifiFields);

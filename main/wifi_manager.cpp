@@ -313,26 +313,31 @@ static void resumeStaConnection()
 
 int WifiManager::scanNetworks(ScannedNetwork* results, int maxResults)
 {
-    // Stop the STA reconnect loop so the radio is free to channel-hop
-    s_wifiScanning = true;
-    esp_wifi_disconnect();
-    vTaskDelay(pdMS_TO_TICKS(100));
+    // If STA is connected, scan without disconnecting (ESP-IDF supports
+    // scanning while associated — the radio briefly hops channels and returns).
+    // Only disconnect when not connected (recovery/AP mode) to free the radio.
+    bool wasConnected = s_connected;
+    if (!wasConnected) {
+        s_wifiScanning = true;
+        esp_wifi_disconnect();
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
 
     wifi_scan_config_t scanConf = {};
     scanConf.show_hidden = false;
 
     esp_err_t err = esp_wifi_scan_start(&scanConf, true);  // blocking scan
-    s_wifiScanning = false;
+    if (!wasConnected) s_wifiScanning = false;
     if (err != ESP_OK) {
         LOG_ERROR("[WiFi] Scan failed: %s", esp_err_to_name(err));
-        resumeStaConnection();
+        if (!wasConnected) resumeStaConnection();
         return 0;
     }
 
     uint16_t apCount = 0;
     esp_wifi_scan_get_ap_num(&apCount);
     if (apCount == 0) {
-        resumeStaConnection();
+        if (!wasConnected) resumeStaConnection();
         return 0;
     }
 
@@ -375,6 +380,6 @@ int WifiManager::scanNetworks(ScannedNetwork* results, int maxResults)
     }
 
     LOG_INFO("[WiFi] Scan found %d unique networks", count);
-    resumeStaConnection();
+    if (!wasConnected) resumeStaConnection();
     return count;
 }
