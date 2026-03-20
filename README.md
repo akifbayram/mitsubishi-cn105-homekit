@@ -60,9 +60,8 @@ For compatible models, see the [MitsubishiCN105ESPHome supported units list](htt
 |-------|--------|---------------|-------|
 | M5Stack NanoC6 (ESP32-C6) | `esp32c6` | `idf.py set-target esp32c6 && idf.py build` | ✅ |
 | M5Stack AtomS3 Lite (ESP32-S3) | `esp32s3` | `idf.py set-target esp32s3 && idf.py build` | ✅ |
-| Generic ESP32 DevKit | `esp32` | `idf.py set-target esp32 && idf.py build` | ❌ |
-| ESP32-S3-DevKitC-1 | `esp32s3` | `idf.py set-target esp32s3 && idf.py build` | ❌ |
 | ESP32-C3 SuperMini / XIAO | `esp32c3` | `idf.py set-target esp32c3 && idf.py build` | ❌ |
+| Generic ESP32 DevKit | `esp32` | `idf.py set-target esp32 && idf.py build` | ❌ |
 
 Board profiles define GPIO pins, LED, button, UART clock source, and debug output for each target. See `main/boards/` for details, or the [Custom Board Guide](docs/custom-boards.md) to add a new board.
 

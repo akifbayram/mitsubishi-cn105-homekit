@@ -5,6 +5,7 @@
 #include <esp_mac.h>
 #include <esp_ota_ops.h>
 #include <esp_task_wdt.h>
+#include <esp_heap_caps.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
@@ -169,6 +170,7 @@ extern "C" void app_main(void)
 
     uint32_t lastWifiCheck = 0;
     uint32_t lastWebLoop   = 0;
+    uint32_t lastHeapLog   = 0;
 #ifdef BLE_ENABLE
     uint32_t lastBleLoop   = 0;
 #endif
@@ -204,6 +206,15 @@ extern "C" void app_main(void)
         if (now - lastWifiCheck >= 1000) {
             wifiRecovery.loop();
             lastWifiCheck = now;
+        }
+
+        // ── Heap health — 60s ─────────────────────────────────────────
+        if (now - lastHeapLog >= 60000) {
+            lastHeapLog = now;
+            LOG_INFO("Heap: free=%lu min=%lu blk=%lu",
+                     (unsigned long)esp_get_free_heap_size(),
+                     (unsigned long)heap_caps_get_minimum_free_size(MALLOC_CAP_DEFAULT),
+                     (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT));
         }
 
         // ── Web server deferred init (one-shot after WiFi or AP active) ──

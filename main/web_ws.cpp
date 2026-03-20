@@ -5,6 +5,7 @@
 #include "wifi_recovery.h"
 #include "homekit_setup.h"
 #include "esp_utils.h"
+#include <esp_heap_caps.h>
 #include <algorithm>
 #include <cmath>
 #include "ble_config.h"
@@ -418,6 +419,16 @@ void WebUI::pushState() {
     } else {
         n += snprintf(buf + n, sizeof(buf) - n, ",\"runtime\":null");
     }
+
+    // Heap diagnostics
+    n += snprintf(buf + n, sizeof(buf) - n,
+        ",\"heapFree\":%lu"
+        ",\"heapMin\":%lu"
+        ",\"heapBlock\":%lu",
+        (unsigned long)esp_get_free_heap_size(),
+        (unsigned long)heap_caps_get_minimum_free_size(MALLOC_CAP_DEFAULT),
+        (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT)
+    );
 
     // Dual setpoint thresholds
     n += snprintf(buf + n, sizeof(buf) - n,
