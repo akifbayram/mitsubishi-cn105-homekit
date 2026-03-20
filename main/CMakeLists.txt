@@ -21,6 +21,9 @@ idf_component_register(
              esp_hap_core esp_hap_apple_profiles esp_hap_platform espressif__mdns
 )
 
+# ── Pass firmware version from git to source code ────────────────────────────
+target_compile_definitions(${COMPONENT_TARGET} PRIVATE FW_VERSION="${PROJECT_VER}")
+
 # ── Auto-select board profile based on IDF_TARGET ────────────────────────────
 # Each chip gets a default board profile. Override by setting -DBOARD_PROFILE_*
 # on the cmake command line (e.g., idf.py build -DBOARD_PROFILE_M5ATOMS3_LITE=1).
