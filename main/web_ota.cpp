@@ -1,4 +1,5 @@
 #include "web_server.h"
+#include <esp_task_wdt.h>
 #include <mbedtls/sha256.h>
 #include "status_led.h"
 #include "board_profile.h"
@@ -40,10 +41,17 @@ esp_err_t WebUI::handleOtaUpload(httpd_req_t *req) {
         "{\"type\":\"ota\",\"status\":\"starting\",\"size\":%u}", (unsigned)totalLen);
     webUI.sendWsText(webUI._wsClientFd, otaMsg);
 
+    // Increase WDT timeout during OTA — esp_ota_begin() erases the partition
+    // which can block for several seconds on large partitions.
+    esp_task_wdt_config_t wdt_ota = { .timeout_ms = 30000, .idle_core_mask = 1, .trigger_panic = true };
+    esp_task_wdt_reconfigure(&wdt_ota);
+
     esp_ota_handle_t otaHandle;
     esp_err_t err = esp_ota_begin(partition, totalLen, &otaHandle);
     if (err != ESP_OK) {
         LOG_ERROR("esp_ota_begin failed: %s", esp_err_to_name(err));
+        esp_task_wdt_config_t wdt_default = { .timeout_ms = 10000, .idle_core_mask = 1, .trigger_panic = true };
+        esp_task_wdt_reconfigure(&wdt_default);
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "OTA begin failed");
         return ESP_FAIL;
     }
@@ -166,6 +174,10 @@ esp_err_t WebUI::handleOtaUpload(httpd_req_t *req) {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Set boot failed");
         return ESP_FAIL;
     }
+
+    // Restore default WDT timeout
+    esp_task_wdt_config_t wdt_default = { .timeout_ms = 10000, .idle_core_mask = 1, .trigger_panic = true };
+    esp_task_wdt_reconfigure(&wdt_default);
 
     LOG_INFO("Firmware update successful (%u bytes). Restarting...", (unsigned)received);
 

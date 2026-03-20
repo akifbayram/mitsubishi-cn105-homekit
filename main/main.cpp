@@ -4,6 +4,7 @@
 #include <nvs_flash.h>
 #include <esp_mac.h>
 #include <esp_ota_ops.h>
+#include <esp_task_wdt.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
@@ -164,6 +165,7 @@ extern "C" void app_main(void)
     // appropriate rates to reduce unnecessary work.
     // ════════════════════════════════════════════════════════════════════════
     LOG_INFO("Entering main loop");
+    esp_task_wdt_add(NULL);
 
     uint32_t lastWifiCheck = 0;
     uint32_t lastWebLoop   = 0;
@@ -172,6 +174,7 @@ extern "C" void app_main(void)
 #endif
 
     while (true) {
+        esp_task_wdt_reset();
         uint32_t now = uptime_ms();
 
         // ── Deferred HomeKit init (one-shot after WiFi connects) ─────────

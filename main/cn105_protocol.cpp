@@ -2,6 +2,7 @@
 #include "cn105_strings.h"
 #include <algorithm>
 #include <cmath>
+#include <esp_task_wdt.h>
 
 static const char *TAG = "cn105";
 
@@ -55,8 +56,10 @@ void CN105Controller::startTask(int priority, int stackSize) {
 }
 
 void CN105Controller::taskFunc(void *arg) {
+    esp_task_wdt_add(NULL);
     auto *self = static_cast<CN105Controller*>(arg);
     while (true) {
+        esp_task_wdt_reset();
         self->loop();
         // Block until UART data arrives or 100ms timeout for timer management
         if (self->_uart) {
