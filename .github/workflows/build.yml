@@ -1,0 +1,50 @@
+# Build verification CI
+#
+# Runs on every push to main and on pull requests to catch build
+# regressions across all chip targets before release.
+
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: esp32c6
+            name: nanoc6
+          - target: esp32s3
+            name: m5atoms3-lite
+          - target: esp32
+            name: esp32-devkit
+          - target: esp32c3
+            name: esp32c3-mini
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Build (${{ matrix.name }})
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v5.5
+          target: ${{ matrix.target }}
+          command: |
+            idf.py set-target ${{ matrix.target }}
+            idf.py build
+            idf.py size
+
+      - name: Report binary size
+        run: |
+          SIZE=$(stat -c%s build/mitsubishi-cn105-homekit.bin)
+          HUMAN=$(numfmt --to=iec-i --suffix=B "$SIZE")
+          echo "### ${{ matrix.name }} (${{ matrix.target }}): ${HUMAN}" >> "$GITHUB_STEP_SUMMARY"

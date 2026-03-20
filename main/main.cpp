@@ -6,6 +6,7 @@
 #include <esp_ota_ops.h>
 #include <esp_task_wdt.h>
 #include <esp_heap_caps.h>
+#include <esp_system.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
@@ -41,6 +42,27 @@ CN105Controller cn105;
 StatusLED statusLED(PIN_LED_DATA, PIN_LED_ENABLE, PIN_BLUE_LED);
 #endif
 
+// ── Crash loop detection (RTC NOINIT survives software resets) ───────────────
+RTC_NOINIT_ATTR static uint32_t s_crashMagic;
+RTC_NOINIT_ATTR static uint32_t s_crashCount;
+static constexpr uint32_t CRASH_MAGIC     = 0xDEAD0505;
+static constexpr uint32_t CRASH_THRESHOLD = 5;
+static bool safeMode = false;
+
+static const char *resetReasonStr(esp_reset_reason_t r) {
+    switch (r) {
+        case ESP_RST_POWERON:   return "POWER_ON";
+        case ESP_RST_SW:        return "SW_RESTART";
+        case ESP_RST_PANIC:     return "PANIC";
+        case ESP_RST_TASK_WDT:  return "TASK_WDT";
+        case ESP_RST_INT_WDT:   return "INT_WDT";
+        case ESP_RST_WDT:       return "WDT";
+        case ESP_RST_BROWNOUT:  return "BROWNOUT";
+        case ESP_RST_DEEPSLEEP: return "DEEPSLEEP";
+        default:                return "OTHER";
+    }
+}
+
 // ── State flags ─────────────────────────────────────────────────────────────
 static bool webUIStarted      = false;
 static bool homekitStarted    = false;
@@ -63,17 +85,35 @@ extern "C" void app_main(void)
     }
     ESP_ERROR_CHECK(err);
 
-    // ── 2. Load persistent settings from NVS ─────────────────────────────
+    // ── 2. Crash loop detection ────────────────────────────────────────
+    {
+        esp_reset_reason_t reason = esp_reset_reason();
+        if (s_crashMagic != CRASH_MAGIC) {
+            s_crashMagic = CRASH_MAGIC;
+            s_crashCount = 0;
+        }
+        bool isCrash = (reason == ESP_RST_PANIC  || reason == ESP_RST_TASK_WDT ||
+                        reason == ESP_RST_INT_WDT || reason == ESP_RST_WDT);
+        if (isCrash) {
+            s_crashCount++;
+        } else {
+            s_crashCount = 0;
+        }
+        safeMode = (s_crashCount >= CRASH_THRESHOLD);
+    }
+
+    // ── 3. Load persistent settings from NVS ─────────────────────────────
     settings.begin();
 
-    // ── 3. Logging init + apply saved log level ──────────────────────────
+    // ── 4. Logging init + apply saved log level ──────────────────────────
     logging_init();
     logging_set_level(settings.get().logLevel);
 
     LOG_INFO("═══════════════════════════════════════");
     LOG_INFO("Mitsubishi CN105 HomeKit Controller");
     LOG_INFO("Board: %s  FW: %s", BOARD_NAME, FW_VERSION);
-    LOG_INFO("Log level: %d (0=ERR 1=WARN 2=INFO 3=DBG)", (int)settings.get().logLevel);
+    LOG_INFO("Reset: %s  Crashes: %lu", resetReasonStr(esp_reset_reason()), (unsigned long)s_crashCount);
+    if (safeMode) LOG_WARN(">>> SAFE MODE — %lu consecutive crashes, skipping CN105/HomeKit/BLE <<<", (unsigned long)s_crashCount);
     LOG_INFO("═══════════════════════════════════════");
 
     // ── 4. Status LED begin + boot indicator ─────────────────────────────
@@ -139,26 +179,31 @@ extern "C" void app_main(void)
     // This keeps port 80 free for the captive portal redirect server
     // during initial WiFi provisioning.
 
-    // ── 10. CN105 UART init ──────────────────────────────────────────────
-    cn105.setUpdateInterval(settings.get().pollMs);
-    cn105.begin(CN105_UART_NUM, PIN_CN105_RX, PIN_CN105_TX);
-    LOG_INFO("CN105 UART started (RX=%d TX=%d baud=%lu)",
-             PIN_CN105_RX, PIN_CN105_TX, (unsigned long)CN105_BAUD_RATE);
+    // ── 10. CN105 UART init (skipped in safe mode) ─────────────────────
+    if (!safeMode) {
+        cn105.setUpdateInterval(settings.get().pollMs);
+        cn105.begin(CN105_UART_NUM, PIN_CN105_RX, PIN_CN105_TX);
+        LOG_INFO("CN105 UART started (RX=%d TX=%d baud=%lu)",
+                 PIN_CN105_RX, PIN_CN105_TX, (unsigned long)CN105_BAUD_RATE);
+    }
 
     // ── 11. WiFi recovery (AP fallback + button handler) ─────────────────
     wifiRecovery.begin(apName);
 
-    // If no WiFi credentials exist, activate recovery AP immediately
-    if (!WifiManager::isConnected()) {
-        LOG_INFO("Starting recovery AP immediately (no credentials or connection failed)");
+    // In safe mode or if no WiFi credentials, activate recovery AP immediately
+    if (safeMode || !WifiManager::isConnected()) {
+        LOG_INFO("Starting recovery AP immediately (%s)",
+                 safeMode ? "safe mode" : "no credentials or connection failed");
         wifiRecovery.activateNow();
     }
 
-    // ── 12. Start CN105 dedicated task (event-driven UART) ───────────────
-    cn105.startTask();
+    // ── 12. Start CN105 dedicated task (skipped in safe mode) ────────────
+    if (!safeMode) {
+        cn105.startTask();
+    }
 
     // ── 13. BLE sensor init ──────────────────────────────────────────────
-    // BLE is started later, after web UI is up
+    // BLE is started later, after web UI is up (skipped in safe mode)
 
     // ════════════════════════════════════════════════════════════════════════
     // Main loop — tiered polling
@@ -179,8 +224,8 @@ extern "C" void app_main(void)
         esp_task_wdt_reset();
         uint32_t now = uptime_ms();
 
-        // ── Deferred HomeKit init (one-shot after WiFi connects) ─────────
-        if (!homekitStarted && WifiManager::isConnected()) {
+        // ── Deferred HomeKit init (one-shot after WiFi connects, skipped in safe mode)
+        if (!safeMode && !homekitStarted && WifiManager::isConnected()) {
             // Release port 80 if captive portal redirect server is running
             if (lastAPState) {
                 webUI.setAPMode(false);
@@ -225,7 +270,7 @@ extern "C" void app_main(void)
             LOG_INFO("Web UI started (port 8080)");
 
 #ifdef BLE_ENABLE
-            BleSensor::begin();
+            if (!safeMode) BleSensor::begin();
 #endif
         }
 
@@ -283,12 +328,14 @@ extern "C" void app_main(void)
         statusLED.loop();
 #endif
 
-        // ── OTA rollback validation (one-shot) ──────────────────────────
-        // Validate firmware after WiFi + CN105 confirmed working, or 60s timeout
-        if (!firmwareValidated && webUIStarted) {
+        // ── OTA rollback validation (one-shot, skipped in safe mode) ────
+        // In safe mode, don't validate — let bootloader rollback to previous firmware.
+        // Validate firmware after WiFi + CN105 confirmed working, or 60s timeout.
+        if (!safeMode && !firmwareValidated && webUIStarted) {
             if (cn105.isConnected() || (uptime_ms() - webUIStartTime > 60000)) {
                 esp_ota_mark_app_valid_cancel_rollback();
                 firmwareValidated = true;
+                s_crashCount = 0;  // Clear crash counter on successful validation
                 LOG_INFO("Firmware validated (%s)",
                          cn105.isConnected() ? "WiFi + CN105 OK" : "WiFi OK, CN105 timeout");
             }
