@@ -18,20 +18,20 @@ Controls Mitsubishi mini split heat pumps via the CN105 serial connector, compat
 
 ## Features
 
-- **Native Apple HomeKit** —no bridge, cloud, or Home Assistant required
-- **Web UI** —real-time control, diagnostics, and log streaming
-- **Browser-based flashing** —no development tools needed ([web flasher](https://serin-labs.github.io/flash/))
-- **BLE remote temperature sensor** —Govee, Xiaomi (PVVX), BTHome v2, with auto-detection
-- **OTA firmware updates** —with SHA256 verification and automatic rollback
-- **Dual setpoint Auto mode** —independent heating and cooling thresholds
-- **Multi-board support** —ESP32, ESP32-C3, ESP32-C6, ESP32-S3
-- **WiFi recovery** —automatic fallback AP with web-based credential entry
+- **Native Apple HomeKit** — no bridge, cloud, or Home Assistant required
+- **Web UI** — real-time control, diagnostics, and log streaming
+- **Browser-based flashing** — no development tools needed ([web flasher](https://serin-labs.github.io/flash))
+- **BLE remote temperature sensor** — Govee, Xiaomi (PVVX), BTHome v2, with auto-detection
+- **OTA firmware updates** — with SHA256 verification and automatic rollback
+- **Dual setpoint Auto mode** — independent heating and cooling thresholds
+- **Multi-board support** — ESP32, ESP32-C3, ESP32-C6, ESP32-S3
+- **WiFi recovery** — automatic fallback AP with web-based credential entry
 
 ## Quick Start
 
-1. **Flash** —Open the [web flasher](https://serin-labs.github.io/flash/), connect your board via USB, and flash the firmware from your browser
-2. **Connect** —Join the **Serin-XXXX** WiFi network (password: `serinlabs`) and enter your WiFi credentials
-3. **Pair** —Open Apple Home, scan the QR code from the web UI at `http://<device-ip>:8080`
+1. **Flash** — Open the [web flasher](https://serin-labs.github.io/flash), connect your board via USB, and flash the firmware from your browser
+2. **Connect** — Join the **Serin-XXXX** WiFi network (password: `serinlabs`) and enter your WiFi credentials
+3. **Pair** — Open Apple Home, scan the QR code from the web UI at `http://<device-ip>:8080`
 
 For developer setup with ESP-IDF, custom boards, and build-time options, see [Setup](#setup).
 
@@ -47,7 +47,7 @@ For developer setup with ESP-IDF, custom boards, and build-time options, see [Se
 | **Connector** | Grove (HY2.0-4P) to CN105 cable (NanoC6) |
 | **Heat pump** | Mitsubishi mini split with CN105 connector |
 
-For compatible models, see the [MitsubishiCN105ESPHome supported units list](https://github.com/echavet/MitsubishiCN105ESPHome?tab=readme-ov-file#supported-mitsubishi-climate-units). Not every unit supports every feature (outside temperature, half-degree precision, wide vane control); it varies by model.
+For a full parts list with purchase links, see the [parts guide](https://serin-labs.github.io/parts). For compatible models, see the [compatibility list](https://serin-labs.github.io/compatibility) or the [MitsubishiCN105ESPHome supported units list](https://github.com/echavet/MitsubishiCN105ESPHome?tab=readme-ov-file#supported-mitsubishi-climate-units). Not every unit supports every feature (outside temperature, half-degree precision, wide vane control); it varies by model.
 
 ### Software
 
@@ -67,7 +67,7 @@ Board profiles define GPIO pins, LED, button, UART clock source, and debug outpu
 
 ## Wiring
 
-Connect the M5Stack NanoC6 to the CN105 connector on the indoor unit's control board using the Grove port:
+Connect the M5Stack NanoC6 to the CN105 connector on the indoor unit's control board using the Grove port. For detailed wiring photos and diagrams, see the [wiring guide](https://serin-labs.github.io/wiring).
 
 ```
 CN105 Connector          M5Stack NanoC6 (Grove)
@@ -80,7 +80,7 @@ CN105 Connector          M5Stack NanoC6 (Grove)
 └──────────────┘         └──────────────────────┘
 ```
 
-The CN105 connector is typically located on the right side of ductless indoor unit's control board behind the front panel. Power is provided by the unit through pins 2 and 3. If your board doesn't have a Grove port, you can connect directly to the appropriate GPIO pins for RX/TX, GND, and 5V (see [board profiles](#supported-boards)).
+The CN105 connector is typically located on the right side of ductless indoor unit's control board behind the front panel. Power is provided by the unit through pins 2 and 3. If your board doesn't have a Grove port, you can connect directly to the appropriate GPIO pins for RX/TX, GND, and 5V (see [board profiles](#boards)).
 
 ## Setup
 
@@ -88,7 +88,7 @@ The CN105 connector is typically located on the right side of ductless indoor un
 
 **Option A — Web Flasher (recommended):**
 
-No tools to install. Visit the [web flasher](https://serin-labs.github.io/flash/), connect your board via USB, select your board type, and click flash. Works in Chrome and Edge.
+No tools to install. Visit the [web flasher](https://serin-labs.github.io/flash), connect your board via USB, select your board type, and click flash. Works in Chrome and Edge.
 
 **Option B — ESP-IDF (developers):**
 
@@ -192,10 +192,10 @@ The firmware auto-detects the sensor type from the BLE advertisement format.
 
 A **Remote Sensor** card appears in the web UI on boards with Bluetooth:
 
-- **MAC Address** —enter or change the sensor's BLE MAC address (persisted to flash)
-- **Feed Toggle** —enable/disable sending the sensor temperature to the heat pump (disabling the feed keeps scanning and displaying sensor data, it just stops overriding the HP's internal thermistor)
-- **Status** —live temperature, humidity, battery level, signal strength, and last update time
-- **Indicators** —green (active), orange (feed disabled), red (stale data), gray (scanning/not configured)
+- **MAC Address** — enter or change the sensor's BLE MAC address (persisted to flash)
+- **Feed Toggle** — enable/disable sending the sensor temperature to the heat pump (disabling the feed keeps scanning and displaying sensor data, it just stops overriding the HP's internal thermistor)
+- **Status** — live temperature, humidity, battery level, signal strength, and last update time
+- **Indicators** — green (active), orange (feed disabled), red (stale data), gray (scanning/not configured)
 
 ## OTA Updates
 
@@ -220,21 +220,21 @@ Access the web interface at `http://<device-ip>:8080`.
 
 The web UI includes:
 
-- **Mode** —Off/Heat/Cool/Auto/Dry/Fan mode selector (power integrated as Off mode)
-- **Temperature** —set target temperature with 0.5°C precision, +/− step buttons
-- **Dual Setpoints** —independent heat/cool thresholds in Auto mode (persisted to flash)
-- **Fan Speed** —Auto, Quiet, Speed 1–4
-- **Vane Control** —vertical and wide vane positions, swing mode
-- **Remote Sensor** —BLE sensor temperature, humidity, battery, signal strength, MAC config, feed toggle (only visible when built with BLE support)
-- **Diagnostics** —compressor frequency, outside temp, runtime hours, error codes, sub mode/stage
-- **HomeKit** —pairing status, controller count, setup code with copy button, QR code for pairing, reset pairing button
-- **Settings** —device name, poll interval (ms), log level, °C/°F toggle
-- **Logs** —real-time log streaming via WebSocket
-- **OTA** —firmware upload with integrity verification (see [OTA Updates](#ota-updates))
+- **Mode** — Off/Heat/Cool/Auto/Dry/Fan mode selector (power integrated as Off mode)
+- **Temperature** — set target temperature with 0.5°C precision, +/− step buttons
+- **Dual Setpoints** — independent heat/cool thresholds in Auto mode (persisted to flash)
+- **Fan Speed** — Auto, Quiet, Speed 1–4
+- **Vane Control** — vertical and wide vane positions, swing mode
+- **Remote Sensor** — BLE sensor temperature, humidity, battery, signal strength, MAC config, feed toggle (only visible when built with BLE support)
+- **Diagnostics** — compressor frequency, outside temp, runtime hours, error codes, sub mode/stage
+- **HomeKit** — pairing status, controller count, setup code with copy button, QR code for pairing, reset pairing button
+- **Settings** — device name, poll interval (ms), log level, °C/°F toggle
+- **Logs** — real-time log streaming via WebSocket
+- **OTA** — firmware upload with integrity verification (see [OTA Updates](#ota-updates))
 
 ## HomeKit Details
 
-Thermostat mode mappings, FAN/DRY mode switches, fan speed percentages, dual setpoints, vane control, and diagnostics are documented in [HomeKit Details](docs/homekit.md).
+Thermostat mode mappings, FAN/DRY mode switches, fan speed percentages, dual setpoints, vane control, and diagnostics are documented in [HomeKit Details](docs/homekit.md). For an overview of HomeKit features and setup, see the [Serin Labs HomeKit page](https://serin-labs.github.io/homekit/features).
 
 ## Project Structure
 
@@ -244,15 +244,19 @@ See [Project Structure](docs/project-structure.md) for the full source tree with
 
 2400 baud, 8E1 serial protocol over the CN105 connector. See [Protocol Reference](docs/protocol.md) for packet format and polling cycle details, and the [muart-group wiki](https://muart-group.github.io/) for community protocol documentation.
 
+## Troubleshooting
+
+See the [troubleshooting guide](https://serin-labs.github.io/troubleshooting) for help with flashing, WiFi, HomeKit pairing, and CN105 connection issues.
+
 ## Acknowledgments
 
 Built on work from:
 
-- **[esp-homekit-sdk](https://github.com/espressif/esp-homekit-sdk)** —Espressif's official HomeKit SDK for ESP-IDF
-- **[SwiCago/HeatPump](https://github.com/SwiCago/HeatPump)** —the original CN105 protocol library and compatibility documentation
-- **[esphome-mitsubishiheatpump](https://github.com/geoffdavis/esphome-mitsubishiheatpump)** —early ESPHome integration
-- **[MitsubishiCN105ESPHome](https://github.com/echavet/MitsubishiCN105ESPHome)** —ESPHome component with comprehensive CN105 protocol implementation
-- **[muart-group](https://muart-group.github.io/)** —community documentation and protocol research
+- **[esp-homekit-sdk](https://github.com/espressif/esp-homekit-sdk)** — Espressif's official HomeKit SDK for ESP-IDF
+- **[SwiCago/HeatPump](https://github.com/SwiCago/HeatPump)** — the original CN105 protocol library and compatibility documentation
+- **[esphome-mitsubishiheatpump](https://github.com/geoffdavis/esphome-mitsubishiheatpump)** — early ESPHome integration
+- **[MitsubishiCN105ESPHome](https://github.com/echavet/MitsubishiCN105ESPHome)** — ESPHome component with comprehensive CN105 protocol implementation
+- **[muart-group](https://muart-group.github.io/)** — community documentation and protocol research
 
 ## Trademarks
 
