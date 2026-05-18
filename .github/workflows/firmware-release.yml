@@ -46,8 +46,10 @@ jobs:
           esp_idf_version: v5.5
           target: ${{ matrix.target }}
           command: |
+            # Derive profile macro from name (e.g. nanoc6 -> NANOC6, m5atoms3-lite -> M5ATOMS3_LITE)
+            PROFILE=$(echo "${{ matrix.name }}" | tr '[:lower:]' '[:upper:]' | tr '-' '_')
             idf.py set-target ${{ matrix.target }}
-            idf.py build
+            idf.py -DBOARD_PROFILE_${PROFILE}=1 build
 
       - name: Collect artifacts
         env:
