@@ -108,6 +108,7 @@ def main() -> None:
     parser.add_argument("--brand-ap-password", default=DEFAULTS["BRAND_AP_PASSWORD"])
     parser.add_argument("--brand-model", default=DEFAULTS["BRAND_MODEL"])
     parser.add_argument("--brand-theme-color", default=DEFAULTS["BRAND_THEME_COLOR"])
+    parser.add_argument("--fw-version", default="0.0.0-dev", help="Firmware version from git/CMake")
     args = parser.parse_args()
 
     brand_vars = {
@@ -116,6 +117,7 @@ def main() -> None:
         "BRAND_AP_PASSWORD": args.brand_ap_password,
         "BRAND_MODEL": args.brand_model,
         "BRAND_THEME_COLOR": args.brand_theme_color,
+        "FW_VERSION": args.fw_version,
     }
 
     embed(args.input, args.output, brand_vars)
