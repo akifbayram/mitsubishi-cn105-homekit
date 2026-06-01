@@ -125,7 +125,7 @@ static void sync_fan_mode(CN105Controller &cn105)
     }
 
     if (s_fanModeOn) {
-        bool isFanMode = (s.power && s.mode == CN105_MODE_FAN);
+        bool isFanMode = s.power && (s.mode == CN105_MODE_FAN);
         const hap_val_t *cur = hap_char_get_val(s_fanModeOn);
         if (forceSync || !cur || cur->b != isFanMode) {
             LOG_DEBUG("[HK:FanMode] sync: %s", isFanMode ? "ON" : "OFF");
@@ -241,7 +241,7 @@ static void sync_dry_mode(CN105Controller &cn105)
     }
 
     if (s_dryModeOn) {
-        bool isDryMode = (s.power && s.mode == CN105_MODE_DRY);
+        bool isDryMode = s.power && (s.mode == CN105_MODE_DRY);
         const hap_val_t *cur = hap_char_get_val(s_dryModeOn);
         if (forceSync || !cur || cur->b != isDryMode) {
             LOG_DEBUG("[HK:DryMode] sync: %s", isDryMode ? "ON" : "OFF");

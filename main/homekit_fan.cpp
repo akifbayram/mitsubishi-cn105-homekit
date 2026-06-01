@@ -321,7 +321,7 @@ static void sync_fan_auto(CN105Controller &cn105)
     }
 
     if (s_fanAutoOn) {
-        bool isAuto = (s.fanSpeed == CN105_FAN_AUTO);
+        bool isAuto = s.power && (s.fanSpeed == CN105_FAN_AUTO);
         const hap_val_t *cur = hap_char_get_val(s_fanAutoOn);
         if (forceSync || !cur || cur->b != isAuto) {
             LOG_DEBUG("[HK:FanAuto] sync auto: %s", isAuto ? "ON" : "OFF");
