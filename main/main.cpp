@@ -32,7 +32,7 @@ static const char *TAG = "main";
 
 // ── Firmware version ────────────────────────────────────────────────────────
 #ifndef FW_VERSION
-#define FW_VERSION "0.1.0"
+#define FW_VERSION "0.0.0-dev"
 #endif
 
 // ── Global instances ────────────────────────────────────────────────────────
