@@ -604,6 +604,7 @@ input:focus-visible,select:focus-visible{outline-offset:0}
           <button class="save-btn" id="bleScanBtn" style="margin:0;width:100%;background:var(--surface3);color:var(--text);font-size:13px" onclick="startBleScan()">Scan for Sensors</button>
         </div>
         <div id="bleScanResults" style="display:none;margin-top:8px"></div>
+        <div id="bleToast" class="ble-banner info" style="display:none;margin-top:8px"></div>
         <button class="save-btn" style="margin:12px 0 0;width:100%" onclick="saveBleConfig()">Save</button>
       </div>
     </div>
@@ -1585,9 +1586,11 @@ input:focus-visible,select:focus-visible{outline-offset:0}
   window.toggleBleFeed=function(){
     ws.send(JSON.stringify({cmd:'config',bleFeed:$('bleFeedToggle').checked}));
   };
+  var bleScanPicked=false;
   window.startBleScan=function(){
     var btn=$('bleScanBtn');
     btn.textContent='Scanning\u2026';btn.disabled=true;btn.classList.add('scanning');
+    bleScanPicked=false;
     $('bleScanResults').style.display='none';
     $('bleScanResults').textContent='';
     ws.send(JSON.stringify({cmd:'bleScan'}));
@@ -1597,6 +1600,9 @@ input:focus-visible,select:focus-visible{outline-offset:0}
       var btn=$('bleScanBtn');
       btn.textContent='Scan for Sensors';btn.disabled=false;btn.classList.remove('scanning');
     }
+    // User already picked a sensor \u2014 ignore trailing results from the
+    // still-running backend discovery so the dismissed list doesn't pop back.
+    if(bleScanPicked)return;
     var el=$('bleScanResults');
     el.textContent='';
     if(!msg.devices||msg.devices.length===0){
@@ -1626,10 +1632,21 @@ input:focus-visible,select:focus-visible{outline-offset:0}
     }
     el.style.display='block';
   }
+  var bleToastTimer=null;
+  function showBleToast(text){
+    var t=$('bleToast');
+    t.textContent=text;
+    t.style.display='flex';
+    if(bleToastTimer)clearTimeout(bleToastTimer);
+    bleToastTimer=setTimeout(function(){t.style.display='none'},3000);
+  }
   function pickBleSensor(addr){
+    bleScanPicked=true;
     $('bleMacInput').value=addr;
     $('bleScanResults').style.display='none';
+    $('bleScanResults').textContent='';
     saveBleConfig();
+    showBleToast('Sensor saved: '+addr);
   }
   window.pickBleSensor=pickBleSensor;
 

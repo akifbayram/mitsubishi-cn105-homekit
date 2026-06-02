@@ -259,6 +259,7 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
         if (jsonGetString(msg, "bleAddr", bleAddrVal, sizeof(bleAddrVal))) {
             BleSensor::setAddr(bleAddrVal);
             LOG_INFO("Config bleAddr=%s", bleAddrVal);
+            pushState();  // setAddr() already persists; just confirm to the UI at once
         }
 
         bool bleFeedVal;
@@ -271,8 +272,8 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
         if (jsonGetInt(msg, "bleTimeout", &bleTimeoutVal)) {
             if (bleTimeoutVal >= 30 && bleTimeoutVal <= 600) {
                 settings.get().bleStaleTimeoutS = (uint16_t)bleTimeoutVal;
-                settings.save();
                 LOG_INFO("Config bleTimeout=%ds", bleTimeoutVal);
+                changed = true;  // saved + pushState() handled by the `changed` block below
             }
         }
 #endif
