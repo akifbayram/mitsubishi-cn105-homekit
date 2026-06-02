@@ -15,6 +15,7 @@ static const char *TAG = "web";
 static esp_err_t setTcpNoDelay(httpd_handle_t, int sockfd) {
     int flag = 1;
     setsockopt(sockfd, IPPROTO_TCP, TCP_NODELAY, &flag, sizeof(flag));
+    LOG_DEBUG("HTTP: new connection accepted (fd=%d)", sockfd);
     return ESP_OK;
 }
 

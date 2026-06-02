@@ -6,6 +6,7 @@
 #include "homekit_setup.h"
 #include "esp_utils.h"
 #include <esp_heap_caps.h>
+#include <lwip/sockets.h>
 #include <algorithm>
 #include <cmath>
 #include "ble_config.h"
@@ -23,6 +24,14 @@ esp_err_t WebUI::handleWebSocket(httpd_req_t *req) {
     // On first call (handshake), req->method == HTTP_GET
     if (req->method == HTTP_GET) {
         int fd = httpd_req_to_sockfd(req);
+
+        // Cap send() blocking time so the httpd task can't hang for minutes when
+        // a client disappears without closing the WebSocket (half-open TCP).
+        // After timeout the send fails, ESP-IDF closes the session, and the
+        // httpd task returns to its select() loop within 5 s.
+        struct timeval tv = {.tv_sec = 5, .tv_usec = 0};
+        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+
         int oldFd = webUI._wsClientFd.exchange(fd);
         if (oldFd >= 0 && oldFd != fd) {
             LOG_INFO("Replacing WS client fd=%d with fd=%d", oldFd, fd);

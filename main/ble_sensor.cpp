@@ -37,6 +37,10 @@ static bool     s_staleReverted = false;
 static std::atomic<bool> s_nimbleInitialized{false};
 static std::atomic<bool> s_pendingInit{false};
 static std::atomic<bool> s_pendingClear{false};   // Deferred clearRemoteTemperature
+// Deferred scan stop+restart, drained in loop(). Set from the httpd task instead
+// of calling stopScan()/startScan() directly: ble_gap_disc_cancel() can block on
+// an HCI response and permanently stall the web server.
+static std::atomic<bool> s_pendingRestart{false};
 static std::atomic<bool> s_bleEnabled{false};      // Mirror of settings.bleEnabled
 
 // ── Keepalive state ─────────────────────────────────────────────────────────
@@ -475,15 +479,15 @@ void BleSensor::setBleEnabled(bool on) {
 
     if (on) {
         if (s_nimbleInitialized.load()) {
-            // Already initialized — just start scanning
-            if (s_addrValid) startScan();
+            s_pendingRestart.store(true);
         } else {
             // Defer NimBLE init to main loop (avoid blocking httpd task)
             s_pendingInit.store(true);
         }
         LOG_INFO("BLE enabled");
     } else {
-        stopScan();
+        // s_bleEnabled is already false, so the restart handler stops without re-scanning
+        s_pendingRestart.store(true);
         // Defer clearRemoteTemperature to loop() (needs cn105 reference)
         s_pendingClear.store(true);
         s_staleReverted = false;
@@ -513,6 +517,17 @@ void BleSensor::loop(CN105Controller &cn105) {
         if (cn105.isConnected()) {
             cn105.sendRemoteTemperature(0);
             LOG_INFO("Cleared remote temp — HP reverts to internal sensor");
+        }
+    }
+
+    // Handle deferred scan restart (sensor address changed from httpd task)
+    if (s_pendingRestart.exchange(false)) {
+        stopScan();
+        // Match the DISC_COMPLETE handler: discovery scans run without a
+        // configured address (that's how new sensors get found).
+        if (s_bleEnabled.load() && (s_addrValid || s_discoveryMode)) {
+            startScan();
+            LOG_INFO("Scan restarted for new sensor address");
         }
     }
 
@@ -577,8 +592,6 @@ void BleSensor::setEnabled(bool enabled) {
 void BleSensor::setAddr(const char* mac) {
     if (!mac) return;
 
-    stopScan();
-
     // Reset type detection for new sensor
     s_sensorType = nullptr;
     s_typeLogged = false;
@@ -590,6 +603,7 @@ void BleSensor::setAddr(const char* mac) {
         strncpy(settings.get().bleSensorAddr, "", sizeof(settings.get().bleSensorAddr));
         settings.save();
         LOG_INFO("Sensor address cleared");
+        s_pendingRestart.store(true);
         return;
     }
 
@@ -600,7 +614,7 @@ void BleSensor::setAddr(const char* mac) {
         settings.get().bleSensorAddr[sizeof(settings.get().bleSensorAddr) - 1] = '\0';
         settings.save();
         LOG_INFO("Sensor address set: %s", mac);
-        startScan();
+        s_pendingRestart.store(true);
     } else {
         LOG_WARN("Invalid MAC format: %s", mac);
     }
@@ -625,7 +639,7 @@ void BleSensor::startDiscovery() {
     s_discoveryStart = uptime_ms();
 
     if (!s_scanning) {
-        startScan();
+        s_pendingRestart.store(true);
     }
 
     LOG_INFO("Discovery scan started (%lums)", (unsigned long)BLE_DISCOVERY_MS);
