@@ -3,6 +3,7 @@
 #include <cstring>
 #include <cstdlib>
 #include <cstdio>
+#include <cstdarg>
 
 // ════════════════════════════════════════════════════════════════════════════
 // Lightweight JSON parsing helpers (strstr-based, no external library)
@@ -72,6 +73,28 @@ inline bool jsonGetBool(const char *json, const char *key, bool *out) {
         return true;
     }
     return false;
+}
+
+// Safely append printf-formatted text to a fixed buffer using a running offset.
+//
+// Replaces the unsafe idiom `n += snprintf(buf + n, sizeof(buf) - n, ...)`, which
+// corrupts memory once `n` exceeds the buffer: `sizeof(buf) - n` is unsigned, so it
+// underflows to a huge size and `buf + n` already points past the end, letting the
+// next snprintf write out of bounds. This helper stops writing once `*pos` reaches
+// `cap`, while still advancing `*pos` past `cap` so the caller can detect truncation
+// afterwards via `*pos >= (int)cap`.
+inline void jsonAppend(char *buf, size_t cap, int *pos, const char *fmt, ...) {
+    if (*pos < 0 || (size_t)*pos >= cap) return;   // full/invalid — never underflow cap - *pos
+
+    va_list args;
+    va_start(args, fmt);
+    int w = vsnprintf(buf + *pos, cap - (size_t)*pos, fmt, args);
+    va_end(args);
+
+    // w < 0: encoding error — mark truncated. Otherwise advance; w is the length that
+    // *would* have been written, so *pos may exceed cap (vsnprintf still NUL-terminated
+    // within cap), making truncation detectable on the next call and at the end.
+    *pos = (w < 0) ? (int)cap : *pos + w;
 }
 
 // Escape a string for safe embedding in a JSON string literal.

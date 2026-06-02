@@ -164,11 +164,11 @@ esp_err_t WebUI::handleWifiScan(httpd_req_t *req) {
 
     char buf[1200];
     int pos = 0;
-    pos += snprintf(buf + pos, sizeof(buf) - pos, "[");
+    jsonAppend(buf, sizeof(buf), &pos, "[");
     for (int i = 0; i < count; i++) {
         char escSSID[67];
         jsonEscape(networks[i].ssid, escSSID, sizeof(escSSID));
-        pos += snprintf(buf + pos, sizeof(buf) - pos,
+        jsonAppend(buf, sizeof(buf), &pos,
             "%s{\"ssid\":\"%s\",\"rssi\":%d,\"secure\":%s}",
             i > 0 ? "," : "",
             escSSID,
@@ -176,7 +176,7 @@ esp_err_t WebUI::handleWifiScan(httpd_req_t *req) {
             networks[i].secure ? "true" : "false");
         if (pos >= (int)sizeof(buf) - 80) break;
     }
-    snprintf(buf + pos, sizeof(buf) - pos, "]");
+    jsonAppend(buf, sizeof(buf), &pos, "]");
 
     httpd_resp_set_type(req, "application/json");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
