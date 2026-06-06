@@ -27,7 +27,6 @@ static hap_char_t *s_battLevel     = nullptr;
 static hap_char_t *s_battLowStatus = nullptr;
 
 static uint32_t s_lastSync       = 0;
-static int8_t   s_lastValidLevel = 100;  // retained across stale periods
 
 void homekit_create_ble_battery(hap_acc_t *acc)
 {
@@ -62,26 +61,19 @@ void homekit_sync_ble_sensor(CN105Controller &cn105)
     if (now - s_lastSync < 2000) return;
     s_lastSync = now;
 
-    int8_t raw = BleSensor::battery();
-
-    uint8_t level;
-    if (raw >= 0) {
-        // Fresh, valid reading
-        s_lastValidLevel = raw;
-        level = (uint8_t)raw;
-    } else if (BleSensor::isStale() && s_lastValidLevel >= 0) {
-        // Lost contact after having had data — retain last known level
-        level = (uint8_t)s_lastValidLevel;
-    } else {
-        // No sensor / unsupported / never seen — safe default, never false-alarm
-        level = 100;
-    }
-
-    uint8_t low = (level <= BATT_LOW_THRESHOLD) ? 1 : 0;
+    // BleSensor::battery() returns the last decoded level and keeps returning it
+    // across stale periods (it is not reset on timeout), which already satisfies
+    // "retain last-known level when stale". It returns -1 only when no battery was
+    // ever decoded (no sensor, or a sensor with no battery field) — then we report
+    // a safe 100% so HomeKit never raises a false low-battery alert.
+    int8_t  raw   = BleSensor::battery();
+    uint8_t level = (raw >= 0) ? (uint8_t)raw : 100;
+    uint8_t low   = (level <= BATT_LOW_THRESHOLD) ? 1 : 0;
 
     if (s_battLevel) {
         const hap_val_t *cur = hap_char_get_val(s_battLevel);
         if (!cur || cur->u != level) {
+            LOG_DEBUG("[HK:Battery] level=%u%%", level);
             hap_val_t v; v.u = level;
             hap_char_update_val(s_battLevel, &v);
         }
