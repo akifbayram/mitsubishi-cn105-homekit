@@ -245,6 +245,9 @@ extern "C" void app_main(void)
             homekit_sync_thermostat(cn105);
             homekit_sync_fan(cn105);
             homekit_sync_switches(cn105);
+#ifdef BLE_ENABLE
+            homekit_sync_ble_sensor(cn105);
+#endif
         }
 
         // ── WiFi recovery — 1 Hz ────────────────────────────────────────
