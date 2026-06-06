@@ -51,6 +51,10 @@ void homekit_sensor_set_serial(const char* serial)
 
 static void create_sensor_accessory()
 {
+    if (s_serial[0] == '\0') {
+        LOG_WARN("[HK:Sensor] serial not set — call homekit_sensor_set_serial() first");
+    }
+
     hap_acc_cfg_t cfg = {
         .name             = const_cast<char*>("Remote Sensor"),
         .model            = const_cast<char*>(BRAND_MODEL),
@@ -68,15 +72,31 @@ static void create_sensor_accessory()
         return;
     }
 
+    // No StatusActive characteristic here (intentional): unlike the AC accessory,
+    // this accessory's presence is conveyed by dynamic add/remove (it disappears
+    // when BLE is disabled/unconfigured), and a stale-but-enabled sensor holds its
+    // last values rather than showing "Not Responding".
+
     // Temperature Sensor (primary)
     float t = BleSensor::temperature();
     hap_serv_t *ts = hap_serv_temperature_sensor_create(std::isnan(t) ? 0.0f : t);
+    if (!ts) {
+        LOG_ERROR("[HK:Sensor] temperature service alloc failed");
+        hap_acc_delete(s_rsAcc); s_rsAcc = nullptr;
+        return;
+    }
     s_rsTemp = hap_serv_get_char_by_uuid(ts, HAP_CHAR_UUID_CURRENT_TEMPERATURE);
     hap_acc_add_serv(s_rsAcc, ts);
 
     // Humidity Sensor
     float h = BleSensor::humidity();
     hap_serv_t *hs = hap_serv_humidity_sensor_create(std::isnan(h) ? 0.0f : h);
+    if (!hs) {
+        LOG_ERROR("[HK:Sensor] humidity service alloc failed");
+        hap_acc_delete(s_rsAcc); s_rsAcc = nullptr;
+        s_rsTemp = nullptr;
+        return;
+    }
     s_rsHum = hap_serv_get_char_by_uuid(hs, HAP_CHAR_UUID_CURRENT_RELATIVE_HUMIDITY);
     hap_acc_add_serv(s_rsAcc, hs);
 
@@ -85,6 +105,12 @@ static void create_sensor_accessory()
     uint8_t level = (raw >= 0) ? (uint8_t)raw : 100;
     uint8_t low   = (level <= BATT_LOW_THRESHOLD) ? 1 : 0;
     hap_serv_t *bs = hap_serv_battery_service_create(level, HAP_CHARGING_STATE_NOT_CHARGEABLE, low);
+    if (!bs) {
+        LOG_ERROR("[HK:Sensor] battery service alloc failed");
+        hap_acc_delete(s_rsAcc); s_rsAcc = nullptr;
+        s_rsTemp = nullptr; s_rsHum = nullptr;
+        return;
+    }
     s_rsBattLevel = hap_serv_get_char_by_uuid(bs, HAP_CHAR_UUID_BATTERY_LEVEL);
     s_rsBattLow   = hap_serv_get_char_by_uuid(bs, HAP_CHAR_UUID_STATUS_LOW_BATTERY);
     hap_acc_add_serv(s_rsAcc, bs);
@@ -147,7 +173,10 @@ void homekit_sensor_loop()
     uint8_t low   = (level <= BATT_LOW_THRESHOLD) ? 1 : 0;
     if (s_rsBattLevel) {
         const hap_val_t *cur = hap_char_get_val(s_rsBattLevel);
-        if (!cur || cur->u != level) { hap_val_t v; v.u = level; hap_char_update_val(s_rsBattLevel, &v); }
+        if (!cur || cur->u != level) {
+            LOG_DEBUG("[HK:Sensor] battery=%u%%", level);
+            hap_val_t v; v.u = level; hap_char_update_val(s_rsBattLevel, &v);
+        }
     }
     if (s_rsBattLow) {
         const hap_val_t *cur = hap_char_get_val(s_rsBattLow);
