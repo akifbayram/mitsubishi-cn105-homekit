@@ -75,6 +75,7 @@ add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/web_ui.html.gz
         --brand-ap-password "${BRAND_AP_PASSWORD}"
         --brand-model "${BRAND_MODEL}"
         --brand-theme-color "${BRAND_THEME_COLOR}"
+        --fw-version "${PROJECT_VER}"
     DEPENDS ${PROJECT_DIR}/web/index.html ${PROJECT_DIR}/scripts/embed_html_idf.py
     COMMENT "Generating web_ui.html.gz"
     VERBATIM
