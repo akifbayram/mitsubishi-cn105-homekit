@@ -26,6 +26,15 @@ void homekit_sync_fan(CN105Controller &cn105);
 /// Push CN105 mode switch states to HomeKit characteristics.
 void homekit_sync_switches(CN105Controller &cn105);
 
+// ── BLE remote sensor battery (compiled only when BLE is enabled) ───────────
+#include "ble_config.h"
+#ifdef BLE_ENABLE
+/// Create the HomeKit Battery Service for the BLE remote sensor.
+void homekit_create_ble_battery(hap_acc_t *acc);
+/// Push BLE sensor battery level + low-battery status to HomeKit.
+void homekit_sync_ble_sensor(CN105Controller &cn105);
+#endif
+
 // ── Per-service creation (internal, called from create_all) ─────────────────
 
 void homekit_create_thermostat(hap_acc_t *acc);
