@@ -216,6 +216,7 @@ extern "C" void app_main(void)
     uint32_t lastWifiCheck = 0;
     uint32_t lastWebLoop   = 0;
     uint32_t lastHeapLog   = 0;
+    uint32_t lastAliveLog  = 0;
 #ifdef BLE_ENABLE
     uint32_t lastBleLoop   = 0;
 #endif
@@ -251,6 +252,12 @@ extern "C" void app_main(void)
         if (now - lastWifiCheck >= 1000) {
             wifiRecovery.loop();
             lastWifiCheck = now;
+        }
+
+        // ── Main-loop alive — 15s ────────────────────────────────────
+        if (now - lastAliveLog >= 15000) {
+            lastAliveLog = now;
+            LOG_DEBUG("main loop alive (uptime=%lus)", (unsigned long)(now / 1000));
         }
 
         // ── Heap health — 60s ─────────────────────────────────────────

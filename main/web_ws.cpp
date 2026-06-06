@@ -6,6 +6,7 @@
 #include "homekit_setup.h"
 #include "esp_utils.h"
 #include <esp_heap_caps.h>
+#include <lwip/sockets.h>
 #include <algorithm>
 #include <cmath>
 #include "ble_config.h"
@@ -23,6 +24,14 @@ esp_err_t WebUI::handleWebSocket(httpd_req_t *req) {
     // On first call (handshake), req->method == HTTP_GET
     if (req->method == HTTP_GET) {
         int fd = httpd_req_to_sockfd(req);
+
+        // Cap send() blocking time so the httpd task can't hang for minutes when
+        // a client disappears without closing the WebSocket (half-open TCP).
+        // After timeout the send fails, ESP-IDF closes the session, and the
+        // httpd task returns to its select() loop within 5 s.
+        struct timeval tv = {.tv_sec = 5, .tv_usec = 0};
+        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+
         int oldFd = webUI._wsClientFd.exchange(fd);
         if (oldFd >= 0 && oldFd != fd) {
             LOG_INFO("Replacing WS client fd=%d with fd=%d", oldFd, fd);
@@ -250,6 +259,7 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
         if (jsonGetString(msg, "bleAddr", bleAddrVal, sizeof(bleAddrVal))) {
             BleSensor::setAddr(bleAddrVal);
             LOG_INFO("Config bleAddr=%s", bleAddrVal);
+            pushState();  // setAddr() already persists; just confirm to the UI at once
         }
 
         bool bleFeedVal;
@@ -262,8 +272,8 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
         if (jsonGetInt(msg, "bleTimeout", &bleTimeoutVal)) {
             if (bleTimeoutVal >= 30 && bleTimeoutVal <= 600) {
                 settings.get().bleStaleTimeoutS = (uint16_t)bleTimeoutVal;
-                settings.save();
                 LOG_INFO("Config bleTimeout=%ds", bleTimeoutVal);
+                changed = true;  // saved + pushState() handled by the `changed` block below
             }
         }
 #endif
@@ -401,27 +411,27 @@ void WebUI::pushState() {
     );
 
     if (st.outsideTempValid) {
-        n += snprintf(buf + n, sizeof(buf) - n, ",\"outsideTemp\":%.1f", st.outsideTemp);
+        jsonAppend(buf, sizeof(buf), &n, ",\"outsideTemp\":%.1f", st.outsideTemp);
     } else {
-        n += snprintf(buf + n, sizeof(buf) - n, ",\"outsideTemp\":null");
+        jsonAppend(buf, sizeof(buf), &n, ",\"outsideTemp\":null");
     }
 
     // Error code
     if (st.hasError) {
-        n += snprintf(buf + n, sizeof(buf) - n, ",\"errorCode\":%u", st.errorCode);
+        jsonAppend(buf, sizeof(buf), &n, ",\"errorCode\":%u", st.errorCode);
     } else {
-        n += snprintf(buf + n, sizeof(buf) - n, ",\"errorCode\":null");
+        jsonAppend(buf, sizeof(buf), &n, ",\"errorCode\":null");
     }
 
     // Runtime hours
     if (st.runtimeValid) {
-        n += snprintf(buf + n, sizeof(buf) - n, ",\"runtime\":%.1f", st.runtimeHours);
+        jsonAppend(buf, sizeof(buf), &n, ",\"runtime\":%.1f", st.runtimeHours);
     } else {
-        n += snprintf(buf + n, sizeof(buf) - n, ",\"runtime\":null");
+        jsonAppend(buf, sizeof(buf), &n, ",\"runtime\":null");
     }
 
     // Heap diagnostics
-    n += snprintf(buf + n, sizeof(buf) - n,
+    jsonAppend(buf, sizeof(buf), &n,
         ",\"heapFree\":%lu"
         ",\"heapMin\":%lu"
         ",\"heapBlock\":%lu",
@@ -431,7 +441,7 @@ void WebUI::pushState() {
     );
 
     // Dual setpoint thresholds
-    n += snprintf(buf + n, sizeof(buf) - n,
+    jsonAppend(buf, sizeof(buf), &n,
         ",\"heatThresh\":%.1f"
         ",\"coolThresh\":%.1f",
         cfg.heatingThreshold,
@@ -440,7 +450,7 @@ void WebUI::pushState() {
 
     int hkControllers = homekit_get_controller_count();
 
-    n += snprintf(buf + n, sizeof(buf) - n,
+    jsonAppend(buf, sizeof(buf), &n,
         ",\"logLevel\":%d"
         ",\"pollInterval\":%lu"
         ",\"tempUnit\":\"%s\""
@@ -475,7 +485,7 @@ void WebUI::pushState() {
 
         const char* sType = BleSensor::sensorType();
 
-        n += snprintf(buf + n, sizeof(buf) - n,
+        jsonAppend(buf, sizeof(buf), &n,
             ",\"bleEnabled\":%s"
             ",\"bleTemp\":%s"
             ",\"bleHumidity\":%s"
@@ -506,7 +516,7 @@ void WebUI::pushState() {
     }
 #endif
 
-    n += snprintf(buf + n, sizeof(buf) - n, "}");
+    jsonAppend(buf, sizeof(buf), &n, "}");
 
     if (n >= (int)sizeof(buf)) {
         LOG_WARN("pushState buffer truncated (%d >= %zu), skipping send", n, sizeof(buf));
@@ -553,13 +563,19 @@ void WebUI::pushDiscoveryResults(bool done) {
         if (n >= (int)sizeof(buf) - 100) break;  // Reserve space for entry + closing
         char escName[50];
         jsonEscape(devs[i].name, escName, sizeof(escName));
-        n += snprintf(buf + n, sizeof(buf) - n,
+        jsonAppend(buf, sizeof(buf), &n,
             "%s{\"addr\":\"%s\",\"name\":\"%s\",\"type\":\"%s\",\"rssi\":%d}",
             i > 0 ? "," : "",
             devs[i].addr, escName, devs[i].type, devs[i].rssi);
     }
 
-    n += snprintf(buf + n, sizeof(buf) - n, "]}");
+    jsonAppend(buf, sizeof(buf), &n, "]}");
+
+    if (n >= (int)sizeof(buf)) {
+        LOG_WARN("pushDiscoveryResults buffer truncated (%d >= %zu), skipping send", n, sizeof(buf));
+        return;
+    }
+
     sendWsText(_wsClientFd, buf);
 #endif
 }
