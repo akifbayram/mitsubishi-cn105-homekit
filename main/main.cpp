@@ -26,6 +26,7 @@
 
 #ifdef BLE_ENABLE
 #include "ble_sensor.h"
+#include "homekit_sensor_accessory.h"
 #endif
 
 static const char *TAG = "main";
@@ -246,7 +247,7 @@ extern "C" void app_main(void)
             homekit_sync_fan(cn105);
             homekit_sync_switches(cn105);
 #ifdef BLE_ENABLE
-            homekit_sync_ble_sensor(cn105);
+            homekit_sensor_loop();
 #endif
         }
 

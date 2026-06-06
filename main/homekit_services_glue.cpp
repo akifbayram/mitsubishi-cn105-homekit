@@ -22,9 +22,6 @@ void homekit_services_create_all(hap_acc_t *acc)
     homekit_create_fan_auto_switch(acc);
     homekit_create_fan_mode_switch(acc);
     homekit_create_dry_mode_switch(acc);
-#ifdef BLE_ENABLE
-    homekit_create_ble_battery(acc);
-#endif
 
     LOG_INFO("[HK] All HomeKit services created");
 }

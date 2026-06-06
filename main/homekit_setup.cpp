@@ -1,5 +1,6 @@
 #include "homekit_setup.h"
 #include "homekit_services.h"
+#include "homekit_sensor_accessory.h"
 #include "settings.h"
 #include "logging.h"
 #include "branding.h"
@@ -105,6 +106,9 @@ bool homekit_init(const char* name, const char* manufacturer,
     // Generate / load setup code before creating accessory
     homekit_generate_setup_code();
     homekit_set_setup_id(BRAND_QR_ID);
+#ifdef BLE_ENABLE
+    homekit_sensor_set_serial(serialNumber);
+#endif
 
     uint8_t product_data[] = {'M','C','A','C','H','A','P','1'};
 
@@ -148,6 +152,9 @@ bool homekit_init(const char* name, const char* manufacturer,
     }
     homekit_services_create_all(acAcc);
     hap_add_bridged_accessory(acAcc, hap_get_unique_aid(serialNumber));
+#ifdef BLE_ENABLE
+    homekit_sensor_begin();  // adds the Remote Sensor bridged accessory if configured
+#endif
 
     // Register event handler
     esp_event_handler_register(HAP_EVENT, ESP_EVENT_ANY_ID, &hap_event_handler, nullptr);
