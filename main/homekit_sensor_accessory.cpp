@@ -27,6 +27,8 @@ static constexpr uint8_t HAP_CHARGING_STATE_NOT_CHARGEABLE = 2; // coin cell, no
 static hap_acc_t  *s_rsAcc       = nullptr;
 static hap_char_t *s_rsTemp      = nullptr;
 static hap_char_t *s_rsHum       = nullptr;
+static hap_char_t *s_rsTempActive = nullptr;  // StatusActive on the temperature service
+static hap_char_t *s_rsHumActive  = nullptr;  // StatusActive on the humidity service
 static hap_char_t *s_rsBattLevel = nullptr;
 static hap_char_t *s_rsBattLow   = nullptr;
 static char        s_serial[20]  = {0};
@@ -65,13 +67,38 @@ static bool update_char_u(hap_char_t *c, uint8_t v)
     return true;
 }
 
-// Delete the accessory object and clear all cached char pointers. Shared by the
-// create() failure paths and destroy_sensor_accessory().
+static void update_char_b(hap_char_t *c, bool v)
+{
+    if (!c) return;
+    const hap_val_t *cur = hap_char_get_val(c);
+    if (cur && cur->b == v) return;
+    hap_val_t nv; nv.b = v; hap_char_update_val(c, &nv);
+}
+
+// "Configured" = a sensor MAC is set. Once configured, the accessory persists for
+// the life of the HomeKit DB — we never remove it. This keeps the Home-app room
+// assignment, custom name, and any automations intact across a BLE toggle, and
+// avoids freeing an accessory the HAP server task may be traversing concurrently.
+static bool sensor_configured()
+{
+    return BleSensor::getAddr()[0] != '\0';
+}
+
+// StatusActive: BLE enabled, configured, and we have fresh data (isActive() requires
+// at least one reading). false surfaces as "Not Responding" in the Home app.
+static bool sensor_active()
+{
+    return BleSensor::isBleEnabled() && sensor_configured() && BleSensor::isActive();
+}
+
+// Delete the accessory object and clear all cached char pointers. Used by the
+// create() failure paths (the accessory is never removed once successfully added).
 static void free_sensor_accessory()
 {
     if (s_rsAcc) hap_acc_delete(s_rsAcc);
     s_rsAcc = nullptr;
     s_rsTemp = s_rsHum = s_rsBattLevel = s_rsBattLow = nullptr;
+    s_rsTempActive = s_rsHumActive = nullptr;
 }
 
 static void create_sensor_accessory()
@@ -80,11 +107,18 @@ static void create_sensor_accessory()
         LOG_WARN("[HK:Sensor] serial not set — pass it to homekit_sensor_begin() first");
     }
 
+    // Unique SerialNumber per accessory (HAP spec): the bridge and AC use the base
+    // serial, so the sensor gets a "-rs" suffix. The same "-rs" string is also the
+    // AID key (hap_get_unique_aid below), which is the existing accessory identity —
+    // so this only adds a distinct SerialNumber and doesn't re-key the accessory.
+    char rsSerial[24];
+    snprintf(rsSerial, sizeof(rsSerial), "%s-rs", s_serial);
+
     hap_acc_cfg_t cfg = {
         .name             = const_cast<char*>("Remote Sensor"),
         .model            = const_cast<char*>(BRAND_MODEL),
         .manufacturer     = const_cast<char*>(BRAND_MANUFACTURER),
-        .serial_num       = s_serial,
+        .serial_num       = rsSerial,
         .fw_rev           = s_fwRev,
         .hw_rev           = nullptr,
         .pv               = const_cast<char*>("1.1.0"),
@@ -97,10 +131,7 @@ static void create_sensor_accessory()
         return;
     }
 
-    // No StatusActive characteristic here (intentional): unlike the AC accessory,
-    // this accessory's presence is conveyed by dynamic add/remove (it disappears
-    // when BLE is disabled/unconfigured), and a stale-but-enabled sensor holds its
-    // last values rather than showing "Not Responding".
+    bool active = sensor_active();
 
     // Temperature Sensor (primary)
     float t = BleSensor::temperature();
@@ -111,6 +142,11 @@ static void create_sensor_accessory()
         return;
     }
     s_rsTemp = hap_serv_get_char_by_uuid(ts, HAP_CHAR_UUID_CURRENT_TEMPERATURE);
+    // Widen the default 0–100 °C range: the SDK silently drops out-of-range updates,
+    // so a remote sensor below freezing would otherwise freeze at its last value.
+    if (s_rsTemp) hap_char_float_set_constraints(s_rsTemp, -50.0f, 100.0f, 0.1f);
+    s_rsTempActive = hap_char_status_active_create(active);
+    hap_serv_add_char(ts, s_rsTempActive);
     hap_acc_add_serv(s_rsAcc, ts);
 
     // Humidity Sensor
@@ -122,6 +158,8 @@ static void create_sensor_accessory()
         return;
     }
     s_rsHum = hap_serv_get_char_by_uuid(hs, HAP_CHAR_UUID_CURRENT_RELATIVE_HUMIDITY);
+    s_rsHumActive = hap_char_status_active_create(active);
+    hap_serv_add_char(hs, s_rsHumActive);
     hap_acc_add_serv(s_rsAcc, hs);
 
     // Battery Service
@@ -137,28 +175,19 @@ static void create_sensor_accessory()
     s_rsBattLow   = hap_serv_get_char_by_uuid(bs, HAP_CHAR_UUID_STATUS_LOW_BATTERY);
     hap_acc_add_serv(s_rsAcc, bs);
 
-    char aidStr[24];
-    snprintf(aidStr, sizeof(aidStr), "%s-rs", s_serial);
-    hap_add_bridged_accessory(s_rsAcc, hap_get_unique_aid(aidStr));
+    // rsSerial ("<serial>-rs") doubles as the stable AID key — one source string.
+    hap_add_bridged_accessory(s_rsAcc, hap_get_unique_aid(rsSerial));
     LOG_INFO("[HK:Sensor] Remote Sensor accessory added (temp/humidity/battery)");
 }
 
-static void destroy_sensor_accessory()
+// Create the accessory the first time a sensor MAC is configured, then leave it in
+// place. We never remove it at runtime: enable/disable and staleness are reflected
+// via StatusActive instead (see sensor_active). This is an append-only mutation of
+// the HAP accessory list — safe to call from the main loop alongside the HAP task.
+static void ensure_sensor_accessory()
 {
-    if (!s_rsAcc) return;
-    hap_remove_bridged_accessory(s_rsAcc);  // unlinks + bumps config number
-    free_sensor_accessory();                // frees the accessory + services, clears chars
-    LOG_INFO("[HK:Sensor] Remote Sensor accessory removed");
-}
-
-// Desired = BLE enabled AND a sensor MAC configured. Adds/removes on transition.
-static void update_topology()
-{
-    bool desired = BleSensor::isBleEnabled() && BleSensor::getAddr()[0] != '\0';
-    if (desired && !s_rsAcc) {
+    if (sensor_configured() && !s_rsAcc) {
         create_sensor_accessory();
-    } else if (!desired && s_rsAcc) {
-        destroy_sensor_accessory();
     }
 }
 
@@ -172,19 +201,23 @@ void homekit_sensor_begin(const char* serial, const char* fwRev)
         strncpy(s_fwRev, fwRev, sizeof(s_fwRev) - 1);
         s_fwRev[sizeof(s_fwRev) - 1] = '\0';
     }
-    update_topology();  // pre-hap_start: include in the initial bridge DB if configured
+    ensure_sensor_accessory();  // pre-hap_start: include in the initial bridge DB if configured
 }
 
 void homekit_sensor_loop()
 {
-    // Throttle to 2s: covers both the (rare) add/remove topology check and the
+    // Throttle to 2s: covers the (one-shot) first-configuration create and the
     // value push — BLE sensor data changes far slower than this.
     uint32_t now = uptime_ms();
     if (now - s_lastSync < 2000) return;
     s_lastSync = now;
 
-    update_topology();
+    ensure_sensor_accessory();
     if (!s_rsAcc) return;
+
+    bool active = sensor_active();
+    update_char_b(s_rsTempActive, active);
+    update_char_b(s_rsHumActive,  active);
 
     float t = BleSensor::temperature();
     if (!std::isnan(t)) update_char_f(s_rsTemp, t);

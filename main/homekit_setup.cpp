@@ -131,11 +131,17 @@ bool homekit_init(const char* name, const char* manufacturer,
     hap_add_accessory(bridge);
 
     // ── Air Conditioner (bridged) accessory ─────────────────────────────────
+    // Unique SerialNumber per accessory (HAP spec): the bridge keeps the base
+    // serial, so the AC gets an "-ac" suffix. hap_acc_create strdup's the string,
+    // so a stack buffer is fine. The AID still derives from the base serialNumber
+    // below, so accessory identity is unchanged.
+    char acSerial[24];
+    snprintf(acSerial, sizeof(acSerial), "%s-ac", serialNumber);
     hap_acc_cfg_t acCfg = {
         .name             = const_cast<char*>("Air Conditioner"),
         .model            = const_cast<char*>(model),
         .manufacturer     = const_cast<char*>(manufacturer),
-        .serial_num       = const_cast<char*>(serialNumber),
+        .serial_num       = acSerial,
         .fw_rev           = const_cast<char*>(fwRevision),
         .hw_rev           = nullptr,
         .pv               = const_cast<char*>("1.1.0"),
