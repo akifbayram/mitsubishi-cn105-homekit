@@ -1,5 +1,6 @@
 #include "homekit_setup.h"
 #include "homekit_services.h"
+#include "homekit_sensor_accessory.h"
 #include "settings.h"
 #include "logging.h"
 #include "branding.h"
@@ -23,7 +24,7 @@ static const char *TAG = "hk_setup";
 static char s_setupCode[12] = "000-00-000";    // XXX-XX-XXX + null
 static char* s_setupPayload = nullptr;          // allocated by esp_hap_get_setup_payload
 static const char* s_statusString = "Not Ready";
-static hap_cid_t s_cid = HAP_CID_AIR_CONDITIONER;
+static hap_cid_t s_cid = HAP_CID_BRIDGE;
 
 // ── HAP event handler (esp_event style) ─────────────────────────────────────
 
@@ -106,8 +107,10 @@ bool homekit_init(const char* name, const char* manufacturer,
     homekit_generate_setup_code();
     homekit_set_setup_id(BRAND_QR_ID);
 
-    // Create accessory
-    hap_acc_cfg_t cfg = {
+    uint8_t product_data[] = {'M','C','A','C','H','A','P','1'};
+
+    // ── Bridge (primary) accessory ──────────────────────────────────────────
+    hap_acc_cfg_t bridgeCfg = {
         .name             = const_cast<char*>(name),
         .model            = const_cast<char*>(model),
         .manufacturer     = const_cast<char*>(manufacturer),
@@ -115,24 +118,47 @@ bool homekit_init(const char* name, const char* manufacturer,
         .fw_rev           = const_cast<char*>(fwRevision),
         .hw_rev           = nullptr,
         .pv               = const_cast<char*>("1.1.0"),
+        .cid              = HAP_CID_BRIDGE,
+        .identify_routine = accessory_identify,
+    };
+    hap_acc_t *bridge = hap_acc_create(&bridgeCfg);
+    if (!bridge) {
+        LOG_ERROR("[HK] bridge hap_acc_create failed");
+        return false;
+    }
+    hap_acc_add_product_data(bridge, product_data, sizeof(product_data));
+    hap_acc_add_wifi_transport_service(bridge, 0);
+    hap_add_accessory(bridge);
+
+    // ── Air Conditioner (bridged) accessory ─────────────────────────────────
+    // Unique SerialNumber per accessory (HAP spec): the bridge keeps the base
+    // serial, so the AC gets an "-ac" suffix. hap_acc_create strdup's the string,
+    // so a stack buffer is fine. The AID still derives from the base serialNumber
+    // below, so accessory identity is unchanged.
+    char acSerial[24];
+    snprintf(acSerial, sizeof(acSerial), "%s-ac", serialNumber);
+    hap_acc_cfg_t acCfg = {
+        .name             = const_cast<char*>("Air Conditioner"),
+        .model            = const_cast<char*>(model),
+        .manufacturer     = const_cast<char*>(manufacturer),
+        .serial_num       = acSerial,
+        .fw_rev           = const_cast<char*>(fwRevision),
+        .hw_rev           = nullptr,
+        .pv               = const_cast<char*>("1.1.0"),
         .cid              = HAP_CID_AIR_CONDITIONER,
         .identify_routine = accessory_identify,
     };
-    hap_acc_t *accessory = hap_acc_create(&cfg);
-    if (!accessory) {
-        LOG_ERROR("[HK] hap_acc_create failed");
+    hap_acc_t *acAcc = hap_acc_create(&acCfg);
+    if (!acAcc) {
+        LOG_ERROR("[HK] AC hap_acc_create failed");
         return false;
     }
-
-    // Add product data (dummy, required by spec)
-    uint8_t product_data[] = {'M','C','A','C','H','A','P','1'};
-    hap_acc_add_product_data(accessory, product_data, sizeof(product_data));
-
-    // Create all HomeKit services and add to the accessory
-    homekit_services_create_all(accessory);
-
-    // Add the accessory to the HAP database
-    hap_add_accessory(accessory);
+    homekit_services_create_all(acAcc);
+    hap_add_bridged_accessory(acAcc, hap_get_unique_aid(serialNumber));
+#ifdef BLE_ENABLE
+    // adds the Remote Sensor bridged accessory if configured
+    homekit_sensor_begin(serialNumber, fwRevision);
+#endif
 
     // Register event handler
     esp_event_handler_register(HAP_EVENT, ESP_EVENT_ANY_ID, &hap_event_handler, nullptr);
