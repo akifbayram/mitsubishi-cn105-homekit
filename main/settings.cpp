@@ -82,8 +82,14 @@ void SettingsStore::begin() {
 
 #ifdef BLE_ENABLE
     // bleEnabled — bool stored as uint8_t
+    // First-boot default honors the -DBLE_SENSOR_DEFAULT_ON build flag; a stored
+    // NVS value (set via web UI) overrides it on subsequent boots.
     {
+#ifdef BLE_SENSOR_DEFAULT_ON
+        uint8_t val = 1;
+#else
         uint8_t val = 0;
+#endif
         nvs_get_u8(_handle, "bleOn", &val);
         _settings.bleEnabled = (val != 0);
     }

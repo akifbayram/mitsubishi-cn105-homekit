@@ -49,6 +49,23 @@ if(NOT _explicit_profile_set)
     endif()
 endif()
 
+# ── BLE remote sensor build-time defaults ────────────────────────────────────
+# Provision the remote temperature sensor at flash time so no post-flash setup
+# is needed. These seed first-boot defaults only; values changed later via the
+# web UI are stored in NVS and win on subsequent boots.
+#   -DBLE_SENSOR_ADDR="AA:BB:CC:DD:EE:FF"  default sensor MAC
+#   -DBLE_SENSOR_DEFAULT_ON=1              enable the BLE sensor by default
+#   -DBLE_DISABLE=1                        compile BLE support out entirely
+if(DEFINED BLE_SENSOR_ADDR)
+    target_compile_definitions(${COMPONENT_TARGET} PRIVATE BLE_SENSOR_ADDR="${BLE_SENSOR_ADDR}")
+endif()
+if(BLE_SENSOR_DEFAULT_ON)
+    target_compile_definitions(${COMPONENT_TARGET} PRIVATE BLE_SENSOR_DEFAULT_ON=1)
+endif()
+if(BLE_DISABLE)
+    target_compile_definitions(${COMPONENT_TARGET} PRIVATE BLE_DISABLE=1)
+endif()
+
 # ── Brand defaults (overridable via -DBRAND_NAME=... on cmake command line) ──
 if(NOT DEFINED BRAND_NAME)
     set(BRAND_NAME "Mini Split")
