@@ -28,7 +28,7 @@ main/
     board_esp32_devkit.h      #   Generic ESP32 DevKit v1
     board_esp32s3_devkit.h    #   ESP32-S3-DevKitC-1
     board_esp32c3_mini.h      #   ESP32-C3 SuperMini / XIAO
-    board_m5atoms3_lite.h     #   M5Stack AtomS3 Lite
+    board_m5atoms3_lite.h     #   M5Stack Atom S3 Lite
   branding.h                  # Build-time branding defaults
   esp_utils.h                 # uptime_ms() — lightweight ESP-IDF timing utility
   uart_interface.h            # UART abstraction interface

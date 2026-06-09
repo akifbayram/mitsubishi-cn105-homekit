@@ -59,7 +59,7 @@ For a full parts list with purchase links, see the [parts guide](https://serin-l
 | Board | Target | Build command | Tested |
 |-------|--------|---------------|-------|
 | M5Stack NanoC6 (ESP32-C6) | `esp32c6` | `idf.py set-target esp32c6 && idf.py build` | ✅ |
-| M5Stack AtomS3 Lite (ESP32-S3) | `esp32s3` | `idf.py set-target esp32s3 && idf.py build` | ✅ |
+| M5Stack Atom S3 Lite (ESP32-S3) | `esp32s3` | `idf.py set-target esp32s3 && idf.py build` | ✅ |
 | ESP32-C3 SuperMini / XIAO | `esp32c3` | `idf.py set-target esp32c3 && idf.py build` | ❌ |
 | Generic ESP32 DevKit | `esp32` | `idf.py set-target esp32 && idf.py build` | ❌ |
 
