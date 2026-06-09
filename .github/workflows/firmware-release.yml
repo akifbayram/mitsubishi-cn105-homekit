@@ -4,8 +4,8 @@
 # serin-cn105 distribution repo for ESP Web Tools flashing.
 #
 # Required secret:
-#   SERIN_CN105_PAT — GitHub Personal Access Token with `repo` scope
-#                     for Serin-Labs/serin-cn105
+#   SERIN_CN105_PAT — Fine-grained PAT scoped to Serin-Labs/serin-cn105
+#                     with Contents: Read and write (Metadata: Read-only)
 
 name: Firmware Release
 
@@ -36,7 +36,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           submodules: recursive
           fetch-depth: 0
@@ -63,7 +63,7 @@ jobs:
           cp build/mitsubishi-cn105-homekit.bin artifact/"${BUILD_NAME}"/firmware.bin
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: firmware-${{ matrix.name }}
           path: artifact/${{ matrix.name }}/
@@ -73,7 +73,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download all firmware artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: firmware-*
           path: artifacts/
@@ -93,7 +93,7 @@ jobs:
           echo "number=${VERSION#v}" >> "$GITHUB_OUTPUT"
 
       - name: Checkout serin-cn105
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: Serin-Labs/serin-cn105
           token: ${{ secrets.SERIN_CN105_PAT }}
@@ -187,7 +187,7 @@ jobs:
       contents: write
     steps:
       - name: Download all firmware artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: firmware-*
           path: artifacts/
@@ -200,7 +200,7 @@ jobs:
           done
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           name: ${{ github.ref_name }}
           generate_release_notes: true
