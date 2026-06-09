@@ -75,20 +75,28 @@ static void update_char_b(hap_char_t *c, bool v)
     hap_val_t nv; nv.b = v; hap_char_update_val(c, &nv);
 }
 
-// "Configured" = a sensor MAC is set. Once configured, the accessory persists for
-// the life of the HomeKit DB — we never remove it. This keeps the Home-app room
-// assignment, custom name, and any automations intact across a BLE toggle, and
-// avoids freeing an accessory the HAP server task may be traversing concurrently.
+// Gates whether the Remote Sensor accessory is published in HomeKit: the BLE feature
+// must be enabled AND a sensor MAC set. A MAC alone is not enough — one can be present
+// without the operator opting in (a compile-time BLE_SENSOR_ADDR default, or stale
+// NVS), and without the isBleEnabled() check those units would surface a phantom
+// "Remote Sensor" on initial HomeKit import even though no sensor was provisioned.
+//
+// Persistence: once added we never remove the accessory at runtime (toggling BLE off
+// flips StatusActive instead — see sensor_active), preserving the Home-app room/name
+// across a live toggle and avoiding a free of an accessory the HAP task may be
+// traversing. It is only (re)created at boot when BLE is enabled, so a unit left with
+// BLE disabled does not carry the accessory across a reboot.
 static bool sensor_configured()
 {
-    return BleSensor::getAddr()[0] != '\0';
+    return BleSensor::isBleEnabled() && BleSensor::getAddr()[0] != '\0';
 }
 
-// StatusActive: BLE enabled, configured, and we have fresh data (isActive() requires
-// at least one reading). false surfaces as "Not Responding" in the Home app.
+// StatusActive: enabled + configured (both implied by sensor_configured) and we have
+// fresh data (isActive() requires at least one reading). false surfaces as "Not
+// Responding" in the Home app.
 static bool sensor_active()
 {
-    return BleSensor::isBleEnabled() && sensor_configured() && BleSensor::isActive();
+    return sensor_configured() && BleSensor::isActive();
 }
 
 // Delete the accessory object and clear all cached char pointers. Used by the
