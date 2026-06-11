@@ -1960,8 +1960,10 @@ input:focus-visible,select:focus-visible{outline-offset:0}
     }).then(function(buf){
       return sha256Hex(buf).then(function(hash){
         if(hash&&hash!==fwLatest.sha256) throw new Error('checksum mismatch — aborted');
-        res.textContent=hash?'Checksum verified. Installing...':'Installing... (checksum not verified — browser limitation on http)';
-        flashBuffer(buf,hash);
+        res.textContent=hash?'Checksum verified. Installing...':'Installing... (device will verify checksum)';
+        // Always send the manifest hash so the device verifies the received
+        // bytes even when the browser cannot (crypto.subtle needs https).
+        flashBuffer(buf,fwLatest.sha256);
       });
     }).catch(function(e){
       res.textContent='Install failed: '+e.message;
