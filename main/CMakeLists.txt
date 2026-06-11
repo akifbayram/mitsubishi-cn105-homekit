@@ -28,6 +28,7 @@ target_compile_definitions(${COMPONENT_TARGET} PRIVATE FW_VERSION="${PROJECT_VER
 # ── Auto-select board profile based on IDF_TARGET ────────────────────────────
 # Each chip gets a default board profile. Override by setting -DBOARD_PROFILE_*
 # on the cmake command line (e.g., idf.py build -DBOARD_PROFILE_M5ATOMS3_LITE=1).
+# When adding a board here, also update the BOARD_FW_ID chain below.
 set(_explicit_profile_set FALSE)
 foreach(_prof CUSTOM NANOC6 ESP32S3_DEVKIT ESP32_DEVKIT ESP32C3_MINI M5ATOMS3_LITE)
     if(DEFINED BOARD_PROFILE_${_prof})
@@ -46,6 +47,35 @@ if(NOT _explicit_profile_set)
         target_compile_definitions(${COMPONENT_TARGET} PRIVATE BOARD_PROFILE_ESP32_DEVKIT)
     elseif(CONFIG_IDF_TARGET_ESP32C3)
         target_compile_definitions(${COMPONENT_TARGET} PRIVATE BOARD_PROFILE_ESP32C3_MINI)
+    endif()
+endif()
+
+# ── Update check (browser-mediated OTA via serin-cn105 manifest) ─────────────
+# BOARD_FW_ID maps the board profile to its serin-cn105 firmware directory.
+# Empty = no published prebuilt (CUSTOM, ESP32S3_DEVKIT) → update UI hidden.
+# -DUPDATE_MANIFEST_URL="" disables the feature; branded builds may point elsewhere.
+if(NOT DEFINED UPDATE_MANIFEST_URL)
+    set(UPDATE_MANIFEST_URL "https://raw.githubusercontent.com/Serin-Labs/serin-cn105/main/firmware/homekit/manifest.json")
+endif()
+
+set(BOARD_FW_ID "")
+if(DEFINED BOARD_PROFILE_NANOC6)
+    set(BOARD_FW_ID "nanoc6")
+elseif(DEFINED BOARD_PROFILE_M5ATOMS3_LITE)
+    set(BOARD_FW_ID "m5atoms3-lite")
+elseif(DEFINED BOARD_PROFILE_ESP32_DEVKIT)
+    set(BOARD_FW_ID "esp32-devkit")
+elseif(DEFINED BOARD_PROFILE_ESP32C3_MINI)
+    set(BOARD_FW_ID "esp32c3-mini")
+elseif(NOT _explicit_profile_set)
+    # Auto-selected profiles (mirror the chip → profile mapping above).
+    # esp32s3 auto-selects ESP32S3_DEVKIT, which has no published prebuilt.
+    if(CONFIG_IDF_TARGET_ESP32C6)
+        set(BOARD_FW_ID "nanoc6")
+    elseif(CONFIG_IDF_TARGET_ESP32)
+        set(BOARD_FW_ID "esp32-devkit")
+    elseif(CONFIG_IDF_TARGET_ESP32C3)
+        set(BOARD_FW_ID "esp32c3-mini")
     endif()
 endif()
 
@@ -94,6 +124,8 @@ add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/web_ui.html.gz
         --brand-model "${BRAND_MODEL}"
         --brand-theme-color "${BRAND_THEME_COLOR}"
         --fw-version "${PROJECT_VER}"
+        --board-fw-id "${BOARD_FW_ID}"
+        --update-manifest-url "${UPDATE_MANIFEST_URL}"
     DEPENDS ${PROJECT_DIR}/web/index.html ${PROJECT_DIR}/scripts/embed_html_idf.py
     COMMENT "Generating web_ui.html.gz"
     VERBATIM
