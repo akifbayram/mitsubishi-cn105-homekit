@@ -87,6 +87,11 @@ void homekit_create_fan_mode_switch(hap_acc_t *acc)
 
     s_fanModeOn = hap_serv_get_char_by_uuid(serv, HAP_CHAR_UUID_ON);
 
+    // Name (default label shown by Home app at pairing) + ConfiguredName (rename).
+    // Both are required: without Name, multiple same-type services show as
+    // "Switch", "Switch 2", "Switch 3" until a later re-read picks up ConfiguredName.
+    hap_serv_add_char(serv, hap_char_name_create(const_cast<char*>("Fan Mode")));
+
     hap_char_t *cname = hap_char_string_create(
         const_cast<char*>(HAP_CHAR_UUID_CONFIGURED_NAME),
         HAP_CHAR_PERM_PR | HAP_CHAR_PERM_PW | HAP_CHAR_PERM_EV,
@@ -214,6 +219,8 @@ void homekit_create_dry_mode_switch(hap_acc_t *acc)
     }
 
     s_dryModeOn = hap_serv_get_char_by_uuid(serv, HAP_CHAR_UUID_ON);
+
+    hap_serv_add_char(serv, hap_char_name_create(const_cast<char*>("Dry Mode")));
 
     hap_char_t *cname = hap_char_string_create(
         const_cast<char*>(HAP_CHAR_UUID_CONFIGURED_NAME),

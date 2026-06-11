@@ -259,7 +259,8 @@ void homekit_create_thermostat(hap_acc_t *acc)
     s_statusActive = hap_char_status_active_create(true);
     hap_serv_add_char(serv, s_statusActive);
 
-    // ConfiguredName
+    // Name (default label) + ConfiguredName (rename)
+    hap_serv_add_char(serv, hap_char_name_create(const_cast<char*>("Thermostat")));
     hap_char_t *cname = hap_char_string_create(
         const_cast<char*>(HAP_CHAR_UUID_CONFIGURED_NAME),
         HAP_CHAR_PERM_PR | HAP_CHAR_PERM_PW | HAP_CHAR_PERM_EV,

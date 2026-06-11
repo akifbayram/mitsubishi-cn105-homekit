@@ -144,7 +144,8 @@ void homekit_create_fan(hap_acc_t *acc)
     s_fanStatusActive = hap_char_status_active_create(true);
     hap_serv_add_char(serv, s_fanStatusActive);
 
-    // ConfiguredName
+    // Name (default label) + ConfiguredName (rename)
+    hap_serv_add_char(serv, hap_char_name_create(const_cast<char*>("Fan")));
     hap_char_t *cname = hap_char_string_create(
         const_cast<char*>(HAP_CHAR_UUID_CONFIGURED_NAME),
         HAP_CHAR_PERM_PR | HAP_CHAR_PERM_PW | HAP_CHAR_PERM_EV,
@@ -296,7 +297,8 @@ void homekit_create_fan_auto_switch(hap_acc_t *acc)
 
     s_fanAutoOn = hap_serv_get_char_by_uuid(serv, HAP_CHAR_UUID_ON);
 
-    // ConfiguredName
+    // Name (default label) + ConfiguredName (rename)
+    hap_serv_add_char(serv, hap_char_name_create(const_cast<char*>("Fan Auto")));
     hap_char_t *cname = hap_char_string_create(
         const_cast<char*>(HAP_CHAR_UUID_CONFIGURED_NAME),
         HAP_CHAR_PERM_PR | HAP_CHAR_PERM_PW | HAP_CHAR_PERM_EV,
