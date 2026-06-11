@@ -756,6 +756,16 @@ input:focus-visible,select:focus-visible{outline-offset:0}
       <button class="save-btn" onclick="saveConfig()">Save Settings</button>
       <div class="fw-section">
         <div class="card-label" role="heading" aria-level="2">Firmware Update</div>
+        <div id="fwUpdateCheck" style="display:none;margin-bottom:10px">
+          <div class="fw-row">
+            <button class="save-btn" style="width:auto;padding:10px 20px;margin:0" id="fwCheckBtn" onclick="checkForUpdate()">Check for Updates</button>
+            <span id="fwCheckResult" style="font-size:13px;color:var(--text2)"></span>
+          </div>
+          <div class="fw-row" id="fwInstallRow" style="display:none;margin-top:8px">
+            <button class="save-btn" style="width:auto;padding:10px 20px;margin:0" id="fwInstallBtn" onclick="installUpdate()">Install</button>
+            <a id="fwNotesLink" href="#" target="_blank" rel="noopener" style="display:none;font-size:13px">What's new</a>
+          </div>
+        </div>
         <div class="fw-row">
           <input type="file" id="fwFile" accept=".bin">
           <button class="save-btn" style="width:auto;padding:10px 20px;margin:0" onclick="uploadFirmware()">Upload</button>
@@ -1866,6 +1876,96 @@ input:focus-visible,select:focus-visible{outline-offset:0}
     }).catch(function(err){
       bar.style.background='var(--red)';
       status.textContent='Checksum error: '+err.message;
+    });
+  };
+
+  // ── Update Check (manual, via serin-cn105 manifest) ───────────────────────
+  var BOARD_FW_ID='{{BOARD_FW_ID}}';
+  var UPDATE_MANIFEST_URL='{{UPDATE_MANIFEST_URL}}';
+  var RUNNING_FW_VER='{{FW_VERSION}}';
+  var fwLatest=null;
+
+  function normVer(v){return String(v||'').replace(/^v/,'')}
+  function isCleanVer(v){return /^\d+(\.\d+)*$/.test(v)}
+  function cmpVer(a,b){
+    var pa=a.split('.'),pb=b.split('.');
+    for(var i=0;i<Math.max(pa.length,pb.length);i++){
+      var x=parseInt(pa[i]||'0',10),y=parseInt(pb[i]||'0',10);
+      if(x!==y) return x<y?-1:1;
+    }
+    return 0;
+  }
+
+  // Show the panel only on official builds with a configured manifest URL.
+  // The indexOf guard keeps it hidden when viewing the raw unsubstituted file.
+  if(BOARD_FW_ID&&UPDATE_MANIFEST_URL&&BOARD_FW_ID.indexOf('{{')<0){
+    $('fwUpdateCheck').style.display='block';
+  }
+
+  window.checkForUpdate=function(){
+    var btn=$('fwCheckBtn'),res=$('fwCheckResult'),row=$('fwInstallRow');
+    btn.disabled=true;
+    res.textContent='Checking...';
+    row.style.display='none';
+    fwLatest=null;
+    fetch(UPDATE_MANIFEST_URL+'?t='+Date.now()).then(function(r){
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      return r.json();
+    }).then(function(man){
+      var latest=normVer(man.version||'');
+      if(!isCleanVer(latest)) throw new Error('no release info');
+      var build=null;
+      (man.builds||[]).forEach(function(b){if(b.board===BOARD_FW_ID)build=b});
+      if(!build) throw new Error('no build for this board');
+      var cur=normVer(RUNNING_FW_VER);
+      if(isCleanVer(cur)&&cmpVer(latest,cur)<=0){
+        res.textContent='Up to date (v'+cur+')';
+        return;
+      }
+      if(!isCleanVer(cur)){
+        res.textContent='Latest release: v'+latest+'. Dev build running — update manually.';
+        return;
+      }
+      var part=null;
+      (build.parts||[]).forEach(function(p){if(p.path&&p.path.indexOf('firmware.bin')>=0)part=p});
+      if(!part||!build.sha256){
+        res.textContent='v'+latest+' available — manifest missing install data, update manually.';
+        return;
+      }
+      var base=UPDATE_MANIFEST_URL.slice(0,UPDATE_MANIFEST_URL.lastIndexOf('/')+1);
+      fwLatest={version:latest,binUrl:base+part.path,sha256:String(build.sha256).toLowerCase()};
+      res.textContent='v'+latest+' available';
+      $('fwInstallBtn').textContent='Install v'+latest;
+      $('fwInstallBtn').disabled=false;
+      var notes=$('fwNotesLink');
+      if(man.release_url&&/^https?:\/\//.test(man.release_url)){notes.href=man.release_url;notes.style.display='inline'}
+      else{notes.style.display='none'}
+      row.style.display='flex';
+    }).catch(function(e){
+      res.textContent='Check failed: '+e.message;
+    }).then(function(){btn.disabled=false});
+  };
+
+  window.installUpdate=function(){
+    if(!fwLatest) return;
+    var btn=$('fwInstallBtn');
+    if(btn.disabled) return;
+    if(!confirm('Download and install v'+fwLatest.version+'? The device will restart.')) return;
+    btn.disabled=true;
+    var res=$('fwCheckResult');
+    res.textContent='Downloading v'+fwLatest.version+'...';
+    fetch(fwLatest.binUrl+'?t='+Date.now()).then(function(r){
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      return r.arrayBuffer();
+    }).then(function(buf){
+      return sha256Hex(buf).then(function(hash){
+        if(hash&&hash!==fwLatest.sha256) throw new Error('checksum mismatch — aborted');
+        res.textContent=hash?'Checksum verified. Installing...':'Installing... (checksum not verified — browser limitation on http)';
+        flashBuffer(buf,hash);
+      });
+    }).catch(function(e){
+      res.textContent='Install failed: '+e.message;
+      btn.disabled=false;
     });
   };
 
