@@ -58,27 +58,36 @@ static uint8_t percentToCN105Fan(uint8_t pct) {
 static int fan_write_cb(hap_write_data_t write_data[], int count,
                          void *serv_priv, void *write_priv)
 {
-    if (!g_homekitCtrl || !g_homekitCtrl->isHealthy()) {
-        LOG_WARN("[HK:Fan] write REJECTED — CN105 not healthy");
-        for (int i = 0; i < count; i++) {
-            *(write_data[i].status) = HAP_STATUS_RES_BUSY;
-        }
-        return HAP_FAIL;
-    }
-
-    const CN105State st = g_homekitCtrl->getEffectiveState();
+    bool healthy = g_homekitCtrl && g_homekitCtrl->isHealthy();
+    // Track power across the batch: the Home app writes Active=1 and
+    // RotationSpeed together when turning the fan on.
+    bool power = healthy && g_homekitCtrl->getEffectiveState().power;
     int ret = HAP_SUCCESS;
 
     for (int i = 0; i < count; i++) {
         hap_write_data_t *w = &write_data[i];
         const char *uuid = hap_char_get_type_uuid(w->hc);
 
+        // ConfiguredName (Home app rename) doesn't touch the heat pump —
+        // accept it even when CN105 is down.
+        if (!strcmp(uuid, HAP_CHAR_UUID_CONFIGURED_NAME)) {
+            hap_char_update_val(w->hc, &w->val);
+            *(w->status) = HAP_STATUS_SUCCESS;
+            continue;
+        }
+
+        if (!healthy) {
+            LOG_WARN("[HK:Fan] write REJECTED — CN105 not healthy");
+            *(w->status) = HAP_STATUS_RES_BUSY;
+            ret = HAP_FAIL;
+            continue;
+        }
+
         if (!strcmp(uuid, HAP_CHAR_UUID_ACTIVE)) {
             uint8_t active = w->val.u;
             LOG_INFO("[HK:Fan] HomeKit -> active: %d", active);
-            if (active == 0) {
-                g_homekitCtrl->setPower(false);
-            }
+            g_homekitCtrl->setPower(active != 0);
+            power = (active != 0);
             hap_char_update_val(w->hc, &w->val);
             *(w->status) = HAP_STATUS_SUCCESS;
 
@@ -88,14 +97,18 @@ static int fan_write_cb(hap_write_data_t write_data[], int count,
             if (ipct == 0) {
                 LOG_INFO("[HK:Fan] HomeKit -> speed: 0%% -> power off");
                 g_homekitCtrl->setPower(false);
-            } else if (st.power) {
+                power = false;
+                hap_char_update_val(w->hc, &w->val);
+            } else if (power) {
                 uint8_t fanByte = percentToCN105Fan(ipct);
                 LOG_INFO("[HK:Fan] HomeKit -> speed: %d%% -> CN105 fan=0x%02X", ipct, fanByte);
                 g_homekitCtrl->setFanSpeed(fanByte);
+                hap_char_update_val(w->hc, &w->val);
             } else {
+                // Don't store a speed the unit isn't running at — sync
+                // reports 0 while the unit is off.
                 LOG_WARN("[HK:Fan] HomeKit -> speed: %d%% IGNORED (unit off)", ipct);
             }
-            hap_char_update_val(w->hc, &w->val);
             *(w->status) = HAP_STATUS_SUCCESS;
 
         } else {
@@ -103,7 +116,9 @@ static int fan_write_cb(hap_write_data_t write_data[], int count,
         }
     }
 
-    g_homekitCtrl->sendPendingChanges();
+    if (healthy) {
+        g_homekitCtrl->sendPendingChanges();
+    }
     return ret;
 }
 
@@ -192,9 +207,9 @@ void homekit_sync_fan(CN105Controller &cn105)
         }
     }
 
-    // Speed (only when powered on)
-    if (s_fanSpeed && s.power) {
-        float pct = (float)cn105FanToPercent(s.fanSpeed);
+    // Speed (0 while off, same as fan AUTO)
+    if (s_fanSpeed) {
+        float pct = s.power ? (float)cn105FanToPercent(s.fanSpeed) : 0.0f;
         const hap_val_t *cur = hap_char_get_val(s_fanSpeed);
         if (forceSync || !cur || fabsf(cur->f - pct) > 0.5f) {
             LOG_DEBUG("[HK:Fan] sync speed: %.0f%%", pct);
@@ -220,17 +235,27 @@ static bool     s_fanAutoWasDisconnected = true;
 static int fan_auto_write_cb(hap_write_data_t write_data[], int count,
                               void *serv_priv, void *write_priv)
 {
-    if (!g_homekitCtrl || !g_homekitCtrl->isHealthy()) {
-        LOG_WARN("[HK:FanAuto] write REJECTED — CN105 not healthy");
-        for (int i = 0; i < count; i++) {
-            *(write_data[i].status) = HAP_STATUS_RES_BUSY;
-        }
-        return HAP_FAIL;
-    }
+    bool healthy = g_homekitCtrl && g_homekitCtrl->isHealthy();
+    int ret = HAP_SUCCESS;
 
     for (int i = 0; i < count; i++) {
         hap_write_data_t *w = &write_data[i];
         const char *uuid = hap_char_get_type_uuid(w->hc);
+
+        // ConfiguredName (Home app rename) doesn't touch the heat pump —
+        // accept it even when CN105 is down.
+        if (!strcmp(uuid, HAP_CHAR_UUID_CONFIGURED_NAME)) {
+            hap_char_update_val(w->hc, &w->val);
+            *(w->status) = HAP_STATUS_SUCCESS;
+            continue;
+        }
+
+        if (!healthy) {
+            LOG_WARN("[HK:FanAuto] write REJECTED — CN105 not healthy");
+            *(w->status) = HAP_STATUS_RES_BUSY;
+            ret = HAP_FAIL;
+            continue;
+        }
 
         if (!strcmp(uuid, HAP_CHAR_UUID_ON)) {
             const CN105State st = g_homekitCtrl->getEffectiveState();
@@ -255,8 +280,10 @@ static int fan_auto_write_cb(hap_write_data_t write_data[], int count,
         }
     }
 
-    g_homekitCtrl->sendPendingChanges();
-    return HAP_SUCCESS;
+    if (healthy) {
+        g_homekitCtrl->sendPendingChanges();
+    }
+    return ret;
 }
 
 void homekit_create_fan_auto_switch(hap_acc_t *acc)

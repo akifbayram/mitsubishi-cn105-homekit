@@ -32,17 +32,27 @@ static bool     s_fanModeWasDisconnected = true;
 static int fan_mode_write_cb(hap_write_data_t write_data[], int count,
                               void *serv_priv, void *write_priv)
 {
-    if (!g_homekitCtrl || !g_homekitCtrl->isHealthy()) {
-        LOG_WARN("[HK:FanMode] write REJECTED — CN105 not healthy");
-        for (int i = 0; i < count; i++) {
-            *(write_data[i].status) = HAP_STATUS_RES_BUSY;
-        }
-        return HAP_FAIL;
-    }
+    bool healthy = g_homekitCtrl && g_homekitCtrl->isHealthy();
+    int ret = HAP_SUCCESS;
 
     for (int i = 0; i < count; i++) {
         hap_write_data_t *w = &write_data[i];
         const char *uuid = hap_char_get_type_uuid(w->hc);
+
+        // ConfiguredName (Home app rename) doesn't touch the heat pump —
+        // accept it even when CN105 is down.
+        if (!strcmp(uuid, HAP_CHAR_UUID_CONFIGURED_NAME)) {
+            hap_char_update_val(w->hc, &w->val);
+            *(w->status) = HAP_STATUS_SUCCESS;
+            continue;
+        }
+
+        if (!healthy) {
+            LOG_WARN("[HK:FanMode] write REJECTED — CN105 not healthy");
+            *(w->status) = HAP_STATUS_RES_BUSY;
+            ret = HAP_FAIL;
+            continue;
+        }
 
         if (!strcmp(uuid, HAP_CHAR_UUID_ON)) {
             bool on = w->val.b;
@@ -61,8 +71,10 @@ static int fan_mode_write_cb(hap_write_data_t write_data[], int count,
         }
     }
 
-    g_homekitCtrl->sendPendingChanges();
-    return HAP_SUCCESS;
+    if (healthy) {
+        g_homekitCtrl->sendPendingChanges();
+    }
+    return ret;
 }
 
 void homekit_create_fan_mode_switch(hap_acc_t *acc)
@@ -148,17 +160,27 @@ static bool     s_dryModeWasDisconnected = true;
 static int dry_mode_write_cb(hap_write_data_t write_data[], int count,
                               void *serv_priv, void *write_priv)
 {
-    if (!g_homekitCtrl || !g_homekitCtrl->isHealthy()) {
-        LOG_WARN("[HK:DryMode] write REJECTED — CN105 not healthy");
-        for (int i = 0; i < count; i++) {
-            *(write_data[i].status) = HAP_STATUS_RES_BUSY;
-        }
-        return HAP_FAIL;
-    }
+    bool healthy = g_homekitCtrl && g_homekitCtrl->isHealthy();
+    int ret = HAP_SUCCESS;
 
     for (int i = 0; i < count; i++) {
         hap_write_data_t *w = &write_data[i];
         const char *uuid = hap_char_get_type_uuid(w->hc);
+
+        // ConfiguredName (Home app rename) doesn't touch the heat pump —
+        // accept it even when CN105 is down.
+        if (!strcmp(uuid, HAP_CHAR_UUID_CONFIGURED_NAME)) {
+            hap_char_update_val(w->hc, &w->val);
+            *(w->status) = HAP_STATUS_SUCCESS;
+            continue;
+        }
+
+        if (!healthy) {
+            LOG_WARN("[HK:DryMode] write REJECTED — CN105 not healthy");
+            *(w->status) = HAP_STATUS_RES_BUSY;
+            ret = HAP_FAIL;
+            continue;
+        }
 
         if (!strcmp(uuid, HAP_CHAR_UUID_ON)) {
             bool on = w->val.b;
@@ -177,8 +199,10 @@ static int dry_mode_write_cb(hap_write_data_t write_data[], int count,
         }
     }
 
-    g_homekitCtrl->sendPendingChanges();
-    return HAP_SUCCESS;
+    if (healthy) {
+        g_homekitCtrl->sendPendingChanges();
+    }
+    return ret;
 }
 
 void homekit_create_dry_mode_switch(hap_acc_t *acc)
