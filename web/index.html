@@ -1802,6 +1802,52 @@ input:focus-visible,select:focus-visible{outline-offset:0}
     }
   }
 
+  // SHA-256 of an ArrayBuffer as lowercase hex; resolves null when
+  // crypto.subtle is unavailable (insecure context, i.e. plain http).
+  function sha256Hex(buf){
+    if(!(window.crypto&&window.crypto.subtle)) return Promise.resolve(null);
+    return crypto.subtle.digest('SHA-256',buf).then(function(hashBuf){
+      var arr=new Uint8Array(hashBuf),hex='';
+      for(var i=0;i<arr.length;i++) hex+=('0'+arr[i].toString(16)).slice(-2);
+      return hex;
+    });
+  }
+
+  // POST a firmware ArrayBuffer to /upload with progress UI.
+  function flashBuffer(buf,hash){
+    var prog=$('otaProgress'),bar=$('otaBar'),status=$('otaStatus');
+    prog.style.display='block';
+    bar.style.width='0%';
+    bar.style.background='var(--accent)';
+    status.textContent='Uploading...';
+    var xhr=new XMLHttpRequest();
+    xhr.open('POST','/upload',true);
+    xhr.setRequestHeader('Content-Type','application/octet-stream');
+    if(hash) xhr.setRequestHeader('X-Firmware-SHA256',hash);
+    xhr.upload.onprogress=function(e){
+      if(e.lengthComputable){
+        var pct=Math.round(e.loaded/e.total*100);
+        bar.style.width=pct+'%';
+        status.textContent='Uploading: '+pct+'%';
+      }
+    };
+    xhr.onload=function(){
+      if(xhr.status===200){
+        bar.style.width='100%';
+        bar.style.background='var(--green)';
+        status.textContent='Update complete! Restarting...';
+      }else{
+        bar.style.background='var(--red)';
+        status.textContent='Upload failed: '+xhr.responseText;
+      }
+    };
+    xhr.onerror=function(){
+      bar.style.background='var(--red)';
+      status.textContent='Upload failed: network error';
+    };
+    xhr.send(new Uint8Array(buf));
+  }
+
   window.uploadFirmware=function(){
     var fileInput=$('fwFile');
     if(!fileInput.files.length){alert('Select a .bin file first');return}
@@ -1809,51 +1855,14 @@ input:focus-visible,select:focus-visible{outline-offset:0}
     if(!file.name.endsWith('.bin')){alert('Please select a .bin firmware file');return}
     if(!confirm('Upload firmware "'+file.name+'" ('+Math.round(file.size/1024)+'KB)?')) return;
 
-    var prog=$('otaProgress'),bar=$('otaBar'),status=$('otaStatus');
-    prog.style.display='block';
+    var bar=$('otaBar'),status=$('otaStatus');
+    $('otaProgress').style.display='block';
     bar.style.width='0%';
     bar.style.background='var(--accent)';
-    status.textContent='Preparing upload...';
+    status.textContent='Computing checksum...';
 
     file.arrayBuffer().then(function(buf){
-      if(window.crypto&&window.crypto.subtle){
-        status.textContent='Computing checksum...';
-        return crypto.subtle.digest('SHA-256',buf).then(function(hashBuf){
-          var arr=new Uint8Array(hashBuf);
-          var hex='';
-          for(var i=0;i<arr.length;i++) hex+=('0'+arr[i].toString(16)).slice(-2);
-          return {data:buf,hash:hex};
-        });
-      }
-      return {data:buf,hash:null};
-    }).then(function(fw){
-      status.textContent='Uploading...';
-      var xhr=new XMLHttpRequest();
-      xhr.open('POST','/upload',true);
-      xhr.setRequestHeader('Content-Type','application/octet-stream');
-      if(fw.hash) xhr.setRequestHeader('X-Firmware-SHA256',fw.hash);
-      xhr.upload.onprogress=function(e){
-        if(e.lengthComputable){
-          var pct=Math.round(e.loaded/e.total*100);
-          bar.style.width=pct+'%';
-          status.textContent='Uploading: '+pct+'%';
-        }
-      };
-      xhr.onload=function(){
-        if(xhr.status===200){
-          bar.style.width='100%';
-          bar.style.background='var(--green)';
-          status.textContent='Update complete! Restarting...';
-        }else{
-          bar.style.background='var(--red)';
-          status.textContent='Upload failed: '+xhr.responseText;
-        }
-      };
-      xhr.onerror=function(){
-        bar.style.background='var(--red)';
-        status.textContent='Upload failed: network error';
-      };
-      xhr.send(new Uint8Array(fw.data));
+      return sha256Hex(buf).then(function(hash){flashBuffer(buf,hash)});
     }).catch(function(err){
       bar.style.background='var(--red)';
       status.textContent='Checksum error: '+err.message;
