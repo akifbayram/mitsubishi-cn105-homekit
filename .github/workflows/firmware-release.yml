@@ -121,15 +121,25 @@ jobs:
       - name: Generate manifest.json
         env:
           VERSION: ${{ steps.version.outputs.number }}
+          TAG: ${{ steps.version.outputs.tag }}
         run: |
+          sha() { sha256sum "artifacts/firmware-$1/firmware.bin" | cut -d' ' -f1; }
+          SHA_NANOC6=$(sha nanoc6)
+          SHA_M5ATOMS3=$(sha m5atoms3-lite)
+          SHA_DEVKIT=$(sha esp32-devkit)
+          SHA_C3MINI=$(sha esp32c3-mini)
+
           cat > serin-cn105/firmware/homekit/manifest.json << EOF
           {
             "name": "Mitsubishi HomeKit Controller",
             "version": "${VERSION}",
+            "release_url": "https://github.com/akifbayram/mitsubishi-cn105-homekit/releases/tag/${TAG}",
             "new_install_prompt_erase": true,
             "builds": [
               {
                 "chipFamily": "ESP32-C6",
+                "board": "nanoc6",
+                "sha256": "${SHA_NANOC6}",
                 "parts": [
                   { "path": "nanoc6/bootloader.bin", "offset": 0 },
                   { "path": "nanoc6/partitions.bin", "offset": 32768 },
@@ -139,6 +149,8 @@ jobs:
               },
               {
                 "chipFamily": "ESP32-S3",
+                "board": "m5atoms3-lite",
+                "sha256": "${SHA_M5ATOMS3}",
                 "parts": [
                   { "path": "m5atoms3-lite/bootloader.bin", "offset": 0 },
                   { "path": "m5atoms3-lite/partitions.bin", "offset": 32768 },
@@ -148,6 +160,8 @@ jobs:
               },
               {
                 "chipFamily": "ESP32",
+                "board": "esp32-devkit",
+                "sha256": "${SHA_DEVKIT}",
                 "parts": [
                   { "path": "esp32-devkit/bootloader.bin", "offset": 4096 },
                   { "path": "esp32-devkit/partitions.bin", "offset": 32768 },
@@ -157,6 +171,8 @@ jobs:
               },
               {
                 "chipFamily": "ESP32-C3",
+                "board": "esp32c3-mini",
+                "sha256": "${SHA_C3MINI}",
                 "parts": [
                   { "path": "esp32c3-mini/bootloader.bin", "offset": 0 },
                   { "path": "esp32c3-mini/partitions.bin", "offset": 32768 },
@@ -167,6 +183,9 @@ jobs:
             ]
           }
           EOF
+
+          python3 -m json.tool serin-cn105/firmware/homekit/manifest.json > /dev/null
+          echo "manifest OK"
 
       - name: Commit and push to serin-cn105
         env:
