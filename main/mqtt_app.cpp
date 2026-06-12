@@ -212,10 +212,123 @@ void MqttClient::publishOtaStatus(const char *json) {
     esp_mqtt_client_publish(s_client, s_topicOtaStatus, json, 0, 1, 0);
 }
 
+// ── State JSON ──────────────────────────────────────────────────────────────
+
+// HA climate "action" values: off, heating, cooling, drying, fan, idle.
+static const char *haAction(const CN105State &st) {
+    if (!st.power) return "off";
+    uint8_t m = st.mode;
+    if (m == CN105_MODE_AUTO) {
+        // Resolve AUTO to its active side from 0x09 polling
+        if (st.autoSubMode == 0x02)      m = CN105_MODE_HEAT;
+        else if (st.autoSubMode == 0x01) m = CN105_MODE_COOL;
+    }
+    if (m == CN105_MODE_FAN) return "fan";
+    if (m == CN105_MODE_DRY) return "drying";
+    if (!st.operating) return "idle";
+    if (m == CN105_MODE_HEAT) return "heating";
+    if (m == CN105_MODE_COOL) return "cooling";
+    return "idle";
+}
+
+static int buildStateJson(char *buf, size_t cap) {
+    // getEffectiveState() substitutes wanted values during the anti-flicker
+    // grace window, so HA doesn't bounce after a command.
+    const CN105State st = s_ctrl->getEffectiveState();
+
+    // haMode: HA climate mode vocabulary ("off" when powered down, "fan_only")
+    const char *haMode = !st.power ? "off"
+        : (st.mode == CN105_MODE_FAN ? "fan_only" : modeToWebStr(st.mode));
+
+    int n = snprintf(buf, cap,
+        "{\"power\":%s"
+        ",\"mode\":\"%s\""
+        ",\"haMode\":\"%s\""
+        ",\"action\":\"%s\""
+        ",\"target\":%.1f"
+        ",\"room\":%.1f"
+        ",\"fan\":\"%s\""
+        ",\"vane\":\"%s\""
+        ",\"wideVane\":\"%s\""
+        ",\"operating\":%s"
+        ",\"compressorHz\":%u"
+        ",\"connected\":%s"
+        ",\"subMode\":\"%s\""
+        ",\"stage\":\"%s\""
+        ",\"autoSubMode\":\"%s\"",
+        st.power ? "true" : "false",
+        modeToWebStr(st.mode),
+        haMode,
+        haAction(st),
+        st.targetTemp,
+        st.roomTemp,
+        fanToWebStr(st.fanSpeed),
+        vaneToWebStr(st.vane),
+        wideVaneToWebStr(st.wideVane),
+        st.operating ? "true" : "false",
+        st.compressorHz,
+        s_ctrl->isConnected() ? "true" : "false",
+        subModeToWebStr(st.subMode),
+        stageToWebStr(st.stage),
+        autoSubModeToWebStr(st.autoSubMode));
+
+    if (st.outsideTempValid)
+        jsonAppend(buf, cap, &n, ",\"outsideTemp\":%.1f", st.outsideTemp);
+    else
+        jsonAppend(buf, cap, &n, ",\"outsideTemp\":null");
+
+    if (st.hasError)
+        jsonAppend(buf, cap, &n, ",\"errorCode\":%u", st.errorCode);
+    else
+        jsonAppend(buf, cap, &n, ",\"errorCode\":null");
+
+    if (st.runtimeValid)
+        jsonAppend(buf, cap, &n, ",\"runtime\":%.1f", st.runtimeHours);
+    else
+        jsonAppend(buf, cap, &n, ",\"runtime\":null");
+
+    jsonAppend(buf, cap, &n,
+        ",\"heatThresh\":%.1f,\"coolThresh\":%.1f",
+        settings.get().heatingThreshold, settings.get().coolingThreshold);
+
+#ifdef BLE_ENABLE
+    if (BleSensor::isBleEnabled()) {
+        float bleT = BleSensor::temperature();
+        float bleH = BleSensor::humidity();
+        char bleTStr[8] = "null", bleHStr[8] = "null";
+        if (!std::isnan(bleT)) snprintf(bleTStr, sizeof(bleTStr), "%.1f", bleT);
+        if (!std::isnan(bleH)) snprintf(bleHStr, sizeof(bleHStr), "%.0f", bleH);
+        jsonAppend(buf, cap, &n,
+            ",\"bleTemp\":%s,\"bleHumidity\":%s,\"bleBattery\":%d",
+            bleTStr, bleHStr, (int)BleSensor::battery());
+    }
+#endif
+
+    jsonAppend(buf, cap, &n, "}");
+    return n;
+}
+
 // ── Placeholder bodies (filled in by later tasks) ───────────────────────────
 static void publishStateIfChanged(bool force) {
-    (void)force;
-    if (s_lastHeartbeat == 0) s_lastHeartbeat = uptime_ms();
+    // Called from the main loop only (1 Hz) — static buffers are safe.
+    static char json[1024];
+    static char lastJson[1024] = "";
+
+    int n = buildStateJson(json, sizeof(json));
+    if (n >= (int)sizeof(json)) {
+        LOG_WARN("MQTT state JSON truncated (%d >= %zu), skipping publish", n, sizeof(json));
+        return;
+    }
+
+    if (!force && strcmp(json, lastJson) == 0) return;
+
+    // Retained so HA gets fresh state immediately on its own restart.
+    int rc = esp_mqtt_client_publish(s_client, s_topicState, json, 0, 0, 1);
+    if (rc >= 0) {
+        strcpy(lastJson, json);
+        s_lastHeartbeat = uptime_ms();
+        LOG_DEBUG("State published (%d bytes)", n);
+    }
 }
 static void publishDiscovery() {}
 static void handleData(esp_mqtt_event_handle_t event) { (void)event; }
