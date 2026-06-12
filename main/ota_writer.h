@@ -42,6 +42,9 @@ public:
 
     static bool tryAcquire();
     static void release();
+    // True while an OTA holds the writer lock (between tryAcquire and release).
+    // Lets other subsystems avoid tearing down resources an OTA is using.
+    static bool isInProgress();
 
 private:
     void restoreWdt();

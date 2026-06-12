@@ -26,6 +26,10 @@ void OtaWriter::release() {
     s_otaInProgress = false;
 }
 
+bool OtaWriter::isInProgress() {
+    return s_otaInProgress;
+}
+
 static void setWdtTimeout(uint32_t ms) {
     esp_task_wdt_config_t cfg = { .timeout_ms = ms, .idle_core_mask = 1, .trigger_panic = true };
     esp_task_wdt_reconfigure(&cfg);

@@ -17,6 +17,7 @@
 #include "json_utils.h"
 #include "ac_command.h"
 #include "mqtt_ota.h"
+#include "ota_writer.h"
 #include "ble_config.h"
 #ifdef BLE_ENABLE
 #include "ble_sensor.h"
@@ -33,6 +34,7 @@ static CN105Controller *s_ctrl = nullptr;
 static esp_mqtt_client_handle_t s_client = nullptr;
 static std::atomic<bool> s_connected{false};
 static std::atomic<bool> s_forcePublish{false};
+static std::atomic<bool> s_reconnectPending{false};
 static bool s_started = false;
 static const char *s_status = "off";
 
@@ -104,6 +106,8 @@ static void startClient() {
     snprintf(s_topicState, sizeof(s_topicState), "%s/state", s_base);
     snprintf(s_topicOtaStatus, sizeof(s_topicOtaStatus), "%s/ota/status", s_base);
 
+    // esp-mqtt strdup's all config strings (uri, user, pass, LWT) during
+    // esp_mqtt_client_init(), so these buffers need only outlive that call.
     static char uri[96];
     snprintf(uri, sizeof(uri), "mqtt://%s:%u", cfg.mqttHost, cfg.mqttPort);
 
@@ -168,11 +172,18 @@ void MqttClient::begin(CN105Controller *ctrl) {
 }
 
 void MqttClient::loop() {
+    // Deferred reconnect (requested by applyConfig from another task): tear
+    // down here in the main task, never while an OTA may be publishing status.
+    if (s_reconnectPending && !OtaWriter::isInProgress()) {
+        s_reconnectPending = false;
+        if (s_started) stopClient();  // reconnects below if still enabled
+    }
+
     const DeviceSettings &cfg = settings.get();
     bool want = cfg.mqttEnabled && strlen(cfg.mqttHost) > 0 && WifiManager::isConnected();
 
     if (want && !s_started) startClient();
-    else if (!want && s_started) stopClient();
+    else if (!want && s_started && !OtaWriter::isInProgress()) stopClient();
 
     if (!s_connected) return;
 
@@ -186,8 +197,10 @@ void MqttClient::loop() {
 }
 
 void MqttClient::applyConfig() {
-    // Tear down; loop() reconnects with the new settings if still enabled.
-    if (s_started) stopClient();
+    // Defer teardown to loop() (main task): avoids blocking the caller's task
+    // on esp_mqtt_client_stop() and never destroys the client while an OTA
+    // task may be publishing status on it.
+    s_reconnectPending = true;
 }
 
 bool MqttClient::isConnected() { return s_connected; }
