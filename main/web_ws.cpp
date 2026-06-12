@@ -570,7 +570,7 @@ void WebUI::pushState() {
 
 #ifdef MQTT_ENABLE
     {
-        char escHost[97], escUser[49], escTopic[60];
+        char escHost[129], escUser[67], escTopic[81];
         jsonEscape(cfg.mqttHost, escHost, sizeof(escHost));
         jsonEscape(cfg.mqttUser, escUser, sizeof(escUser));
         jsonEscape(cfg.mqttBaseTopic[0] ? cfg.mqttBaseTopic : MqttClient::baseTopic(),
