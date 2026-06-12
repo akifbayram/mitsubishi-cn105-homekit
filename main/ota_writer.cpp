@@ -64,6 +64,10 @@ esp_err_t OtaWriter::begin(size_t expectedSize, const char *expectedSha256) {
     }
 
     // esp_ota_begin() erases the partition, which can block for several seconds.
+    // The 30s timeout intentionally stays raised for the whole OTA: the MQTT
+    // otaTask isn't TWDT-registered, and the watched main/CN105 tasks keep
+    // resetting the watchdog, so this only widens the safety margin during the
+    // flash-bound write phase. restoreWdt() drops it back to 10s when done.
     setWdtTimeout(30000);
 
     esp_err_t err = esp_ota_begin(_partition,

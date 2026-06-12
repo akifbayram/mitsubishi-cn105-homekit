@@ -71,7 +71,11 @@ static void otaTask(void *arg) {
                                esp_err_to_name(err));
                 goto fail;
             }
-            esp_http_client_fetch_headers(client);
+            int64_t hdrLen = esp_http_client_fetch_headers(client);
+            if (hdrLen < 0) {
+                publishStatusf("{\"state\":\"error\",\"reason\":\"header read failed\"}");
+                goto fail;
+            }
             status = esp_http_client_get_status_code(client);
             if (status == 301 || status == 302 || status == 303 ||
                 status == 307 || status == 308) {
@@ -79,7 +83,10 @@ static void otaTask(void *arg) {
                     publishStatusf("{\"state\":\"error\",\"reason\":\"too many redirects\"}");
                     goto fail;
                 }
-                esp_http_client_set_redirection(client);
+                if (esp_http_client_set_redirection(client) != ESP_OK) {
+                    publishStatusf("{\"state\":\"error\",\"reason\":\"redirect: no Location header\"}");
+                    goto fail;
+                }
                 esp_http_client_close(client);
                 continue;
             }
@@ -114,7 +121,13 @@ static void otaTask(void *arg) {
                                (unsigned)writer.received());
                 goto fail;
             }
-            if (r == 0) break;  // download complete
+            if (r == 0) {
+                if (!esp_http_client_is_complete_data_received(client)) {
+                    LOG_WARN("OTA: r==0 but data incomplete (%u bytes); SHA256 will catch truncation",
+                             (unsigned)writer.received());
+                }
+                break;  // download complete
+            }
 
             err = writer.write((const uint8_t *)buf, r);
             if (err != ESP_OK) {
@@ -169,6 +182,7 @@ bool MqttOta::start(const char *url, const char *sha256) {
 
     OtaParams *p = (OtaParams *)malloc(sizeof(OtaParams));
     if (!p) {
+        MqttClient::publishOtaStatus("{\"state\":\"error\",\"reason\":\"out of memory\"}");
         OtaWriter::release();
         return false;
     }
@@ -177,6 +191,9 @@ bool MqttOta::start(const char *url, const char *sha256) {
     strncpy(p->sha, sha256, sizeof(p->sha) - 1);
     p->sha[sizeof(p->sha) - 1] = '\0';
 
+    // 8 KB stack: mbedTLS in/out buffers (~20 KB) and handshake params are
+    // heap-allocated by esp-tls; hardware MPI keeps ECC frame depth low.
+    // Matches the IDF HTTPS-OTA examples' task stack size.
     if (xTaskCreate(otaTask, "mqtt_ota", 8192, p, 5, NULL) != pdPASS) {
         LOG_ERROR("Failed to create OTA task");
         free(p);
