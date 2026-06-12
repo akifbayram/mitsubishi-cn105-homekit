@@ -610,6 +610,60 @@ input:focus-visible,select:focus-visible{outline-offset:0}
     </div>
   </div>
 
+  <!-- MQTT (hidden when MQTT not compiled in) -->
+  <div class="card" style="padding:0;display:none" id="mqttCard">
+    <div class="collapse-header" onclick="togglePanel(this)" tabindex="0" role="button" aria-expanded="false">
+      <span class="collapse-title">MQTT</span>
+      <span id="mqttStatusLabel" style="font-size:12px;color:var(--text2);font-weight:400"></span>
+      <span class="status-dot idle" id="mqttDot"></span>
+      <span class="collapse-chevron">&#8250;</span>
+    </div>
+    <div class="collapse-body" id="mqttBody">
+      <div class="ble-config-row">
+        <label class="status-label" style="margin:0">Enable MQTT</label>
+        <label class="ios-toggle">
+          <input type="checkbox" id="mqttEnableToggle">
+          <span class="ios-toggle-slider"></span>
+        </label>
+      </div>
+      <div class="ble-help">Connects to an MQTT broker for Home Assistant and local automation.</div>
+      <div class="ble-config-row" style="margin-top:10px">
+        <label class="status-label" style="margin:0">Broker Host</label>
+        <input type="text" id="mqttHostInput" placeholder="192.168.1.10" spellcheck="false" autocomplete="off"
+               style="flex:1;min-width:0;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 10px;color:var(--text);font-size:13px">
+      </div>
+      <div class="ble-config-row" style="margin-top:10px">
+        <label class="status-label" style="margin:0">Port</label>
+        <input type="number" id="mqttPortInput" min="1" max="65535" value="1883"
+               style="width:90px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 10px;color:var(--text);font-size:13px;text-align:center">
+      </div>
+      <div class="ble-config-row" style="margin-top:10px">
+        <label class="status-label" style="margin:0">Username</label>
+        <input type="text" id="mqttUserInput" placeholder="(optional)" spellcheck="false" autocomplete="off"
+               style="flex:1;min-width:0;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 10px;color:var(--text);font-size:13px">
+      </div>
+      <div class="ble-config-row" style="margin-top:10px">
+        <label class="status-label" style="margin:0">Password</label>
+        <input type="password" id="mqttPassInput" placeholder="(unchanged)" autocomplete="new-password"
+               style="flex:1;min-width:0;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 10px;color:var(--text);font-size:13px">
+      </div>
+      <div class="ble-config-row" style="margin-top:10px">
+        <label class="status-label" style="margin:0">Base Topic</label>
+        <input type="text" id="mqttTopicInput" spellcheck="false" autocomplete="off"
+               style="flex:1;min-width:0;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 10px;color:var(--text);font-family:monospace;font-size:13px">
+      </div>
+      <div class="ble-config-row" style="margin-top:10px">
+        <label class="status-label" style="margin:0">Home Assistant Discovery</label>
+        <label class="ios-toggle">
+          <input type="checkbox" id="mqttDiscToggle" checked>
+          <span class="ios-toggle-slider"></span>
+        </label>
+      </div>
+      <div class="ble-help">Automatically creates the climate and sensor entities in Home Assistant.</div>
+      <button class="save-btn" style="margin:12px 0 0;width:100%" onclick="saveMqttConfig()">Save</button>
+    </div>
+  </div>
+
   <!-- HomeKit -->
   <div class="card" style="padding:0">
     <div class="collapse-header" onclick="togglePanel(this)" tabindex="0" role="button" aria-expanded="false">
@@ -1371,6 +1425,20 @@ input:focus-visible,select:focus-visible{outline-offset:0}
       }
     }
 
+    // MQTT
+    if(s.mqttStatus!==undefined){
+      $('mqttCard').style.display='';
+      var st=s.mqttStatus;
+      $('mqttStatusLabel').textContent=st==='connected'?'Connected':(st==='connecting'?'Connecting…':(st==='error'?'Error':''));
+      $('mqttDot').className='status-dot '+(st==='connected'?'active':(st==='error'?'error':'idle'));
+      $('mqttEnableToggle').checked=!!s.mqttEnabled;
+      if(!$('mqttHostInput').matches(':focus'))$('mqttHostInput').value=s.mqttHost||'';
+      if(!$('mqttPortInput').matches(':focus'))$('mqttPortInput').value=s.mqttPort||1883;
+      if(!$('mqttUserInput').matches(':focus'))$('mqttUserInput').value=s.mqttUser||'';
+      if(!$('mqttTopicInput').matches(':focus'))$('mqttTopicInput').value=s.mqttTopic||'';
+      $('mqttDiscToggle').checked=s.mqttDiscovery!==false;
+    }
+
     // CN105 header: glowing dot + status label
     var cn105Lbl=$('cn105StatusLabel');
     var cn105Bnr=$('cn105Banner');
@@ -1583,6 +1651,19 @@ input:focus-visible,select:focus-visible{outline-offset:0}
     });
   };
 
+  window.saveMqttConfig=function(){
+    var o={cmd:'config',
+      mqttEnabled:$('mqttEnableToggle').checked,
+      mqttHost:$('mqttHostInput').value.trim(),
+      mqttPort:parseInt($('mqttPortInput').value)||1883,
+      mqttUser:$('mqttUserInput').value.trim(),
+      mqttTopic:$('mqttTopicInput').value.trim(),
+      mqttDiscovery:$('mqttDiscToggle').checked};
+    var p=$('mqttPassInput').value;
+    if(p) o.mqttPass=p;  /* empty = leave stored password unchanged */
+    send(o);
+    $('mqttPassInput').value='';
+  };
   window.saveBleConfig=function(){
     var mac=$('bleMacInput').value.trim().toUpperCase();
     if(mac&&!/^([0-9A-F]{2}:){5}[0-9A-F]{2}$/.test(mac)){alert('Invalid MAC format');return}

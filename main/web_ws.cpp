@@ -14,6 +14,10 @@
 #ifdef BLE_ENABLE
 #include "ble_sensor.h"
 #endif
+#include "mqtt_config.h"
+#ifdef MQTT_ENABLE
+#include "mqtt_app.h"
+#endif
 
 static const char *TAG = "web_ws";
 
@@ -271,11 +275,66 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
         }
 #endif
 
+#ifdef MQTT_ENABLE
+        bool mqttChanged = false;
+        bool mqttBool;
+        if (jsonGetBool(msg, "mqttEnabled", &mqttBool)) {
+            settings.get().mqttEnabled = mqttBool;
+            LOG_INFO("Config mqttEnabled=%s", mqttBool ? "ON" : "OFF");
+            mqttChanged = true;
+        }
+        char mqttStr[64];
+        if (jsonGetString(msg, "mqttHost", mqttStr, sizeof(mqttStr))) {
+            strncpy(settings.get().mqttHost, mqttStr, sizeof(settings.get().mqttHost) - 1);
+            settings.get().mqttHost[sizeof(settings.get().mqttHost) - 1] = '\0';
+            mqttChanged = true;
+        }
+        int mqttInt;
+        if (jsonGetInt(msg, "mqttPort", &mqttInt)) {
+            if (mqttInt >= 1 && mqttInt <= 65535) {
+                settings.get().mqttPort = (uint16_t)mqttInt;
+                mqttChanged = true;
+            }
+        }
+        char mqttUserStr[33];
+        if (jsonGetString(msg, "mqttUser", mqttUserStr, sizeof(mqttUserStr))) {
+            strncpy(settings.get().mqttUser, mqttUserStr, sizeof(settings.get().mqttUser) - 1);
+            settings.get().mqttUser[sizeof(settings.get().mqttUser) - 1] = '\0';
+            mqttChanged = true;
+        }
+        char mqttPassStr[65];
+        if (jsonGetString(msg, "mqttPass", mqttPassStr, sizeof(mqttPassStr))) {
+            // Key only present when the user typed a new password (empty
+            // input = leave unchanged; UI never echoes the stored password)
+            strncpy(settings.get().mqttPass, mqttPassStr, sizeof(settings.get().mqttPass) - 1);
+            settings.get().mqttPass[sizeof(settings.get().mqttPass) - 1] = '\0';
+            mqttChanged = true;
+        }
+        char mqttTopicStr[40];
+        if (jsonGetString(msg, "mqttTopic", mqttTopicStr, sizeof(mqttTopicStr))) {
+            strncpy(settings.get().mqttBaseTopic, mqttTopicStr, sizeof(settings.get().mqttBaseTopic) - 1);
+            settings.get().mqttBaseTopic[sizeof(settings.get().mqttBaseTopic) - 1] = '\0';
+            mqttChanged = true;
+        }
+        bool mqttDiscBool;
+        if (jsonGetBool(msg, "mqttDiscovery", &mqttDiscBool)) {
+            settings.get().mqttDiscovery = mqttDiscBool;
+            mqttChanged = true;
+        }
+        if (mqttChanged) changed = true;
+#endif
+
         if (changed) {
             settings.save();
             // Push updated state to reflect new config values
             pushState();
         }
+
+#ifdef MQTT_ENABLE
+        if (mqttChanged) {
+            MqttClient::applyConfig();  // reconnect with saved settings
+        }
+#endif
 
     } else if (strcmp(cmd, "bleScan") == 0) {
 #ifdef BLE_ENABLE
@@ -364,7 +423,7 @@ void WebUI::pushState() {
 
     unsigned long wifiUptimeSec = wifiRecovery.getWifiUptimeSeconds();
 
-    char buf[1200];
+    char buf[1600];
     int n = snprintf(buf, sizeof(buf),
         "{\"type\":\"state\""
         ",\"power\":%s"
@@ -506,6 +565,31 @@ void WebUI::pushState() {
             BleSensor::isDiscovering() ? "true" : "false",
             sType ? "\"" : "", sType ? sType : "null", sType ? "\"" : ""
         );
+    }
+#endif
+
+#ifdef MQTT_ENABLE
+    {
+        char escHost[97], escUser[49], escTopic[60];
+        jsonEscape(cfg.mqttHost, escHost, sizeof(escHost));
+        jsonEscape(cfg.mqttUser, escUser, sizeof(escUser));
+        jsonEscape(cfg.mqttBaseTopic[0] ? cfg.mqttBaseTopic : MqttClient::baseTopic(),
+                   escTopic, sizeof(escTopic));
+        jsonAppend(buf, sizeof(buf), &n,
+            ",\"mqttEnabled\":%s"
+            ",\"mqttStatus\":\"%s\""
+            ",\"mqttHost\":\"%s\""
+            ",\"mqttPort\":%u"
+            ",\"mqttUser\":\"%s\""
+            ",\"mqttTopic\":\"%s\""
+            ",\"mqttDiscovery\":%s",
+            cfg.mqttEnabled ? "true" : "false",
+            MqttClient::statusStr(),
+            escHost,
+            (unsigned)cfg.mqttPort,
+            escUser,
+            escTopic,
+            cfg.mqttDiscovery ? "true" : "false");
     }
 #endif
 
