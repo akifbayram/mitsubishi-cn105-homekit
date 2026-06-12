@@ -336,11 +336,12 @@ static void publishStateIfChanged(bool force) {
 
 static void publishSensorDiscovery(const char *objectId, const char *name,
                                    const char *devClass, const char *unit,
-                                   const char *valueTpl) {
+                                   const char *valueTpl, const char *stateClass,
+                                   int expireAfter) {
     char topic[96];
     snprintf(topic, sizeof(topic), "homeassistant/sensor/%s/%s/config",
              s_nodeId, objectId);
-    static char buf[640];
+    static char buf[768];
     int n = snprintf(buf, sizeof(buf),
         "{\"name\":\"%s\""
         ",\"uniq_id\":\"%s_%s\""
@@ -348,8 +349,10 @@ static void publishSensorDiscovery(const char *objectId, const char *name,
         ",\"avty_t\":\"%s/availability\""
         ",\"val_tpl\":\"%s\"",
         name, s_nodeId, objectId, s_base, s_base, valueTpl);
-    if (devClass) jsonAppend(buf, sizeof(buf), &n, ",\"dev_cla\":\"%s\"", devClass);
-    if (unit)     jsonAppend(buf, sizeof(buf), &n, ",\"unit_of_meas\":\"%s\"", unit);
+    if (devClass)   jsonAppend(buf, sizeof(buf), &n, ",\"dev_cla\":\"%s\"", devClass);
+    if (unit)       jsonAppend(buf, sizeof(buf), &n, ",\"unit_of_meas\":\"%s\"", unit);
+    if (stateClass) jsonAppend(buf, sizeof(buf), &n, ",\"stat_cla\":\"%s\"", stateClass);
+    if (expireAfter > 0) jsonAppend(buf, sizeof(buf), &n, ",\"exp_aft\":%d", expireAfter);
     jsonAppend(buf, sizeof(buf), &n, ",\"dev\":%s}", s_deviceJson);
     if (n >= (int)sizeof(buf)) {
         LOG_WARN("Discovery config truncated for %s", objectId);
@@ -423,22 +426,22 @@ static void publishDiscovery() {
     publishSelectDiscovery();
 
     publishSensorDiscovery("outside_temp", "Outside Temperature", "temperature",
-        "\xC2\xB0""C", "{{ value_json.outsideTemp }}");
+        "\xC2\xB0""C", "{{ value_json.outsideTemp }}", "measurement", 0);
     publishSensorDiscovery("compressor_hz", "Compressor Frequency", "frequency",
-        "Hz", "{{ value_json.compressorHz }}");
+        "Hz", "{{ value_json.compressorHz }}", "measurement", 0);
     publishSensorDiscovery("runtime_hours", "Runtime", nullptr,
-        "h", "{{ value_json.runtime }}");
+        "h", "{{ value_json.runtime }}", "total_increasing", 0);
     publishSensorDiscovery("error_code", "Error Code", nullptr,
-        nullptr, "{{ value_json.errorCode }}");
+        nullptr, "{{ value_json.errorCode }}", nullptr, 0);
 
 #ifdef BLE_ENABLE
     if (BleSensor::isBleEnabled()) {
         publishSensorDiscovery("ble_temp", "Remote Sensor Temperature", "temperature",
-            "\xC2\xB0""C", "{{ value_json.bleTemp }}");
+            "\xC2\xB0""C", "{{ value_json.bleTemp }}", "measurement", 90);
         publishSensorDiscovery("ble_humidity", "Remote Sensor Humidity", "humidity",
-            "%", "{{ value_json.bleHumidity }}");
+            "%", "{{ value_json.bleHumidity }}", "measurement", 90);
         publishSensorDiscovery("ble_battery", "Remote Sensor Battery", "battery",
-            "%", "{{ value_json.bleBattery }}");
+            "%", "{{ value_json.bleBattery }}", "measurement", 90);
     }
 #endif
 
