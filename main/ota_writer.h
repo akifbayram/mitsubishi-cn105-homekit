@@ -8,8 +8,14 @@
 
 // Shared streaming OTA writer used by the HTTP upload handler (web_ota.cpp)
 // and the MQTT-triggered download (mqtt_ota.cpp). Exactly one OTA may run at
-// a time across all entry points — call tryAcquire() before begin() and
-// release() after the writer is done (abort or non-rebooting failure).
+// a time across all entry points.
+//
+// Acquire/release contract: begin() does NOT check the acquire flag itself —
+// callers MUST call tryAcquire() first and only proceed if it returns true.
+// After a successful tryAcquire(), release() must be called exactly once on
+// every non-rebooting path (abort, any failure); success paths that call
+// esp_restart() may skip it. A forgotten release() permanently wedges all
+// future OTAs until reboot.
 //
 // Verification contract: when expectedSha256 is provided, the new image is
 // only marked bootable (esp_ota_set_boot_partition) after the computed hash

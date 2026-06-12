@@ -165,8 +165,8 @@ void OtaWriter::abort() {
     _active = false;
     restoreWdt();
 #if PIN_LED_DATA >= 0
-    // Hand the LED back to the main-loop priority chain (which skips
-    // re-evaluation while state == SLED_OTA).
-    statusLED.setState(SLED_BOOT);
+    // Neutral handoff back to the main-loop priority chain, which only skips
+    // re-evaluation while state == SLED_OTA — it reclassifies on the next tick.
+    statusLED.setState(SLED_OFF);
 #endif
 }
