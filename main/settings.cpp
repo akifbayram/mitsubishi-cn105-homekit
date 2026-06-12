@@ -130,32 +130,46 @@ void SettingsStore::begin() {
 #endif
 
 #ifdef MQTT_ENABLE
+    // mqttEnabled — bool stored as uint8_t
     {
         uint8_t val = 0;
         nvs_get_u8(_handle, "mqttOn", &val);
         _settings.mqttEnabled = (val != 0);
     }
+
+    // mqttHost — string
     {
         size_t len = sizeof(_settings.mqttHost);
         nvs_get_str(_handle, "mqttHost", _settings.mqttHost, &len);
     }
+
+    // mqttPort — uint16_t
     {
         uint16_t val = 1883;
         nvs_get_u16(_handle, "mqttPort", &val);
         _settings.mqttPort = val;
     }
+    if (_settings.mqttPort == 0) _settings.mqttPort = 1883;
+
+    // mqttUser — string
     {
         size_t len = sizeof(_settings.mqttUser);
         nvs_get_str(_handle, "mqttUser", _settings.mqttUser, &len);
     }
+
+    // mqttPass — string
     {
         size_t len = sizeof(_settings.mqttPass);
         nvs_get_str(_handle, "mqttPass", _settings.mqttPass, &len);
     }
+
+    // mqttBaseTopic — string
     {
         size_t len = sizeof(_settings.mqttBaseTopic);
         nvs_get_str(_handle, "mqttTopic", _settings.mqttBaseTopic, &len);
     }
+
+    // mqttDiscovery — bool stored as uint8_t
     {
         uint8_t val = 1;
         nvs_get_u8(_handle, "mqttDisc", &val);
