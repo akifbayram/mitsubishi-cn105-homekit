@@ -1,5 +1,6 @@
 #include "web_server.h"
 #include "cn105_strings.h"
+#include "ac_command.h"
 #include "json_utils.h"
 #include "wifi_manager.h"
 #include "wifi_recovery.h"
@@ -107,44 +108,36 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
         bool boolVal;
         if (jsonGetBool(msg, "power", &boolVal)) {
             LOG_INFO("Set power=%s", boolVal ? "ON" : "OFF");
-            _ctrl->setPower(boolVal);
-            hasControlChange = true;
+            hasControlChange |= acApplyCommand(*_ctrl, "power", boolVal ? "on" : "off");
         }
 
         char strVal[16];
         if (jsonGetString(msg, "mode", strVal, sizeof(strVal))) {
-            uint8_t mode = strToMode(strVal);
-            LOG_INFO("Set mode=%s (0x%02X)", strVal, mode);
-            _ctrl->setMode(mode);
-            hasControlChange = true;
+            LOG_INFO("Set mode=%s", strVal);
+            hasControlChange |= acApplyCommand(*_ctrl, "mode", strVal);
         }
 
         float floatVal;
         if (jsonGetFloat(msg, "target", &floatVal)) {
             LOG_INFO("Set target=%.1f", floatVal);
-            _ctrl->setTargetTemp(floatVal);
-            hasControlChange = true;
+            char tbuf[16];
+            snprintf(tbuf, sizeof(tbuf), "%.1f", floatVal);
+            hasControlChange |= acApplyCommand(*_ctrl, "temperature", tbuf);
         }
 
         if (jsonGetString(msg, "fan", strVal, sizeof(strVal))) {
-            uint8_t fan = strToFan(strVal);
-            LOG_INFO("Set fan=%s (0x%02X)", strVal, fan);
-            _ctrl->setFanSpeed(fan);
-            hasControlChange = true;
+            LOG_INFO("Set fan=%s", strVal);
+            hasControlChange |= acApplyCommand(*_ctrl, "fan", strVal);
         }
 
         if (jsonGetString(msg, "vane", strVal, sizeof(strVal))) {
-            uint8_t vane = strToVane(strVal);
-            LOG_INFO("Set vane=%s (0x%02X)", strVal, vane);
-            _ctrl->setVane(vane);
-            hasControlChange = true;
+            LOG_INFO("Set vane=%s", strVal);
+            hasControlChange |= acApplyCommand(*_ctrl, "vane", strVal);
         }
 
         if (jsonGetString(msg, "wideVane", strVal, sizeof(strVal))) {
-            uint8_t wv = strToWideVane(strVal);
-            LOG_INFO("Set wideVane=%s (0x%02X)", strVal, wv);
-            _ctrl->setWideVane(wv);
-            hasControlChange = true;
+            LOG_INFO("Set wideVane=%s", strVal);
+            hasControlChange |= acApplyCommand(*_ctrl, "widevane", strVal);
         }
 
         if (hasControlChange) {
