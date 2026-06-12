@@ -53,6 +53,7 @@ static uint32_t s_lastHeartbeat = 0;
 static void publishStateIfChanged(bool force);
 static void publishDiscovery();
 static void handleData(esp_mqtt_event_handle_t event);
+static void handleOtaInstall(const char *payload);
 
 // ── Event handler ───────────────────────────────────────────────────────────
 static void mqttEventHandler(void *arg, esp_event_base_t base,
@@ -332,6 +333,90 @@ static void publishStateIfChanged(bool force) {
     }
 }
 static void publishDiscovery() {}
-static void handleData(esp_mqtt_event_handle_t event) { (void)event; }
+
+// strToX silently maps unknown strings to a default; for MQTT we reject
+// unrecognized enum values by checking the value round-trips to itself.
+static bool enumValueValid(const char *field, const char *value) {
+    if (strcmp(field, "mode") == 0)     return strcmp(modeToWebStr(strToMode(value)), value) == 0;
+    if (strcmp(field, "fan") == 0)      return strcmp(fanToWebStr(strToFan(value)), value) == 0;
+    if (strcmp(field, "vane") == 0)     return strcmp(vaneToWebStr(strToVane(value)), value) == 0;
+    if (strcmp(field, "widevane") == 0) return strcmp(wideVaneToWebStr(strToWideVane(value)), value) == 0;
+    return true;  // power/temperature validated elsewhere
+}
+
+static void handleData(esp_mqtt_event_handle_t e) {
+    // Multi-frame payloads (current_data_offset > 0) are larger than any
+    // command we accept — ignore continuation frames.
+    if (e->current_data_offset != 0) return;
+
+    char topic[96];
+    if (e->topic_len == 0 || e->topic_len >= (int)sizeof(topic)) return;
+    memcpy(topic, e->topic, e->topic_len);
+    topic[e->topic_len] = '\0';
+
+    char payload[512];
+    size_t plen = (size_t)e->data_len < sizeof(payload) - 1
+                      ? (size_t)e->data_len : sizeof(payload) - 1;
+    memcpy(payload, e->data, plen);
+    payload[plen] = '\0';
+
+    size_t baseLen = strlen(s_base);
+    if (strncmp(topic, s_base, baseLen) != 0 || topic[baseLen] != '/') return;
+    const char *sub = topic + baseLen + 1;
+
+    if (strcmp(sub, "ota/install") == 0) {
+        handleOtaInstall(payload);
+        return;
+    }
+
+    // Command topics: "<field>/set"
+    char field[16];
+    const char *slash = strchr(sub, '/');
+    if (!slash || strcmp(slash, "/set") != 0) return;
+    size_t flen = (size_t)(slash - sub);
+    if (flen == 0 || flen >= sizeof(field)) return;
+    memcpy(field, sub, flen);
+    field[flen] = '\0';
+
+    LOG_INFO("MQTT cmd: %s = %s", field, payload);
+
+    bool applied = false;
+    if (strcmp(field, "mode") == 0) {
+        // HA climate publishes "off" as a mode and names FAN "fan_only"
+        if (strcmp(payload, "off") == 0) {
+            applied = acApplyCommand(*s_ctrl, "power", "off");
+        } else {
+            const char *mode = (strcmp(payload, "fan_only") == 0) ? "fan" : payload;
+            if (!enumValueValid("mode", mode)) {
+                LOG_WARN("MQTT cmd rejected: mode=%s (unknown)", payload);
+                return;
+            }
+            acApplyCommand(*s_ctrl, "power", "on");
+            applied = acApplyCommand(*s_ctrl, "mode", mode);
+        }
+    } else if (strcmp(field, "fan") == 0 || strcmp(field, "vane") == 0 ||
+               strcmp(field, "widevane") == 0) {
+        if (!enumValueValid(field, payload)) {
+            LOG_WARN("MQTT cmd rejected: %s=%s (unknown)", field, payload);
+            return;
+        }
+        applied = acApplyCommand(*s_ctrl, field, payload);
+    } else {
+        // power, temperature — acApplyCommand validates these itself
+        applied = acApplyCommand(*s_ctrl, field, payload);
+    }
+
+    if (applied) {
+        s_ctrl->sendPendingChanges();
+        s_forcePublish = true;  // reflect effective (wanted) state immediately
+    } else {
+        LOG_WARN("MQTT cmd not applied: %s = %s", field, payload);
+    }
+}
+
+static void handleOtaInstall(const char *payload) {
+    (void)payload;
+    LOG_WARN("OTA install command received but not yet implemented");
+}
 
 #endif // MQTT_ENABLE
