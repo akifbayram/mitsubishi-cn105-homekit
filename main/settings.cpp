@@ -129,6 +129,46 @@ void SettingsStore::begin() {
              _settings.bleStaleTimeoutS);
 #endif
 
+#ifdef MQTT_ENABLE
+    {
+        uint8_t val = 0;
+        nvs_get_u8(_handle, "mqttOn", &val);
+        _settings.mqttEnabled = (val != 0);
+    }
+    {
+        size_t len = sizeof(_settings.mqttHost);
+        nvs_get_str(_handle, "mqttHost", _settings.mqttHost, &len);
+    }
+    {
+        uint16_t val = 1883;
+        nvs_get_u16(_handle, "mqttPort", &val);
+        _settings.mqttPort = val;
+    }
+    {
+        size_t len = sizeof(_settings.mqttUser);
+        nvs_get_str(_handle, "mqttUser", _settings.mqttUser, &len);
+    }
+    {
+        size_t len = sizeof(_settings.mqttPass);
+        nvs_get_str(_handle, "mqttPass", _settings.mqttPass, &len);
+    }
+    {
+        size_t len = sizeof(_settings.mqttBaseTopic);
+        nvs_get_str(_handle, "mqttTopic", _settings.mqttBaseTopic, &len);
+    }
+    {
+        uint8_t val = 1;
+        nvs_get_u8(_handle, "mqttDisc", &val);
+        _settings.mqttDiscovery = (val != 0);
+    }
+
+    LOG_INFO("[Settings] MQTT: enabled=%s host=%s port=%u discovery=%s",
+             _settings.mqttEnabled ? "ON" : "OFF",
+             strlen(_settings.mqttHost) > 0 ? _settings.mqttHost : "(none)",
+             _settings.mqttPort,
+             _settings.mqttDiscovery ? "ON" : "OFF");
+#endif
+
     LOG_INFO("[Settings] Loaded: logLevel=%d poll=%lums name=%s unit=%s",
              _settings.logLevel, (unsigned long)_settings.pollMs, _settings.deviceName,
              _settings.useFahrenheit ? "F" : "C");
@@ -149,6 +189,15 @@ void SettingsStore::save() {
     nvs_set_str(_handle, "bleAddr", _settings.bleSensorAddr);
     nvs_set_u8(_handle, "bleFeed", _settings.bleFeedEnabled ? 1 : 0);
     nvs_set_u16(_handle, "bleTimeout", _settings.bleStaleTimeoutS);
+#endif
+#ifdef MQTT_ENABLE
+    nvs_set_u8(_handle, "mqttOn", _settings.mqttEnabled ? 1 : 0);
+    nvs_set_str(_handle, "mqttHost", _settings.mqttHost);
+    nvs_set_u16(_handle, "mqttPort", _settings.mqttPort);
+    nvs_set_str(_handle, "mqttUser", _settings.mqttUser);
+    nvs_set_str(_handle, "mqttPass", _settings.mqttPass);
+    nvs_set_str(_handle, "mqttTopic", _settings.mqttBaseTopic);
+    nvs_set_u8(_handle, "mqttDisc", _settings.mqttDiscovery ? 1 : 0);
 #endif
     nvs_commit(_handle);
 

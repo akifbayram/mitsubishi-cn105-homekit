@@ -6,6 +6,7 @@
 #include "logging.h"
 #include "branding.h"
 #include "ble_config.h"
+#include "mqtt_config.h"
 
 struct DeviceSettings {
     LogLevel logLevel    = LOG_LEVEL_INFO;
@@ -22,6 +23,15 @@ struct DeviceSettings {
     char     bleSensorAddr[18] = "";      // "AA:BB:CC:DD:EE:FF" or empty
     bool     bleFeedEnabled = false;      // Feed BLE temp to heat pump
     uint16_t bleStaleTimeoutS = 90;       // Seconds before sensor marked stale (30-600)
+#endif
+#ifdef MQTT_ENABLE
+    bool     mqttEnabled = false;        // Master MQTT on/off (lazy connect)
+    char     mqttHost[64] = "";          // Broker hostname or IP; empty = unconfigured
+    uint16_t mqttPort = 1883;
+    char     mqttUser[33] = "";          // Empty = anonymous
+    char     mqttPass[65] = "";
+    char     mqttBaseTopic[40] = "";     // Empty = derive "mitsubishi/<XXYY>" from MAC
+    bool     mqttDiscovery = true;       // Home Assistant MQTT Discovery
 #endif
 };
 
