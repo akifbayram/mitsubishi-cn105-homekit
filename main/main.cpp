@@ -23,6 +23,10 @@
 #include "homekit_setup.h"
 #include "homekit_services.h"
 #include "web_server.h"
+#include "mqtt_config.h"
+#ifdef MQTT_ENABLE
+#include "mqtt_app.h"
+#endif
 
 #ifdef BLE_ENABLE
 #include "ble_sensor.h"
@@ -203,6 +207,13 @@ extern "C" void app_main(void)
         cn105.startTask();
     }
 
+    // ── 12b. MQTT init (lazy — connects from loop() when enabled) ────────
+#ifdef MQTT_ENABLE
+    if (!safeMode) {
+        MqttClient::begin(&cn105);
+    }
+#endif
+
     // ── 13. BLE sensor init ──────────────────────────────────────────────
     // BLE is started later, after web UI is up (skipped in safe mode)
 
@@ -220,6 +231,9 @@ extern "C" void app_main(void)
     uint32_t lastAliveLog  = 0;
 #ifdef BLE_ENABLE
     uint32_t lastBleLoop   = 0;
+#endif
+#ifdef MQTT_ENABLE
+    uint32_t lastMqttLoop  = 0;
 #endif
 
     while (true) {
@@ -304,6 +318,14 @@ extern "C" void app_main(void)
         if (webUIStarted && now - lastBleLoop >= 1000) {
             BleSensor::loop(cn105);
             lastBleLoop = now;
+        }
+#endif
+
+        // ── MQTT — 1 Hz ─────────────────────────────────────────────────
+#ifdef MQTT_ENABLE
+        if (!safeMode && webUIStarted && now - lastMqttLoop >= 1000) {
+            MqttClient::loop();
+            lastMqttLoop = now;
         }
 #endif
 
