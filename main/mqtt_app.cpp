@@ -529,8 +529,37 @@ static void handleData(esp_mqtt_event_handle_t e) {
 }
 
 static void handleOtaInstall(const char *payload) {
-    (void)payload;
-    LOG_WARN("OTA install command received but not yet implemented");
+    char url[256];
+    char sha[80];
+
+    if (!jsonGetString(payload, "url", url, sizeof(url)) || strlen(url) == 0) {
+        MqttClient::publishOtaStatus(
+            "{\"state\":\"error\",\"reason\":\"missing url\"}");
+        return;
+    }
+    if (!jsonGetString(payload, "sha256", sha, sizeof(sha)) || strlen(sha) != 64) {
+        MqttClient::publishOtaStatus(
+            "{\"state\":\"error\",\"reason\":\"sha256 required (64 hex chars)\"}");
+        return;
+    }
+    for (int i = 0; i < 64; i++) {
+        char c = sha[i];
+        bool hex = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') ||
+                   (c >= 'A' && c <= 'F');
+        if (!hex) {
+            MqttClient::publishOtaStatus(
+                "{\"state\":\"error\",\"reason\":\"sha256 must be hex\"}");
+            return;
+        }
+    }
+    if (strncmp(url, "http://", 7) != 0 && strncmp(url, "https://", 8) != 0) {
+        MqttClient::publishOtaStatus(
+            "{\"state\":\"error\",\"reason\":\"url must be http or https\"}");
+        return;
+    }
+
+    LOG_WARN("MQTT OTA install requested: %s", url);
+    MqttOta::start(url, sha);
 }
 
 #endif // MQTT_ENABLE
