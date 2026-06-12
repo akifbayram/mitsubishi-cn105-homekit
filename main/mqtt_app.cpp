@@ -529,12 +529,19 @@ static void handleData(esp_mqtt_event_handle_t e) {
 }
 
 static void handleOtaInstall(const char *payload) {
-    char url[256];
+    char url[512];
     char sha[80];
 
     if (!jsonGetString(payload, "url", url, sizeof(url)) || strlen(url) == 0) {
         MqttClient::publishOtaStatus(
             "{\"state\":\"error\",\"reason\":\"missing url\"}");
+        return;
+    }
+    if (strlen(url) >= sizeof(url) - 1) {
+        // jsonGetString fills to the cap on overflow — treat a full buffer as a
+        // (likely) truncated URL and reject with a clear error.
+        MqttClient::publishOtaStatus(
+            "{\"state\":\"error\",\"reason\":\"url too long\"}");
         return;
     }
     if (!jsonGetString(payload, "sha256", sha, sizeof(sha)) || strlen(sha) != 64) {

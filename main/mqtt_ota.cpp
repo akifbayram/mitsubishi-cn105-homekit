@@ -19,7 +19,7 @@
 static const char *TAG = "mqtt_ota";
 
 struct OtaParams {
-    char url[256];
+    char url[512];
     char sha[65];
 };
 
