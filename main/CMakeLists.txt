@@ -17,8 +17,11 @@ idf_component_register(
          "homekit_switches.cpp"
          "ble_sensor.cpp"
          "homekit_sensor_accessory.cpp"
+         "ota_writer.cpp"
+         "mqtt_app.cpp"
+         "mqtt_ota.cpp"
     INCLUDE_DIRS "."
-    REQUIRES nvs_flash esp_wifi esp_netif esp_http_server esp_timer driver bt app_update mbedtls
+    REQUIRES nvs_flash esp_wifi esp_netif esp_http_server esp_http_client esp-tls esp_timer driver bt app_update mbedtls mqtt
              esp_hap_core esp_hap_apple_profiles esp_hap_platform espressif__mdns
 )
 
@@ -94,6 +97,9 @@ if(BLE_SENSOR_DEFAULT_ON)
 endif()
 if(BLE_DISABLE)
     target_compile_definitions(${COMPONENT_TARGET} PRIVATE BLE_DISABLE=1)
+endif()
+if(MQTT_DISABLE)
+    target_compile_definitions(${COMPONENT_TARGET} PRIVATE MQTT_DISABLE=1)
 endif()
 
 # ── Brand defaults (overridable via -DBRAND_NAME=... on cmake command line) ──
