@@ -224,10 +224,11 @@ static const char *haAction(const CN105State &st) {
         else if (st.autoSubMode == 0x01) m = CN105_MODE_COOL;
     }
     if (m == CN105_MODE_FAN) return "fan";
-    if (m == CN105_MODE_DRY) return "drying";
+    if (m == CN105_MODE_DRY) return st.operating ? "drying" : "idle";
     if (!st.operating) return "idle";
     if (m == CN105_MODE_HEAT) return "heating";
     if (m == CN105_MODE_COOL) return "cooling";
+    // AUTO with autoSubMode 0x00 (OFF) or 0x03 (LEADER): active side unknown → idle
     return "idle";
 }
 
