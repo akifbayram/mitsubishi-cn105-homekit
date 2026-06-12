@@ -332,7 +332,118 @@ static void publishStateIfChanged(bool force) {
         LOG_DEBUG("State published (%d bytes)", n);
     }
 }
-static void publishDiscovery() {}
+// ── Home Assistant MQTT Discovery ───────────────────────────────────────────
+
+static void publishSensorDiscovery(const char *objectId, const char *name,
+                                   const char *devClass, const char *unit,
+                                   const char *valueTpl) {
+    char topic[96];
+    snprintf(topic, sizeof(topic), "homeassistant/sensor/%s/%s/config",
+             s_nodeId, objectId);
+    static char buf[640];
+    int n = snprintf(buf, sizeof(buf),
+        "{\"name\":\"%s\""
+        ",\"uniq_id\":\"%s_%s\""
+        ",\"stat_t\":\"%s/state\""
+        ",\"avty_t\":\"%s/availability\""
+        ",\"val_tpl\":\"%s\"",
+        name, s_nodeId, objectId, s_base, s_base, valueTpl);
+    if (devClass) jsonAppend(buf, sizeof(buf), &n, ",\"dev_cla\":\"%s\"", devClass);
+    if (unit)     jsonAppend(buf, sizeof(buf), &n, ",\"unit_of_meas\":\"%s\"", unit);
+    jsonAppend(buf, sizeof(buf), &n, ",\"dev\":%s}", s_deviceJson);
+    if (n >= (int)sizeof(buf)) {
+        LOG_WARN("Discovery config truncated for %s", objectId);
+        return;
+    }
+    esp_mqtt_client_publish(s_client, topic, buf, 0, 1, 1);
+}
+
+static void publishClimateDiscovery() {
+    char topic[96];
+    snprintf(topic, sizeof(topic), "homeassistant/climate/%s/config", s_nodeId);
+
+    char escName[65];
+    jsonEscape(settings.get().deviceName, escName, sizeof(escName));
+
+    static char buf[1536];
+    int n = snprintf(buf, sizeof(buf),
+        "{\"~\":\"%s\""
+        ",\"name\":\"%s\""
+        ",\"uniq_id\":\"%s_climate\""
+        ",\"avty_t\":\"~/availability\""
+        ",\"mode_stat_t\":\"~/state\",\"mode_stat_tpl\":\"{{ value_json.haMode }}\""
+        ",\"mode_cmd_t\":\"~/mode/set\""
+        ",\"modes\":[\"off\",\"heat\",\"cool\",\"auto\",\"dry\",\"fan_only\"]"
+        ",\"temp_stat_t\":\"~/state\",\"temp_stat_tpl\":\"{{ value_json.target }}\""
+        ",\"temp_cmd_t\":\"~/temperature/set\""
+        ",\"curr_temp_t\":\"~/state\",\"curr_temp_tpl\":\"{{ value_json.room }}\""
+        ",\"act_t\":\"~/state\",\"act_tpl\":\"{{ value_json.action }}\""
+        ",\"fan_mode_stat_t\":\"~/state\",\"fan_mode_stat_tpl\":\"{{ value_json.fan }}\""
+        ",\"fan_mode_cmd_t\":\"~/fan/set\""
+        ",\"fan_modes\":[\"auto\",\"quiet\",\"1\",\"2\",\"3\",\"4\"]"
+        ",\"swing_mode_stat_t\":\"~/state\",\"swing_mode_stat_tpl\":\"{{ value_json.vane }}\""
+        ",\"swing_mode_cmd_t\":\"~/vane/set\""
+        ",\"swing_modes\":[\"auto\",\"1\",\"2\",\"3\",\"4\",\"5\",\"swing\"]"
+        ",\"min_temp\":16,\"max_temp\":31,\"temp_step\":0.5"
+        ",\"dev\":%s}",
+        s_base, escName, s_nodeId, s_deviceJson);
+    if (n >= (int)sizeof(buf)) {
+        LOG_WARN("Climate discovery config truncated");
+        return;
+    }
+    esp_mqtt_client_publish(s_client, topic, buf, 0, 1, 1);
+}
+
+static void publishSelectDiscovery() {
+    char topic[96];
+    snprintf(topic, sizeof(topic), "homeassistant/select/%s/widevane/config", s_nodeId);
+    static char buf[640];
+    int n = snprintf(buf, sizeof(buf),
+        "{\"name\":\"Horizontal Vane\""
+        ",\"uniq_id\":\"%s_widevane\""
+        ",\"stat_t\":\"%s/state\""
+        ",\"val_tpl\":\"{{ value_json.wideVane }}\""
+        ",\"cmd_t\":\"%s/widevane/set\""
+        ",\"avty_t\":\"%s/availability\""
+        ",\"options\":[\"ll\",\"l\",\"c\",\"r\",\"rr\",\"split\",\"swing\"]"
+        ",\"entity_category\":\"config\""
+        ",\"dev\":%s}",
+        s_nodeId, s_base, s_base, s_base, s_deviceJson);
+    if (n >= (int)sizeof(buf)) {
+        LOG_WARN("Select discovery config truncated");
+        return;
+    }
+    esp_mqtt_client_publish(s_client, topic, buf, 0, 1, 1);
+}
+
+static void publishDiscovery() {
+    if (!settings.get().mqttDiscovery) return;
+
+    publishClimateDiscovery();
+    publishSelectDiscovery();
+
+    publishSensorDiscovery("outside_temp", "Outside Temperature", "temperature",
+        "\xC2\xB0""C", "{{ value_json.outsideTemp }}");
+    publishSensorDiscovery("compressor_hz", "Compressor Frequency", "frequency",
+        "Hz", "{{ value_json.compressorHz }}");
+    publishSensorDiscovery("runtime_hours", "Runtime", nullptr,
+        "h", "{{ value_json.runtime }}");
+    publishSensorDiscovery("error_code", "Error Code", nullptr,
+        nullptr, "{{ value_json.errorCode }}");
+
+#ifdef BLE_ENABLE
+    if (BleSensor::isBleEnabled()) {
+        publishSensorDiscovery("ble_temp", "Remote Sensor Temperature", "temperature",
+            "\xC2\xB0""C", "{{ value_json.bleTemp }}");
+        publishSensorDiscovery("ble_humidity", "Remote Sensor Humidity", "humidity",
+            "%", "{{ value_json.bleHumidity }}");
+        publishSensorDiscovery("ble_battery", "Remote Sensor Battery", "battery",
+            "%", "{{ value_json.bleBattery }}");
+    }
+#endif
+
+    LOG_INFO("HA discovery configs published (node %s)", s_nodeId);
+}
 
 // strToX silently maps unknown strings to a default; for MQTT we reject
 // unrecognized enum values by checking the value round-trips to itself.
