@@ -354,11 +354,11 @@ static void handleData(esp_mqtt_event_handle_t e) {
     memcpy(topic, e->topic, e->topic_len);
     topic[e->topic_len] = '\0';
 
-    char payload[512];
-    size_t plen = (size_t)e->data_len < sizeof(payload) - 1
-                      ? (size_t)e->data_len : sizeof(payload) - 1;
-    memcpy(payload, e->data, plen);
-    payload[plen] = '\0';
+    // Largest command payload is the OTA-install JSON (url + sha256, ~350 B).
+    char payload[400];
+    if (e->data_len <= 0 || e->data_len >= (int)sizeof(payload)) return;
+    memcpy(payload, e->data, e->data_len);
+    payload[e->data_len] = '\0';
 
     size_t baseLen = strlen(s_base);
     if (strncmp(topic, s_base, baseLen) != 0 || topic[baseLen] != '/') return;
