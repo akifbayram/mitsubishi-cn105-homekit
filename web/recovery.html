@@ -237,7 +237,7 @@ input:focus-visible{outline-offset:0}
   </div>
 
   <!-- Help -->
-  <div class="card">
+  <div class="card" id="helpCard">
     <div class="card-label">What to expect</div>
     <ol class="steps">
       <li>Select your home WiFi network above</li>
@@ -246,6 +246,16 @@ input:focus-visible{outline-offset:0}
       <li>This hotspot will turn off automatically</li>
     </ol>
     <p class="help-text" style="margin-top:10px">If the connection fails, the hotspot will remain active so you can try again.</p>
+  </div>
+
+  <!-- HomeKit next steps (shown once WiFi connects) -->
+  <div class="card" id="hkCard" style="display:none">
+    <div class="card-label">Next: Add to HomeKit</div>
+    <ol class="steps">
+      <li>Open the <strong>Home</strong> app on your iPhone or iPad</li>
+      <li>Tap <strong>+</strong> &rarr; <strong>Add Accessory</strong></li>
+      <li>Scan the HomeKit code on your device label to finish pairing</li>
+    </ol>
   </div>
 
 </main>
@@ -262,6 +272,7 @@ input:focus-visible{outline-offset:0}
 
   /* ── Elements ────────────────────────────────────────────────────────── */
   var netList=document.getElementById('netList');
+  var netCard=document.getElementById('netCard');
   var joinCard=document.getElementById('joinCard');
   var joinLabel=document.getElementById('joinLabel');
   var joinName=document.getElementById('joinName');
@@ -276,6 +287,8 @@ input:focus-visible{outline-offset:0}
   var devName=document.getElementById('devName');
   var refreshBtn=document.getElementById('refreshBtn');
   var pwToggle=document.getElementById('pwToggle');
+  var helpCard=document.getElementById('helpCard');
+  var hkCard=document.getElementById('hkCard');
 
   var selSSID='';
   var selSecure=true;
@@ -447,11 +460,21 @@ input:focus-visible{outline-offset:0}
       connDot.className='conn-dot ok';
       connDot.title='Connected';
       connDot.setAttribute('aria-label','Connected');
+      helpCard.style.display='none';
+      hkCard.style.display='';
     }
   }).catch(function(){});
 
   /* ── Initial scan ───────────────────────────────────────────────────── */
   doScan();
+
+  /* ── Restore the network picker after a failed join ─────────────────── */
+  function showPicker(){
+    netCard.style.display='';
+    joinCard.style.display='';
+    joinBtn.disabled=false;
+    joinBtn.textContent='Join';
+  }
 
   /* ── Join ────────────────────────────────────────────────────────────── */
   joinBtn.onclick=function(){
@@ -462,6 +485,12 @@ input:focus-visible{outline-offset:0}
 
     joinBtn.disabled=true;
     joinBtn.textContent='Connecting\u2026';
+
+    /* Collapse the picker so the status card is the only thing on screen,
+       then scroll up to it. Re-shown by showPicker() if the join fails. */
+    netCard.style.display='none';
+    joinCard.style.display='none';
+    window.scrollTo({top:0,behavior:'smooth'});
 
     fetch('/wifi-setup',{
       method:'POST',
@@ -477,8 +506,7 @@ input:focus-visible{outline-offset:0}
           clearInterval(poll);
           statusBox.className='status err';
           statusBox.textContent='Connection timeout. Check credentials and try again.';
-          joinBtn.disabled=false;
-          joinBtn.textContent='Join';
+          showPicker();
           return;
         }
         fetch('/wifi-status').then(function(r){return r.json()}).then(function(s){
@@ -490,14 +518,16 @@ input:focus-visible{outline-offset:0}
             connDot.title='Connected';
             connDot.setAttribute('aria-label','Connected');
             joinBtn.textContent='Connected';
+            /* Hotspot is about to drop — leave the user with pairing next steps. */
+            helpCard.style.display='none';
+            hkCard.style.display='';
           }
         }).catch(function(){});
       },3000);
     }).catch(function(){
       statusBox.className='status err';
       statusBox.textContent='Failed to save. Check connection to device hotspot.';
-      joinBtn.disabled=false;
-      joinBtn.textContent='Join';
+      showPicker();
     });
   };
 })();
