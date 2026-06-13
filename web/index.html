@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="{{BRAND_THEME_COLOR}}">
@@ -299,6 +299,8 @@ input[type=range]::-moz-range-thumb{
 .setting-row .unit{font-size:13px;color:var(--text2);min-width:20px}
 .pw-wrap{flex:1;position:relative}
 .pw-wrap input{width:100%;padding-right:40px}
+.pw-field{-webkit-text-security:disc}
+.pw-field.pw-visible{-webkit-text-security:none}
 .pw-toggle{position:absolute;right:8px;top:50%;transform:translateY(-50%);
   background:none;border:none;color:var(--text2);cursor:pointer;font-size:14px;
   padding:4px;line-height:1}
@@ -350,6 +352,20 @@ input[type=range]::-moz-range-thumb{
 .ota-bar-wrap{background:var(--surface2);border-radius:4px;height:6px;overflow:hidden;margin-bottom:6px}
 .ota-bar{height:100%;background:var(--accent);width:0%;transition:width .3s;border-radius:4px}
 .ota-status{font-size:12px;color:var(--text2)}
+
+/* ── Toast ─────────────────────────────────────────────────────────────── */
+.toast{
+  position:fixed;left:50%;bottom:24px;
+  transform:translateX(-50%) translateY(8px);
+  max-width:340px;width:max-content;padding:11px 18px;
+  border-radius:var(--radius-sm);background:var(--surface3);color:var(--text);
+  font-size:14px;font-weight:500;text-align:center;line-height:1.35;
+  box-shadow:0 4px 16px rgba(0,0,0,0.3);z-index:200;
+  opacity:0;pointer-events:none;
+  transition:opacity .25s,transform .25s;
+}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.toast.err{background:var(--red);color:#fff}
 
 /* ── Scrollbar ─────────────────────────────────────────────────────────── */
 ::-webkit-scrollbar{width:4px}
@@ -700,8 +716,8 @@ input:focus-visible,select:focus-visible{outline-offset:0}
       <div class="setting-row">
         <label>Password</label>
         <div class="pw-wrap">
-          <input type="password" id="cfgPass" placeholder="Password" maxlength="64" autocapitalize="off">
-          <button type="button" class="pw-toggle" onclick="togglePw('cfgPass',this)" aria-label="Show password">&#x1F441;&#x200D;&#x1F5E8;</button>
+          <input type="text" id="cfgPass" class="pw-field" placeholder="Password" maxlength="64" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false">
+          <button type="button" class="pw-toggle" onmousedown="event.preventDefault()" onclick="togglePw('cfgPass',this)" aria-label="Show password">&#x1F441;&#x200D;&#x1F5E8;</button>
         </div>
       </div>
       <button class="save-btn" id="wifiSaveBtn" onclick="saveWifi()" disabled>Save WiFi</button>
@@ -796,6 +812,8 @@ input:focus-visible,select:focus-visible{outline-offset:0}
 
 </main>
 
+<div id="toast" class="toast" role="status" aria-live="polite"></div>
+
 <script>
 (function(){
   'use strict';
@@ -832,9 +850,8 @@ input:focus-visible,select:focus-visible{outline-offset:0}
   var $=function(id){return document.getElementById(id)};
   window.togglePw=function(id,btn){
     var el=document.getElementById(id);
-    var show=el.type==='password';
-    el.type=show?'text':'password';
-    btn.textContent='\u{1F441}\u200D\u{1F5E8}';
+    var show=!el.classList.contains('pw-visible');
+    el.classList.toggle('pw-visible',show);
     btn.setAttribute('aria-label',show?'Hide password':'Show password');
   };
   var connDot=$('connDot');
@@ -1174,8 +1191,32 @@ input:focus-visible,select:focus-visible{outline-offset:0}
     }
   });
 
+  function wsReady(){return ws&&ws.readyState===1}
+
+  // Returns true when the message was actually sent. Callers that mutate the
+  // UI optimistically must check this so they don't show false success.
   function send(obj){
-    if(ws&&ws.readyState===1) ws.send(JSON.stringify(obj));
+    if(wsReady()){ws.send(JSON.stringify(obj));return true}
+    return false;
+  }
+
+  // Guard for control actions: surfaces a toast instead of silently dropping
+  // the command when the socket is down. Returns true when safe to proceed.
+  function ensureConnected(){
+    if(wsReady()) return true;
+    showToast('Not connected — change not sent',true);
+    return false;
+  }
+
+  // ── Toast ──────────────────────────────────────────────────────────────────
+  var toastTimer=null;
+  function showToast(text,isErr){
+    var t=$('toast');
+    t.textContent=text;
+    t.classList.toggle('err',!!isErr);
+    t.classList.add('show');
+    if(toastTimer)clearTimeout(toastTimer);
+    toastTimer=setTimeout(function(){t.classList.remove('show')},2600);
   }
 
   // ── State handler ──────────────────────────────────────────────────────────
@@ -1588,22 +1629,29 @@ input:focus-visible,select:focus-visible{outline-offset:0}
     if(mac&&!/^([0-9A-F]{2}:){5}[0-9A-F]{2}$/.test(mac)){alert('Invalid MAC format');return}
     var t=parseInt($('bleTimeoutInput').value,10);
     if(isNaN(t)||t<30||t>600){alert('Timeout must be 30–600 seconds');return}
-    ws.send(JSON.stringify({cmd:'config',bleAddr:mac,bleTimeout:t}));
+    if(!send({cmd:'config',bleAddr:mac,bleTimeout:t})) showToast('Not connected — not saved',true);
   };
   window.toggleBleEnabled=function(){
-    ws.send(JSON.stringify({cmd:'config',bleEnabled:$('bleEnableToggle').checked}));
+    if(!send({cmd:'config',bleEnabled:$('bleEnableToggle').checked})){
+      $('bleEnableToggle').checked=!$('bleEnableToggle').checked;
+      showToast('Not connected — change not sent',true);
+    }
   };
   window.toggleBleFeed=function(){
-    ws.send(JSON.stringify({cmd:'config',bleFeed:$('bleFeedToggle').checked}));
+    if(!send({cmd:'config',bleFeed:$('bleFeedToggle').checked})){
+      $('bleFeedToggle').checked=!$('bleFeedToggle').checked;
+      showToast('Not connected — change not sent',true);
+    }
   };
   var bleScanPicked=false;
   window.startBleScan=function(){
+    if(!ensureConnected()) return;
     var btn=$('bleScanBtn');
     btn.textContent='Scanning\u2026';btn.disabled=true;btn.classList.add('scanning');
     bleScanPicked=false;
     $('bleScanResults').style.display='none';
     $('bleScanResults').textContent='';
-    ws.send(JSON.stringify({cmd:'bleScan'}));
+    send({cmd:'bleScan'});
   };
   function onBleScanResults(msg){
     if(msg.done){
@@ -1662,6 +1710,7 @@ input:focus-visible,select:focus-visible{outline-offset:0}
 
   // ── Controls ───────────────────────────────────────────────────────────────
   window.setMode=function(btn){
+    if(!ensureConnected()) return;
     lastCmdTime=Date.now();
     var v=btn.getAttribute('data-v');
     if(v==='off'){
@@ -1679,6 +1728,7 @@ input:focus-visible,select:focus-visible{outline-offset:0}
   };
 
   window.setFan=function(btn){
+    if(!ensureConnected()) return;
     lastCmdTime=Date.now();
     var v=btn.getAttribute('data-v');
     state.fan=v;
@@ -1687,6 +1737,7 @@ input:focus-visible,select:focus-visible{outline-offset:0}
   };
 
   window.setVane=function(btn){
+    if(!ensureConnected()) return;
     lastCmdTime=Date.now();
     var v=btn.getAttribute('data-v');
     state.vane=v;
@@ -1695,6 +1746,7 @@ input:focus-visible,select:focus-visible{outline-offset:0}
   };
 
   window.setWideVane=function(btn){
+    if(!ensureConnected()) return;
     lastCmdTime=Date.now();
     var v=btn.getAttribute('data-v');
     state.wideVane=v;
@@ -1718,6 +1770,7 @@ input:focus-visible,select:focus-visible{outline-offset:0}
   }
 
   window.stepTemp=function(dir){
+    if(!ensureConnected()) return;
     var s=parseFloat(tempSlider.step),v=parseFloat(tempSlider.value);
     var nv=v+(dir*s);
     var mn=parseFloat(tempSlider.min),mx=parseFloat(tempSlider.max);
@@ -1735,8 +1788,15 @@ input:focus-visible,select:focus-visible{outline-offset:0}
     targetTemp.textContent=display;
   };
   window.onSliderChange=function(){
-    lastCmdTime=Date.now();
     sliderDragging=false;
+    if(!wsReady()){
+      // Roll the displayed setpoint back to the confirmed value so the UI
+      // doesn't show a change that was never sent.
+      showToast('Not connected — change not sent',true);
+      syncTempFromState();
+      return;
+    }
+    lastCmdTime=Date.now();
     var raw=parseFloat(tempSlider.value);
     var celsius=(tempUnit==='F')?fToCTable(raw):raw;
     var display=(tempUnit==='F')?raw.toString():raw.toFixed(1);
@@ -1745,11 +1805,26 @@ input:focus-visible,select:focus-visible{outline-offset:0}
     send({cmd:'set',target:celsius});
   };
 
+  // Re-sync the setpoint slider + readout from the last confirmed state.
+  function syncTempFromState(){
+    if(state.target==null) return;
+    if(tempUnit==='F'){
+      var tf=cToFTable(state.target);
+      tempSlider.value=tf;
+      sliderVal.textContent=tf.toString();
+    } else {
+      tempSlider.value=state.target;
+      sliderVal.textContent=state.target.toFixed(1);
+    }
+    targetTemp.textContent=fmtTemp(state.target);
+  }
+
   heatSlider.oninput=function(){
     var raw=parseFloat(this.value);
     heatThreshVal.textContent=(tempUnit==='F')?raw.toString():raw.toFixed(1);
   };
   heatSlider.onchange=function(){
+    if(!wsReady()){showToast('Not connected — change not sent',true);syncDualFromState();return}
     dualLocked=true;
     var raw=parseFloat(this.value);
     send({cmd:'set',heatThresh:(tempUnit==='F')?fToCTable(raw):raw});
@@ -1760,11 +1835,28 @@ input:focus-visible,select:focus-visible{outline-offset:0}
     coolThreshVal.textContent=(tempUnit==='F')?raw.toString():raw.toFixed(1);
   };
   coolSlider.onchange=function(){
+    if(!wsReady()){showToast('Not connected — change not sent',true);syncDualFromState();return}
     dualLocked=true;
     var raw=parseFloat(this.value);
     send({cmd:'set',coolThresh:(tempUnit==='F')?fToCTable(raw):raw});
     setTimeout(function(){dualLocked=false},2000);
   };
+
+  // Re-sync the heat/cool threshold sliders from the last confirmed state.
+  function syncDualFromState(){
+    if(state.heatThresh==null||state.coolThresh==null) return;
+    if(tempUnit==='F'){
+      heatSlider.value=cToFTable(state.heatThresh);
+      heatThreshVal.textContent=cToFTable(state.heatThresh).toString();
+      coolSlider.value=cToFTable(state.coolThresh);
+      coolThreshVal.textContent=cToFTable(state.coolThresh).toString();
+    } else {
+      heatSlider.value=state.heatThresh;
+      heatThreshVal.textContent=state.heatThresh.toFixed(1);
+      coolSlider.value=state.coolThresh;
+      coolThreshVal.textContent=state.coolThresh.toFixed(1);
+    }
+  }
 
   window.setTempUnit=function(btn){
     var u=btn.getAttribute('data-v');
@@ -1779,20 +1871,24 @@ input:focus-visible,select:focus-visible{outline-offset:0}
 
   window.saveConfig=function(){
     var name=$('cfgDeviceName').value.replace(/["\\\n\r]/g,'').trim();
-    send({
+    var ok=send({
       cmd:'config',
       deviceName:name,
       logLevel:parseInt($('cfgLogLevel').value),
       pollInterval:parseInt($('cfgPoll').value),
       vaneConfig:parseInt($('cfgVanes').value)
     });
+    showToast(ok?'Settings saved':'Not connected — not saved',!ok);
   };
 
   window.saveWifi=function(){
     var ssid=$('cfgSSID').value.trim();
     var pass=$('cfgPass').value;
     if(!ssid) return;
-    send({cmd:'wifi',ssid:ssid,password:pass});
+    if(!send({cmd:'wifi',ssid:ssid,password:pass})){
+      showToast('Not connected — not saved',true);
+    }
+    // Success is confirmed by the server's wifiSaved reply (onWifiSaved).
   };
 
   // ── OTA Upload ────────────────────────────────────────────────────────────
