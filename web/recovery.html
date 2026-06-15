@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>{{BRAND_NAME}} - WiFi Setup</title>
@@ -37,7 +37,7 @@ body{
 .header{
   position:sticky;top:0;z-index:100;
   display:flex;align-items:center;justify-content:space-between;
-  padding:12px 16px;margin:0 -16px 0;
+  padding:12px 16px;margin:0 -16px;
   background:var(--bg);
 }
 .header-left{display:flex;align-items:baseline;gap:6px}
@@ -50,11 +50,14 @@ body{
 .conn-dot.ok{background:var(--green);box-shadow:0 0 6px var(--green)}
 .conn-dot.err{background:var(--red)}
 .theme-toggle{
+  position:relative;
   width:34px;height:34px;border:none;border-radius:50%;
   background:var(--seg-bg);cursor:pointer;display:flex;
   align-items:center;justify-content:center;color:var(--text2);padding:0;
   transition:transform .15s;
 }
+/* Expand tap area to 44px without growing the visual control */
+.theme-toggle::after{content:'';position:absolute;inset:-5px}
 .theme-toggle:active{transform:scale(.88)}
 .theme-toggle svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 .icon-moon{display:none}
@@ -64,11 +67,11 @@ body{
 /* ── Cards ─────────────────────────────────────────────────────────────── */
 .card{
   background:var(--surface);border-radius:var(--radius);
-  padding:14px 16px;margin-bottom:10px;
+  padding:16px;margin-bottom:12px;
 }
 .card-hdr{
   display:flex;align-items:center;justify-content:space-between;
-  margin-bottom:6px;
+  margin-bottom:8px;
 }
 .card-label{
   font-size:13px;font-weight:500;color:var(--text2);
@@ -77,23 +80,28 @@ body{
 
 /* ── Status Banner ────────────────────────────────────────────────────── */
 .status{
-  padding:10px 12px;border-radius:var(--radius-sm);font-size:13px;
-  margin-bottom:10px;text-align:center;font-weight:500;
+  padding:10px 14px;border-radius:var(--radius-sm);font-size:13px;
+  margin-top:8px;text-align:center;font-weight:500;line-height:1.4;
   transition:all .3s;
 }
 .status.err{background:rgba(255,59,48,0.15);color:var(--red)}
 .status.ok{background:rgba(52,199,89,0.15);color:var(--green)}
 .status.warn{background:rgba(255,149,0,0.15);color:var(--orange)}
 .current-ssid{font-size:13px;color:var(--text2)}
+/* Only reserve space when an SSID is actually shown */
+.current-ssid:not(:empty){margin-top:10px}
 .current-ssid strong{color:var(--text)}
 
 /* ── Refresh button ───────────────────────────────────────────────────── */
 .refresh-btn{
-  width:28px;height:28px;border:none;border-radius:50%;
+  position:relative;
+  width:32px;height:32px;border:none;border-radius:50%;
   background:var(--seg-bg);color:var(--text2);cursor:pointer;
   display:flex;align-items:center;justify-content:center;padding:0;
   transition:transform .15s;
 }
+/* Expand tap area to 44px without growing the visual control */
+.refresh-btn::after{content:'';position:absolute;inset:-6px}
 .refresh-btn:active{transform:scale(.88)}
 .refresh-btn svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 .refresh-btn.spin svg{animation:spin .8s linear infinite}
@@ -101,7 +109,7 @@ body{
 
 /* ── Network list ─────────────────────────────────────────────────────── */
 .net-row{
-  display:flex;align-items:center;gap:10px;
+  display:flex;align-items:center;gap:10px;min-height:44px;
   padding:11px 0;border-bottom:0.5px solid var(--border);
   cursor:pointer;transition:background .1s;
   -webkit-user-select:none;user-select:none;
@@ -130,13 +138,13 @@ body{
 /* ── Join card ────────────────────────────────────────────────────────── */
 .setting-row{
   display:flex;align-items:center;gap:12px;
-  padding:10px 0;border-bottom:0.5px solid var(--border);
+  padding:11px 0;border-bottom:0.5px solid var(--border);
 }
 .setting-row:last-of-type{border-bottom:none}
 .setting-row label{font-size:15px;color:var(--text);min-width:70px}
 .setting-row input[type=text],.setting-row input[type=password]{
-  flex:1;padding:8px 12px;border:1.5px solid transparent;border-radius:var(--radius-sm);
-  background:var(--seg-bg);color:var(--text);font-size:15px;
+  flex:1;min-height:44px;padding:10px 12px;border:1.5px solid transparent;border-radius:var(--radius-sm);
+  background:var(--seg-bg);color:var(--text);font-size:16px;
   font-family:inherit;outline:none;
 }
 .setting-row input[type=text]:focus,.setting-row input[type=password]:focus{
@@ -145,16 +153,21 @@ body{
 .setting-row input::placeholder{color:var(--text3)}
 .pw-wrap{flex:1;position:relative}
 .pw-wrap input{width:100%;padding-right:40px}
-.pw-toggle{position:absolute;right:8px;top:50%;transform:translateY(-50%);
-  background:none;border:none;color:var(--text2);cursor:pointer;font-size:14px;
-  padding:4px;line-height:1}
-.join-name{font-size:15px;font-weight:500;color:var(--text);margin-bottom:4px}
+.pw-toggle{position:absolute;right:6px;top:50%;transform:translateY(-50%);
+  width:32px;height:32px;background:none;border:none;color:var(--text2);cursor:pointer;
+  display:flex;align-items:center;justify-content:center;padding:0;line-height:1}
+/* Expand tap area to 44px without growing the visual control */
+.pw-toggle::after{content:'';position:absolute;inset:-6px}
+.join-name{font-size:15px;font-weight:500;color:var(--text);margin-bottom:8px}
+/* Clear the sticky header when the card is scrolled to the top so a focused
+   field sits above the on-screen keyboard. */
+#joinCard{scroll-margin-top:64px}
 
 /* ── Button ───────────────────────────────────────────────────────────── */
 .join-btn{
-  width:100%;padding:12px;border:none;border-radius:var(--radius-sm);
+  width:100%;min-height:44px;padding:13px;border:none;border-radius:var(--radius-sm);
   background:var(--green);color:#fff;font-size:15px;font-weight:600;
-  cursor:pointer;margin-top:8px;font-family:inherit;
+  cursor:pointer;margin-top:12px;font-family:inherit;
   transition:transform .15s,opacity .15s;
 }
 .join-btn:active{transform:scale(.97);opacity:.8}
@@ -162,9 +175,28 @@ body{
 
 /* ── Help ─────────────────────────────────────────────────────────────── */
 .help-text{font-size:13px;color:var(--text2);line-height:1.5}
-.steps{font-size:13px;color:var(--text2);line-height:1.7;padding-left:20px}
+.steps{font-size:13px;color:var(--text2);line-height:1.7;padding-left:20px;margin-top:8px}
 .steps li{margin-bottom:4px}
 .steps li::marker{color:var(--accent)}
+
+/* ── HomeKit pairing ──────────────────────────────────────────────────── */
+.hk-code{display:flex;gap:6px;justify-content:center;margin:12px 0 16px}
+.hk-digit{
+  flex:1;max-width:38px;aspect-ratio:1;
+  display:flex;align-items:center;justify-content:center;
+  background:var(--surface2);border-radius:8px;
+  font-size:20px;font-weight:600;font-variant-numeric:tabular-nums;
+}
+.hk-actions{display:flex;gap:8px}
+.hk-btn{
+  flex:1;min-height:44px;padding:12px;border:none;border-radius:var(--radius-sm);
+  font-size:14px;font-weight:600;font-family:inherit;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  text-align:center;text-decoration:none;
+  transition:transform .15s,opacity .15s;
+}
+.hk-btn:active{transform:scale(.97);opacity:.8}
+.hk-btn-secondary{background:var(--surface3);color:var(--text)}
 
 /* ── Scrollbar ────────────────────────────────────────────────────────── */
 ::-webkit-scrollbar{width:4px}
@@ -251,10 +283,14 @@ input:focus-visible{outline-offset:0}
   <!-- HomeKit next steps (shown once WiFi connects) -->
   <div class="card" id="hkCard" style="display:none">
     <div class="card-label">Next: Add to HomeKit</div>
-    <ol class="steps">
-      <li>Open the <strong>Home</strong> app on your iPhone or iPad</li>
-      <li>Tap <strong>+</strong> &rarr; <strong>Add Accessory</strong></li>
-      <li>Scan the HomeKit code on your device label to finish pairing</li>
+    <div class="hk-code" id="hkCode" style="display:none"></div>
+    <div class="hk-actions">
+      <button type="button" id="hkCopyBtn" class="hk-btn hk-btn-secondary">Copy Code</button>
+    </div>
+    <ol class="steps" style="margin-top:14px">
+      <li>Reconnect this phone to your home WiFi</li>
+      <li>Open the <strong>Home</strong> app &rarr; <strong>+</strong> &rarr; <strong>Add Accessory</strong></li>
+      <li>Tap <strong>More options&hellip;</strong> and enter the code above (or scan the label)</li>
     </ol>
   </div>
 
@@ -289,6 +325,8 @@ input:focus-visible{outline-offset:0}
   var pwToggle=document.getElementById('pwToggle');
   var helpCard=document.getElementById('helpCard');
   var hkCard=document.getElementById('hkCard');
+  var hkCode=document.getElementById('hkCode');
+  var hkCopyBtn=document.getElementById('hkCopyBtn');
 
   var selSSID='';
   var selSecure=true;
@@ -376,6 +414,22 @@ input:focus-visible{outline-offset:0}
     netList.appendChild(otherRow);
   }
 
+  /* ── Scroll the join card to the top, above the on-screen keyboard ───── */
+  /* .focus() pops the keyboard asynchronously, so wait for visualViewport to
+     resize (keyboard slid in) before scrolling; fall back to a timeout for
+     desktop / no-keyboard cases. block:'start' + scroll-margin keeps the
+     network name, password field and Join button all above the keyboard. */
+  function scrollJoinIntoView(){
+    var vv=window.visualViewport,done=false;
+    function go(){
+      if(done)return;done=true;
+      if(vv)vv.removeEventListener('resize',go);
+      joinCard.scrollIntoView({behavior:'smooth',block:'start'});
+    }
+    if(vv)vv.addEventListener('resize',go);
+    setTimeout(go,350);
+  }
+
   /* ── Select network from list ───────────────────────────────────────── */
   function selectNetwork(ssid,secure){
     selSSID=ssid;selSecure=secure;isOther=false;
@@ -394,7 +448,7 @@ input:focus-visible{outline-offset:0}
       var r=rows[i];
       r.classList.toggle('selected',!r.classList.contains('net-other')&&r.querySelector('.net-name').textContent===ssid);
     }
-    joinCard.scrollIntoView({behavior:'smooth',block:'nearest'});
+    scrollJoinIntoView();
     checkFields();
   }
 
@@ -411,7 +465,7 @@ input:focus-visible{outline-offset:0}
     var rows=netList.querySelectorAll('.net-row');
     for(var i=0;i<rows.length;i++)rows[i].classList.remove('selected');
     ssidInput.focus();
-    joinCard.scrollIntoView({behavior:'smooth',block:'nearest'});
+    scrollJoinIntoView();
   }
 
   /* ── Field validation ───────────────────────────────────────────────── */
@@ -460,8 +514,7 @@ input:focus-visible{outline-offset:0}
       connDot.className='conn-dot ok';
       connDot.title='Connected';
       connDot.setAttribute('aria-label','Connected');
-      helpCard.style.display='none';
-      hkCard.style.display='';
+      showHomeKit(d.hkSetupCode);
     }
   }).catch(function(){});
 
@@ -475,6 +528,42 @@ input:focus-visible{outline-offset:0}
     joinBtn.disabled=false;
     joinBtn.textContent='Join';
   }
+
+  /* ── Reveal HomeKit pairing card with the live setup code ───────────── */
+  var hkSetupCode='';
+  function showHomeKit(code){
+    helpCard.style.display='none';
+    hkCard.style.display='';
+    if(code&&code!=='000-00-000'){
+      hkSetupCode=code;
+      var digits=code.replace(/[^0-9]/g,'');
+      hkCode.textContent='';
+      for(var i=0;i<digits.length;i++){
+        var d=document.createElement('span');
+        d.className='hk-digit';
+        d.textContent=digits.charAt(i);
+        hkCode.appendChild(d);
+      }
+      hkCode.style.display='';
+    }
+  }
+
+  /* ── Copy the setup code to the clipboard ───────────────────────────── */
+  function fallbackCopy(text){
+    var ta=document.createElement('textarea');
+    ta.value=text;ta.style.position='fixed';ta.style.opacity='0';
+    document.body.appendChild(ta);ta.select();
+    try{document.execCommand('copy')}catch(e){}
+    document.body.removeChild(ta);
+  }
+  hkCopyBtn.onclick=function(){
+    if(!hkSetupCode)return;
+    if(navigator.clipboard&&navigator.clipboard.writeText){
+      navigator.clipboard.writeText(hkSetupCode).catch(function(){fallbackCopy(hkSetupCode)});
+    }else{fallbackCopy(hkSetupCode)}
+    hkCopyBtn.textContent='Copied!';
+    setTimeout(function(){hkCopyBtn.textContent='Copy Code'},1500);
+  };
 
   /* ── Join ────────────────────────────────────────────────────────────── */
   joinBtn.onclick=function(){
@@ -519,8 +608,7 @@ input:focus-visible{outline-offset:0}
             connDot.setAttribute('aria-label','Connected');
             joinBtn.textContent='Connected';
             /* Hotspot is about to drop — leave the user with pairing next steps. */
-            helpCard.style.display='none';
-            hkCard.style.display='';
+            showHomeKit(s.hkSetupCode);
           }
         }).catch(function(){});
       },3000);

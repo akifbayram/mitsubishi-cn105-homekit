@@ -149,10 +149,12 @@ esp_err_t WebUI::handleWifiStatus(httpd_req_t *req) {
     jsonEscape(ssid, escSSID, sizeof(escSSID));
     jsonEscape(cfg.deviceName, escName, sizeof(escName));
 
-    char buf[200];
+    char buf[280];
     snprintf(buf, sizeof(buf),
-        "{\"ssid\":\"%s\",\"deviceName\":\"%s\",\"connected\":%s}",
-        escSSID, escName, connected ? "true" : "false");
+        "{\"ssid\":\"%s\",\"deviceName\":\"%s\",\"connected\":%s"
+        ",\"hkSetupCode\":\"%s\"}",
+        escSSID, escName, connected ? "true" : "false",
+        homekit_get_setup_code());
 
     httpd_resp_set_type(req, "application/json");
     httpd_resp_sendstr(req, buf);
