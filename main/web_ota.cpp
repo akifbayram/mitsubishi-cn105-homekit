@@ -39,7 +39,7 @@ esp_err_t WebUI::handleOtaUpload(httpd_req_t *req) {
     char otaMsg[128];
     snprintf(otaMsg, sizeof(otaMsg),
         "{\"type\":\"ota\",\"status\":\"starting\",\"size\":%u}", (unsigned)totalLen);
-    webUI.sendWsText(webUI._wsClientFd, otaMsg);
+    webUI.broadcastWs(otaMsg);
 
     // Increase WDT timeout during OTA — esp_ota_begin() erases the partition
     // which can block for several seconds on large partitions.
@@ -133,7 +133,7 @@ esp_err_t WebUI::handleOtaUpload(httpd_req_t *req) {
             LOG_INFO("Progress: %u/%u bytes (%u%%)", (unsigned)received, (unsigned)totalLen, pct);
             snprintf(otaMsg, sizeof(otaMsg),
                 "{\"type\":\"ota\",\"status\":\"progress\",\"pct\":%u}", pct);
-            webUI.sendWsText(webUI._wsClientFd, otaMsg);
+            webUI.broadcastWs(otaMsg);
         }
     }
 
@@ -186,7 +186,7 @@ esp_err_t WebUI::handleOtaUpload(httpd_req_t *req) {
 
     snprintf(otaMsg, sizeof(otaMsg),
         "{\"type\":\"ota\",\"status\":\"done\",\"pct\":100}");
-    webUI.sendWsText(webUI._wsClientFd, otaMsg);
+    webUI.broadcastWs(otaMsg);
 
     vTaskDelay(pdMS_TO_TICKS(1000));
     esp_restart();

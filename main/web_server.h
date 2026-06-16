@@ -16,9 +16,7 @@ public:
 private:
     httpd_handle_t   _server = NULL;
     CN105Controller *_ctrl   = nullptr;
-    std::atomic<int> _wsClientFd{-1};    // Track connected WS client (single client, cross-task)
     uint32_t _lastStatePush  = 0;
-    uint32_t _lastWsPing     = 0;      // Server-side WS ping for dead client detection
     bool _apMode = false;               // True when fallback AP is active
 
     httpd_handle_t   _redirectServer = NULL;  // Port 80 redirect server for AP mode
@@ -42,6 +40,8 @@ private:
     void pushState();
     void pushDiscoveryResults(bool done);
     void sendWsText(int fd, const char *text);
+    void broadcastWs(const char *text);          // Send to every WS client, refreshing LRU
+    int  collectWsClients(int *out, int maxOut); // List active WebSocket client fds
 
     // ── WiFi credential handling (shared by REST + WS paths) ────────────────
     bool applyWifiCredentials(const char *json, const char **outError);
