@@ -327,7 +327,7 @@ void WebUI::begin(CN105Controller *ctrl) {
     config.ctrl_port        = 32769;  // Different from default to avoid conflict
     config.stack_size       = 8192;   // Default 4096 too small for WS handlers + log buffers
     config.max_uri_handlers = 10;     // Default 8 too few for all endpoints
-    config.max_open_sockets = 12;    // headroom for a browser's parallel HTTP conns + WS + a 2nd viewer (LWIP pool raised to 24 on c6)
+    config.max_open_sockets = 7;
     config.lru_purge_enable = true;
     config.open_fn          = setTcpNoDelay;
 
