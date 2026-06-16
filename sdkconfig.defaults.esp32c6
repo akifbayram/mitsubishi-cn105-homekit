@@ -3,3 +3,10 @@ CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
 CONFIG_ESPTOOLPY_FLASHSIZE_8MB=n
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_4mb.csv"
+
+# Socket headroom: a real browser opens ~6 parallel HTTP connections plus the
+# WebSocket, and a 2nd viewer doubles that. Keep the shared LWIP pool ahead of
+# the web server's max_open_sockets (12) plus the HAP server on port 80, so a
+# full pool never starves new connections (accept errno 23).
+CONFIG_LWIP_MAX_SOCKETS=24
+CONFIG_LWIP_MAX_ACTIVE_TCP=24
