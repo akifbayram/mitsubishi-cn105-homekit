@@ -284,9 +284,8 @@ static void addDiscoveryResult(const char* addrLower, const char* name,
     // Add new entry
     if (s_discoveryCount < BLE_MAX_DISCOVERED) {
         auto& d = s_discovered[s_discoveryCount];
-        strncpy(d.addr, addr, sizeof(d.addr));
-        strncpy(d.name, name ? name : "", sizeof(d.name) - 1);
-        d.name[sizeof(d.name) - 1] = '\0';
+        snprintf(d.addr, sizeof(d.addr), "%s", addr);
+        snprintf(d.name, sizeof(d.name), "%s", name ? name : "");
         d.type = type;
         d.rssi = rssi;
         s_discoveryCount++;

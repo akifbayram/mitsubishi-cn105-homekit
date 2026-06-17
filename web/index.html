@@ -183,6 +183,8 @@ input[type=range]::-moz-range-thumb{
 .collapse-header.open{border-radius:var(--radius) var(--radius) 0 0;margin-bottom:0}
 .collapse-title{font-size:15px;font-weight:500;flex:1;color:var(--text)}
 .collapse-chevron{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:16px;height:16px;line-height:1;flex:none;
   font-size:16px;color:var(--text3);transition:transform .3s cubic-bezier(.4,0,.2,1);
   font-weight:300;
 }
@@ -1216,6 +1218,31 @@ input:focus-visible,select:focus-visible{outline-offset:0}
     toastTimer=setTimeout(function(){t.classList.remove('show')},2600);
   }
 
+  // Show/populate the AUTO dual-setpoint slider from a state-like object.
+  // Shared by onState() (server push) and setMode() (optimistic on click) so
+  // the slider's visibility tracks mode changes instantly instead of waiting
+  // for the post-command lockout to expire.
+  function renderDual(s){
+    if(s&&s.mode==='auto'&&s.connected&&s.power){
+      dualTemp.style.display='';
+      if(!dualLocked&&s.heatThresh!=null&&s.coolThresh!=null){
+        if(tempUnit==='F'){
+          heatSlider.value=cToFTable(s.heatThresh);
+          heatThreshVal.textContent=cToFTable(s.heatThresh).toString();
+          coolSlider.value=cToFTable(s.coolThresh);
+          coolThreshVal.textContent=cToFTable(s.coolThresh).toString();
+        } else {
+          heatSlider.value=s.heatThresh;
+          heatThreshVal.textContent=s.heatThresh.toFixed(1);
+          coolSlider.value=s.coolThresh;
+          coolThreshVal.textContent=s.coolThresh.toFixed(1);
+        }
+      }
+    } else {
+      dualTemp.style.display='none';
+    }
+  }
+
   // ── State handler ──────────────────────────────────────────────────────────
   function onState(s){
     var locked = lastCmdTime > 0 && (Date.now() - lastCmdTime) < 2000;
@@ -1243,24 +1270,7 @@ input:focus-visible,select:focus-visible{outline-offset:0}
         }
       }
 
-      if(s.mode==='auto'&&s.connected&&s.power){
-        dualTemp.style.display='';
-        if(!dualLocked){
-          if(tempUnit==='F'){
-            heatSlider.value=cToFTable(s.heatThresh);
-            heatThreshVal.textContent=cToFTable(s.heatThresh).toString();
-            coolSlider.value=cToFTable(s.coolThresh);
-            coolThreshVal.textContent=cToFTable(s.coolThresh).toString();
-          } else {
-            heatSlider.value=s.heatThresh;
-            heatThreshVal.textContent=s.heatThresh.toFixed(1);
-            coolSlider.value=s.coolThresh;
-            coolThreshVal.textContent=s.coolThresh.toFixed(1);
-          }
-        }
-      } else {
-        dualTemp.style.display='none';
-      }
+      renderDual(s);
 
       setActive('fanGrp', s.fan);
       setActive('vaneGrp', s.vane);
@@ -1714,12 +1724,14 @@ input:focus-visible,select:focus-visible{outline-offset:0}
       state.power=false;
       setActive('modeGrp','off');
       setModeTheme(null);
+      renderDual(state);
       send({cmd:'set',power:false});
     }else{
       state.power=true;
       state.mode=v;
       setActive('modeGrp',v);
       setModeTheme(v);
+      renderDual(state);
       send({cmd:'set',power:true,mode:v});
     }
   };

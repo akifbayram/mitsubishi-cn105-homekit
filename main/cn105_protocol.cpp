@@ -460,9 +460,32 @@ void CN105Controller::readSerial() {
 
                 _rxBuf[_rxLen++] = b;
 
-                // If we have the header, check if we have a complete packet
+                // Validate the fixed header bytes as they arrive. Positions 2
+                // and 3 are always 0x01 0x30;
+                // rejecting here stops a noise-triggered false sync on 0xFC from
+                // being mistaken for a packet. Position 1 (packet type) varies.
+                if (_rxLen == 3 && _rxBuf[2] != CN105_HEADER_BYTE2) {
+                    _rxLen = 0;
+                    continue;
+                }
+                if (_rxLen == 4 && _rxBuf[3] != CN105_HEADER_BYTE3) {
+                    _rxLen = 0;
+                    continue;
+                }
+
+                // Once the length byte (position 4) is in, bound-check it before
+                // trusting it. Computed in int to avoid the uint8_t wraparound a
+                // length byte >= 250 would otherwise cause (5 + 250 + 1 == 256
+                // -> 0), which led to out-of-bounds reads in calcChecksum. Frames
+                // larger than the buffer are rejected up front.
                 if (_rxLen >= 5) {
-                    uint8_t expectedLen = 5 + _rxBuf[4] + 1;
+                    int expectedLen = 5 + (int)_rxBuf[4] + 1;  // header + data + checksum
+                    if (expectedLen > (int)sizeof(_rxBuf)) {
+                        LOG_WARN("RX invalid length 0x%02X (frame=%d > buf=%d), resetting",
+                                 _rxBuf[4], expectedLen, (int)sizeof(_rxBuf));
+                        _rxLen = 0;
+                        continue;
+                    }
                     if (_rxLen >= expectedLen) {
                         uint8_t chk = calcChecksum(_rxBuf, expectedLen - 1);
                         if (chk == _rxBuf[expectedLen - 1]) {
@@ -470,7 +493,7 @@ void CN105Controller::readSerial() {
                                 char hex[128]; logHex(hex, sizeof(hex), _rxBuf, expectedLen);
                                 LOG_DEBUG("RX VALID (%d bytes): %s", expectedLen, hex);
                             }
-                            processPacket(_rxBuf, expectedLen);
+                            processPacket(_rxBuf, (uint8_t)expectedLen);
                         } else {
                             LOG_ERROR("RX CHECKSUM FAIL: expected=0x%02X got=0x%02X",
                                       chk, _rxBuf[expectedLen - 1]);
@@ -513,12 +536,24 @@ void CN105Controller::processPacket(const uint8_t *pkt, uint8_t len) {
             _lastSuccessfulResponse = _state.lastUpdate;
             break;
 
-        case CN105_PKT_INFO_RESP:
+        case CN105_PKT_INFO_RESP: {
+            // data[0] (== pkt[5]) echoes the info type the unit is responding to.
+            uint8_t respType = (len >= 6) ? pkt[5] : 0xFF;
+
             if (len >= 7) {
                 handleInfoResponse(&pkt[5], pkt[4]);
             }
 
-            if (_cycleRunning && _awaitingResponse) {
+            // Only advance the poll cycle when the response matches the request
+            // we're actually waiting on. echavet's RequestScheduler matches
+            // responses to requests by code; advancing on any INFO_RESP lets a
+            // stale/duplicate/out-of-order packet desync the phase sequence. A
+            // genuinely missing response is still handled by the cycle timeout
+            // in loop() (which also drives the 0x04 soft-disable).
+            bool awaitingExpected = _cycleRunning && _awaitingResponse &&
+                                    _pollPhase < CN105_POLL_PHASE_COUNT &&
+                                    respType == POLL_TYPES[_pollPhase];
+            if (awaitingExpected) {
                 _awaitingResponse = false;
                 _pollPhase++;
 
@@ -536,8 +571,14 @@ void CN105Controller::processPacket(const uint8_t *pkt, uint8_t len) {
                     _cycleRunning = false;
                     _lastCycleEnd = uptime_ms();
                 }
+            } else if (_cycleRunning && _awaitingResponse) {
+                LOG_DEBUG("RX INFO_RESP type 0x%02X != expected 0x%02X (phase %d/%d), not advancing",
+                          respType,
+                          _pollPhase < CN105_POLL_PHASE_COUNT ? POLL_TYPES[_pollPhase] : 0xFF,
+                          _pollPhase + 1, CN105_POLL_PHASE_COUNT);
             }
             break;
+        }
 
         default:
             LOG_WARN("RX unknown packet type 0x%02X", pktType);
