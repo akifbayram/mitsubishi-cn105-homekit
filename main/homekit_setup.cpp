@@ -199,7 +199,7 @@ bool homekit_init(const char* name, const char* manufacturer,
     s_setupPayload = esp_hap_get_setup_payload(
         s_setupCode, const_cast<char*>(BRAND_QR_ID), false, s_cid);
 
-    // Start HAP (binds port 80)
+    // Start HAP (binds CONFIG_HAP_HTTP_SERVER_PORT, 8080; advertised via mDNS)
     int ret = hap_start();
     if (ret != HAP_SUCCESS) {
         LOG_ERROR("[HK] hap_start failed: %d", ret);

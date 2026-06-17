@@ -228,7 +228,9 @@ extern "C" void app_main(void)
 
         // ── Deferred HomeKit init (one-shot after WiFi connects, skipped in safe mode)
         if (!safeMode && !homekitStarted && WifiManager::isConnected()) {
-            // Release port 80 if captive portal redirect server is running
+            // WiFi is up: drop the captive portal handler now that we have a real
+            // network. HAP binds its own port (8080), so there's no contention
+            // with the web UI on port 80.
             if (lastAPState) {
                 webUI.setAPMode(false);
                 lastAPState = false;
@@ -278,7 +280,7 @@ extern "C" void app_main(void)
             webUI.begin(&cn105);
             webUIStarted = true;
             webUIStartTime = uptime_ms();
-            LOG_INFO("Web UI started (port 8080)");
+            LOG_INFO("Web UI started (port 80)");
 
 #ifdef BLE_ENABLE
             if (!safeMode) BleSensor::begin();
@@ -289,9 +291,9 @@ extern "C" void app_main(void)
         if (webUIStarted && now - lastWebLoop >= 100) {
             bool apNow = wifiRecovery.isAPActive();
             if (apNow != lastAPState) {
-                if (!homekitStarted || !apNow) {
-                    webUI.setAPMode(apNow);
-                }
+                // Captive portal handler lives on the port-80 web server and is
+                // subnet-gated, so it can safely coexist with HAP (port 8080).
+                webUI.setAPMode(apNow);
                 lastAPState = apNow;
             }
 

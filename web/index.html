@@ -1131,8 +1131,9 @@ input:focus-visible,select:focus-visible{outline-offset:0}
       ws=null;
     }
     var host=location.hostname||'192.168.1.1';
-    var port=location.port||'8080';
-    ws=new WebSocket('ws://'+host+':'+port+'/ws');
+    // Use the same port the page was served from (empty => default 80).
+    var portPart=location.port?(':'+location.port):'';
+    ws=new WebSocket('ws://'+host+portPart+'/ws');
 
     // Timeout: if not open within 5s, kill and retry (Safari CONNECTING hang)
     if(connectTimeout) clearTimeout(connectTimeout);

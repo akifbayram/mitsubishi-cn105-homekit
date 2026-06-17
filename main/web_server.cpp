@@ -63,30 +63,33 @@ esp_err_t WebUI::sendGzipPage(httpd_req_t *req, const uint8_t *data, size_t len)
     return ESP_OK;
 }
 
-esp_err_t WebUI::handleRoot(httpd_req_t *req) {
-    // If AP fallback is active, check if client is on the AP subnet (192.168.4.x)
-    if (webUI._apMode) {
-        int fd = httpd_req_to_sockfd(req);
-        struct sockaddr_storage saddr;
-        socklen_t addrLen = sizeof(saddr);
-        if (getpeername(fd, (struct sockaddr *)&saddr, &addrLen) == 0) {
-            uint32_t ip = 0;
-            if (saddr.ss_family == AF_INET) {
-                ip = ntohl(((struct sockaddr_in *)&saddr)->sin_addr.s_addr);
-            } else if (saddr.ss_family == AF_INET6) {
-                // IPv4-mapped IPv6: ::ffff:x.x.x.x — last 4 bytes are the IPv4 address
-                struct sockaddr_in6 *a6 = (struct sockaddr_in6 *)&saddr;
-                uint8_t *b = a6->sin6_addr.s6_addr;
-                if (b[10] == 0xFF && b[11] == 0xFF) {
-                    ip = ((uint32_t)b[12] << 24) | ((uint32_t)b[13] << 16) |
-                         ((uint32_t)b[14] << 8)  |  (uint32_t)b[15];
-                }
-            }
-            // AP subnet: 192.168.4.0/24 = 0xC0A80400
-            if (ip && (ip & 0xFFFFFF00) == 0xC0A80400) {
-                return handleRecoveryPage(req);
-            }
+// True if the request's peer is on the fallback AP subnet (192.168.4.0/24).
+static bool isApSubnetClient(httpd_req_t *req) {
+    int fd = httpd_req_to_sockfd(req);
+    struct sockaddr_storage saddr;
+    socklen_t addrLen = sizeof(saddr);
+    if (getpeername(fd, (struct sockaddr *)&saddr, &addrLen) != 0) return false;
+    uint32_t ip = 0;
+    if (saddr.ss_family == AF_INET) {
+        ip = ntohl(((struct sockaddr_in *)&saddr)->sin_addr.s_addr);
+    } else if (saddr.ss_family == AF_INET6) {
+        // IPv4-mapped IPv6: ::ffff:x.x.x.x — last 4 bytes are the IPv4 address
+        struct sockaddr_in6 *a6 = (struct sockaddr_in6 *)&saddr;
+        uint8_t *b = a6->sin6_addr.s6_addr;
+        if (b[10] == 0xFF && b[11] == 0xFF) {
+            ip = ((uint32_t)b[12] << 24) | ((uint32_t)b[13] << 16) |
+                 ((uint32_t)b[14] << 8)  |  (uint32_t)b[15];
         }
+    }
+    // AP subnet: 192.168.4.0/24 = 0xC0A80400
+    return ip && (ip & 0xFFFFFF00) == 0xC0A80400;
+}
+
+esp_err_t WebUI::handleRoot(httpd_req_t *req) {
+    // If AP fallback is active and the client is on the AP subnet, serve the
+    // WiFi setup page instead of the main UI.
+    if (webUI._apMode && isApSubnetClient(req)) {
+        return handleRecoveryPage(req);
     }
 
     return sendGzipPage(req, web_ui_html_gz_start,
@@ -103,7 +106,7 @@ esp_err_t WebUI::handleRecoveryPage(httpd_req_t *req) {
 // Returns 200 with HTML (not 302) so all platforms detect the captive portal.
 static const char CNA_PAGE[] =
     "<!DOCTYPE html><html><head>"
-    "<meta http-equiv=\"refresh\" content=\"0;url=http://192.168.4.1:8080/\">"
+    "<meta http-equiv=\"refresh\" content=\"0;url=http://192.168.4.1/\">"
     "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
     "<title>WiFi Setup</title>"
     "<style>body{font-family:-apple-system,system-ui,sans-serif;background:#000;"
@@ -113,7 +116,7 @@ static const char CNA_PAGE[] =
     "</head><body><div>"
     "<p style=\"font-size:15px;color:#8E8E93;margin-bottom:16px\">"
     "Redirecting to WiFi setup&hellip;</p>"
-    "<a href=\"http://192.168.4.1:8080/\">Tap here if not redirected</a>"
+    "<a href=\"http://192.168.4.1/\">Tap here if not redirected</a>"
     "</div></body></html>";
 
 static void serveCNAPage(httpd_req_t *req) {
@@ -127,9 +130,16 @@ esp_err_t WebUI::handleRedirect80(httpd_req_t *req) {
     return ESP_OK;
 }
 
+// Catch-all 404 handler installed only while the fallback AP is active. Serves
+// the captive-portal page to AP-subnet clients (triggers the OS popup); any
+// other client gets a normal 404 so the main UI behaves normally.
 static esp_err_t handleRedirect404(httpd_req_t *req, httpd_err_code_t) {
-    serveCNAPage(req);
-    return ESP_OK;
+    if (webUI.isAPMode() && isApSubnetClient(req)) {
+        serveCNAPage(req);
+        return ESP_OK;
+    }
+    httpd_resp_send_err(req, HTTPD_404_NOT_FOUND, "Not found");
+    return ESP_FAIL;
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -226,37 +236,28 @@ esp_err_t WebUI::handleWifiSetup(httpd_req_t *req) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// AP mode (captive portal redirect server on port 80)
+// AP mode (captive portal handler on the port-80 web server)
 // ══════════════════════════════════════════════════════════════════════════════
 
+// The web UI now owns port 80, so the captive portal no longer needs a separate
+// server: while the fallback AP is active we install a catch-all 404 handler on
+// the main server that serves the captive-portal page to AP-subnet clients.
+// handleRoot already routes AP-subnet clients to the WiFi setup page.
 void WebUI::setAPMode(bool active) {
     if (active == _apMode) return;
     _apMode = active;
+    applyCaptivePortalHandler();
+}
 
-    if (active && !_redirectServer) {
-        // Start lightweight HTTP server on port 80 for captive portal redirect
-        httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
-        cfg.server_port = 80;
-        cfg.ctrl_port   = 32770;
-        cfg.stack_size  = 4096;
-        cfg.max_open_sockets = 2;
-        cfg.lru_purge_enable = true;
-        if (httpd_start(&_redirectServer, &cfg) == ESP_OK) {
-            // Catch root
-            const httpd_uri_t rUri = {
-                .uri = "/", .method = HTTP_GET, .handler = handleRedirect80,
-                .user_ctx = this, .is_websocket = false,
-                .handle_ws_control_frames = false, .supported_subprotocol = NULL
-            };
-            httpd_register_uri_handler(_redirectServer, &rUri);
-            // Catch all other URIs (OS captive portal checks: /generate_204, /connecttest.txt, etc.)
-            httpd_register_err_handler(_redirectServer, HTTPD_404_NOT_FOUND, handleRedirect404);
-            LOG_INFO("Port 80 captive portal server started");
-        }
-    } else if (!active && _redirectServer) {
-        httpd_stop(_redirectServer);
-        _redirectServer = NULL;
-        LOG_INFO("Port 80 redirect server stopped");
+void WebUI::applyCaptivePortalHandler() {
+    if (!_server) return;  // begin() re-applies this once the server is up
+    if (_apMode) {
+        // Catch OS captive portal probes (/generate_204, /connecttest.txt, etc.)
+        httpd_register_err_handler(_server, HTTPD_404_NOT_FOUND, handleRedirect404);
+        LOG_INFO("Captive portal handler enabled (AP mode)");
+    } else {
+        httpd_register_err_handler(_server, HTTPD_404_NOT_FOUND, NULL);
+        LOG_INFO("Captive portal handler disabled");
     }
 }
 
@@ -316,14 +317,14 @@ esp_err_t WebUI::handleFavicon(httpd_req_t *req) {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// begin() — start HTTP server on port 8080
+// begin() — start HTTP server on port 80
 // ══════════════════════════════════════════════════════════════════════════════
 
 void WebUI::begin(CN105Controller *ctrl) {
     _ctrl = ctrl;
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.server_port      = 8080;
+    config.server_port      = 80;
     config.ctrl_port        = 32769;  // Different from default to avoid conflict
     config.stack_size       = 8192;   // Default 4096 too small for WS handlers + log buffers
     config.max_uri_handlers = 10;     // Default 8 too few for all endpoints
@@ -439,6 +440,10 @@ void WebUI::begin(CN105Controller *ctrl) {
         .handle_ws_control_frames = false, .supported_subprotocol = NULL
     };
     httpd_register_uri_handler(_server, &faviconUri);
+
+    // If the fallback AP was already active before the server came up, install
+    // the captive portal handler now (setAPMode() may have run pre-begin()).
+    applyCaptivePortalHandler();
 
     LOG_INFO("HTTP server started, WebSocket endpoint at /ws");
 

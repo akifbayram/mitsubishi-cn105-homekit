@@ -31,7 +31,7 @@ Controls Mitsubishi mini split heat pumps via the CN105 serial connector, compat
 
 1. **Flash** — Open the [web flasher](https://serin-labs.github.io/flash), connect your board via USB, and flash the firmware from your browser
 2. **Connect** — Join the **Serin-XXXX** WiFi network (password: `serinlabs`) and enter your WiFi credentials
-3. **Pair** — Open Apple Home, scan the QR code from the web UI at `http://<device-ip>:8080`
+3. **Pair** — Open Apple Home, scan the QR code from the web UI at `http://<device-ip>`
 
 For developer setup with ESP-IDF, custom boards, and build-time options, see [Setup](#setup).
 
@@ -136,7 +136,7 @@ If the device loses WiFi, it spins up a fallback AP (**Serin-XXXX**) after 5 min
 | Layer | Method | Details |
 |-------|--------|---------|
 | **Auto AP** | Automatic | Fallback AP activates after 5 min disconnect (2 min after a credential change). Disables automatically when WiFi reconnects. |
-| **Recovery page** | Web browser | Connect to the AP and navigate to `192.168.4.1:8080` to enter new WiFi credentials. |
+| **Recovery page** | Web browser | Connect to the AP and navigate to `192.168.4.1` to enter new WiFi credentials. |
 | **Button reset** | Physical | 10-second long-press on the board button (e.g., GPIO9 on NanoC6) erases stored WiFi credentials. Only available on boards with a button. |
 
 ### 4. HomeKit Pairing
@@ -147,7 +147,7 @@ Once connected to WiFi:
 
 **Option A — Scan QR Code (recommended):**
 
-1. Scan the QR code shown in the web UI at `http://<device-ip>:8080` (HomeKit panel)
+1. Scan the QR code shown in the web UI at `http://<device-ip>` (HomeKit panel)
 
 **Option B — Manual setup code:**
 
@@ -202,21 +202,21 @@ A **Remote Sensor** card appears in the web UI on boards with Bluetooth:
 Update firmware over the air without USB access:
 
 **Via Web UI:**
-Navigate to `http://<device-ip>:8080`, open Settings, and use the Firmware Update section. The browser computes a SHA256 checksum before uploading, and the device verifies integrity before applying.
+Navigate to `http://<device-ip>`, open Settings, and use the Firmware Update section. The browser computes a SHA256 checksum before uploading, and the device verifies integrity before applying.
 
 **Via curl:**
 ```bash
 idf.py build
 curl --data-binary @build/mitsubishi-cn105-homekit.bin \
      -H "Content-Type: application/octet-stream" \
-     http://<device-ip>:8080/upload
+     http://<device-ip>/upload
 ```
 
 **Rollback protection:** After an OTA update, the device checks that WiFi and CN105 UART still work before confirming the new firmware. If it reboots before that check passes (crash, power loss), it rolls back to the previous firmware.
 
 ## Web UI
 
-Access the web interface at `http://<device-ip>:8080`.
+Access the web interface at `http://<device-ip>`.
 
 The web UI includes:
 

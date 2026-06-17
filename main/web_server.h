@@ -12,6 +12,7 @@ public:
     void loop();                        // Called from main loop to push state updates
     void broadcastLog(const char *msg, size_t len); // Send log line to WS client
     void setAPMode(bool active);        // Toggle AP mode flag (controls page routing)
+    bool isAPMode() const { return _apMode; }
 
 private:
     httpd_handle_t   _server = NULL;
@@ -19,7 +20,7 @@ private:
     uint32_t _lastStatePush  = 0;
     bool _apMode = false;               // True when fallback AP is active
 
-    httpd_handle_t   _redirectServer = NULL;  // Port 80 redirect server for AP mode
+    void applyCaptivePortalHandler();   // (Un)install the AP-mode captive 404 handler
 
     // ── HTTP handlers (static, access global webUI instance) ────────────────
     static esp_err_t handleRoot(httpd_req_t *req);
