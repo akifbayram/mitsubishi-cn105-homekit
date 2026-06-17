@@ -34,6 +34,8 @@ Setting the slider to 0% or deactivating the fan service powers the unit off. Au
 
 The HomeKit Thermostat service supports independent heating and cooling thresholds, but the CN105 protocol only accepts a **single target temperature**. The controller maps the two thresholds onto that single setpoint with a room-vs-band deadband: room below the heating threshold → send the heating threshold; room above the cooling threshold → send the cooling threshold; room inside the band → send the current room temperature so the unit idles. The heat pump's reported `autoSubMode` is used only for status display, not to choose the setpoint (it lags and can latch to a stale side). A 2°C minimum gap is enforced between thresholds.
 
+**Changeover is performed by the heat pump, not the controller.** In AUTO the firmware sets the single target temperature but does not force the heat/cool direction — the unit decides. Per Mitsubishi's spec, it only changes over (Cool↔Heat) once the room is about 4°F (2°C) from the set temperature for more than 15 minutes. So after the room crosses a threshold the switch can lag several minutes, and a small room-vs-threshold gap may not trigger one at all (e.g. room 74°F with the cooling threshold at 70°F can stay latched on heat). This is expected manufacturer behavior; the web UI surfaces a short note in the AUTO card so users aren't surprised by the delay.
+
 ## Vane Control
 
 Vane positions (including swing mode) are controlled exclusively through the [web UI](../README.md#web-ui).
