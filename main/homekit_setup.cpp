@@ -8,7 +8,7 @@
 #include <cstdio>
 
 #include <esp_event.h>
-#include <esp_random.h>
+#include <esp_mac.h>
 #include <nvs_flash.h>
 #include <mdns.h>
 
@@ -241,21 +241,32 @@ void homekit_generate_setup_code(void)
         return;
     }
 
-    // Generate random 8-digit code
-    // HAP spec forbids these codes: 000-00-000, 111-11-111, ..., 999-99-999,
-    // 123-45-678 and 876-54-321
+    // Derive 8-digit code from WiFi STA MAC using FNV-1a 32-bit hash.
+    // Deterministic per device; unique because MACs are unique.
+    uint8_t mac[6];
+    esp_read_mac(mac, ESP_MAC_WIFI_STA);
+    uint32_t hash = 2166136261UL;
+    for (int i = 0; i < 6; i++) {
+        hash ^= (uint32_t)mac[i];
+        hash = (uint32_t)(hash * 16777619UL);
+    }
+    uint32_t raw = hash % 100000000UL;
+
+    // Skip HAP-forbidden codes (all same digit × 8, 12345678, 87654321)
     char digits[9];
     do {
-        uint32_t r = esp_random();
-        snprintf(digits, sizeof(digits), "%08lu", (unsigned long)(r % 100000000UL));
-    } while (
-        (digits[0] == digits[1] && digits[1] == digits[2] &&
-         digits[2] == digits[3] && digits[3] == digits[4] &&
-         digits[4] == digits[5] && digits[5] == digits[6] &&
-         digits[6] == digits[7]) ||
-        strcmp(digits, "12345678") == 0 ||
-        strcmp(digits, "87654321") == 0
-    );
+        snprintf(digits, sizeof(digits), "%08lu", (unsigned long)raw);
+        if ((digits[0] == digits[1] && digits[1] == digits[2] &&
+             digits[2] == digits[3] && digits[3] == digits[4] &&
+             digits[4] == digits[5] && digits[5] == digits[6] &&
+             digits[6] == digits[7]) ||
+            strcmp(digits, "12345678") == 0 ||
+            strcmp(digits, "87654321") == 0) {
+            raw = (raw + 1) % 100000000UL;
+        } else {
+            break;
+        }
+    } while (1);
 
     // Save raw 8-digit code to NVS
     memcpy(settings.get().setupCode, digits, 8);
@@ -266,7 +277,7 @@ void homekit_generate_setup_code(void)
     snprintf(s_setupCode, sizeof(s_setupCode), "%.3s-%.2s-%.3s",
              digits, digits + 3, digits + 5);
     hap_set_setup_code(s_setupCode);
-    LOG_INFO("[HK] Generated new setup code: %s", s_setupCode);
+    LOG_INFO("[HK] Derived setup code from MAC: %s", s_setupCode);
 }
 
 const char* homekit_get_setup_payload(void)
