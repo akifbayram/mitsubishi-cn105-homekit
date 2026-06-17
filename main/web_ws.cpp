@@ -32,13 +32,8 @@ esp_err_t WebUI::handleWebSocket(httpd_req_t *req) {
         struct timeval tv = {.tv_sec = 5, .tv_usec = 0};
         setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 
-        int oldFd = webUI._wsClientFd.exchange(fd);
-        if (oldFd >= 0 && oldFd != fd) {
-            LOG_INFO("Replacing WS client fd=%d with fd=%d", oldFd, fd);
-        } else {
-            LOG_INFO("WebSocket client connected (fd=%d)", fd);
-        }
-        // Push initial state immediately after connection
+        LOG_INFO("WebSocket client connected (fd=%d)", fd);
+        // Push initial state immediately (broadcast reaches this new client too)
         webUI.pushState();
         return ESP_OK;
     }
@@ -330,15 +325,8 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
 void WebUI::sendWsText(int fd, const char *text) {
     if (fd < 0 || !_server) return;
 
-    // Verify the client is still a valid WebSocket connection
-    httpd_ws_client_info_t info = httpd_ws_get_fd_info(_server, fd);
-    if (info != HTTPD_WS_CLIENT_WEBSOCKET) {
-        // Client disconnected or is no longer a WS client — atomic CAS
-        // avoids clearing a newly-connected client's fd in a race
-        int expected = fd;
-        _wsClientFd.compare_exchange_strong(expected, -1);
-        return;
-    }
+    // Skip fds that are no longer live WebSocket sessions (closed / plain HTTP).
+    if (httpd_ws_get_fd_info(_server, fd) != HTTPD_WS_CLIENT_WEBSOCKET) return;
 
     httpd_ws_frame_t frame;
     memset(&frame, 0, sizeof(frame));
@@ -348,20 +336,52 @@ void WebUI::sendWsText(int fd, const char *text) {
 
     esp_err_t ret = httpd_ws_send_frame_async(_server, fd, &frame);
     if (ret != ESP_OK) {
-        // Reset fd BEFORE logging — prevents broadcastLog from retrying the dead socket.
-        // Atomic CAS: only clear if fd hasn't been replaced by a new client.
-        int expected = fd;
-        _wsClientFd.compare_exchange_strong(expected, -1);
-        LOG_WARN("Failed to send WS frame to fd=%d: %d, client cleared", fd, ret);
+        // httpd reaps the dead socket on its own; this LOG_WARN is reentrancy-
+        // guarded in logging.cpp so it can't cascade through broadcastLog.
+        LOG_WARN("WS send to fd=%d failed: %d", fd, ret);
     }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// Push full state JSON to connected WebSocket client
+// WebSocket client enumeration + broadcast
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Fill `out` with the fds of all live WebSocket clients. Returns the count.
+int WebUI::collectWsClients(int *out, int maxOut) {
+    if (!_server) return 0;
+    size_t cnt = CONFIG_LWIP_MAX_SOCKETS;
+    int fds[CONFIG_LWIP_MAX_SOCKETS];
+    if (httpd_get_client_list(_server, &cnt, fds) != ESP_OK) return 0;
+    int n = 0;
+    for (size_t i = 0; i < cnt && n < maxOut; i++) {
+        if (httpd_ws_get_fd_info(_server, fds[i]) == HTTPD_WS_CLIENT_WEBSOCKET) {
+            out[n++] = fds[i];
+        }
+    }
+    return n;
+}
+
+// Send `text` to every connected WebSocket client. Each socket's LRU counter is
+// refreshed first: a server-push-only WebSocket never *receives* traffic, so
+// esp_http_server's LRU logic would otherwise purge it when the socket pool
+// fills (a browser opening parallel HTTP connections, or a second viewer).
+void WebUI::broadcastWs(const char *text) {
+    int fds[CONFIG_LWIP_MAX_SOCKETS];
+    int n = collectWsClients(fds, CONFIG_LWIP_MAX_SOCKETS);
+    for (int i = 0; i < n; i++) {
+        httpd_sess_update_lru_counter(_server, fds[i]);
+        sendWsText(fds[i], text);
+    }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Push full state JSON to all connected WebSocket clients
 // ══════════════════════════════════════════════════════════════════════════════
 
 void WebUI::pushState() {
-    if (_wsClientFd < 0) return;
+    int wsFds[CONFIG_LWIP_MAX_SOCKETS];
+    int wsN = collectWsClients(wsFds, CONFIG_LWIP_MAX_SOCKETS);
+    if (wsN == 0) return;  // nobody listening — skip building the JSON
 
     const CN105State st = _ctrl->getEffectiveState();
     const DeviceSettings &cfg = settings.get();
@@ -523,7 +543,10 @@ void WebUI::pushState() {
         return;
     }
 
-    sendWsText(_wsClientFd, buf);
+    for (int i = 0; i < wsN; i++) {
+        httpd_sess_update_lru_counter(_server, wsFds[i]);
+        sendWsText(wsFds[i], buf);
+    }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -531,7 +554,7 @@ void WebUI::pushState() {
 // ══════════════════════════════════════════════════════════════════════════════
 
 void WebUI::broadcastLog(const char *msg, size_t len) {
-    if (_wsClientFd < 0) return;
+    if (!_server) return;
 
     // Static buffers — safe because this is only called from the vprintf hook
     // which runs under the ESP-IDF log lock (one task at a time).  Avoids
@@ -541,7 +564,7 @@ void WebUI::broadcastLog(const char *msg, size_t len) {
 
     static char buf[320];
     snprintf(buf, sizeof(buf), "{\"type\":\"log\",\"msg\":\"%s\"}", escaped);
-    sendWsText(_wsClientFd, buf);
+    broadcastWs(buf);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -550,7 +573,7 @@ void WebUI::broadcastLog(const char *msg, size_t len) {
 
 void WebUI::pushDiscoveryResults(bool done) {
 #ifdef BLE_ENABLE
-    if (_wsClientFd < 0) return;
+    if (!_server) return;
 
     int count = 0;
     const BleDiscoveredDevice* devs = BleSensor::discoveryResults(count);
@@ -576,7 +599,7 @@ void WebUI::pushDiscoveryResults(bool done) {
         return;
     }
 
-    sendWsText(_wsClientFd, buf);
+    broadcastWs(buf);
 #endif
 }
 
@@ -585,37 +608,16 @@ void WebUI::pushDiscoveryResults(bool done) {
 // ══════════════════════════════════════════════════════════════════════════════
 
 void WebUI::loop() {
-    if (_wsClientFd < 0) return;
+    if (!_server) return;
 
     uint32_t now = uptime_ms();
     if (now - _lastStatePush >= 1000) {
         _lastStatePush = now;
         pushState();
     }
-
-    // Server-side WS ping every 15s to detect dead clients (half-open TCP)
-    if (now - _lastWsPing >= 15000) {
-        _lastWsPing = now;
-        int fd = _wsClientFd.load();
-        if (fd < 0) return;
-        httpd_ws_client_info_t info = httpd_ws_get_fd_info(_server, fd);
-        if (info != HTTPD_WS_CLIENT_WEBSOCKET) {
-            LOG_INFO("Dead WS client detected (fd=%d), cleaning up", fd);
-            int expected = fd;
-            _wsClientFd.compare_exchange_strong(expected, -1);
-            return;
-        }
-        httpd_ws_frame_t ping;
-        memset(&ping, 0, sizeof(ping));
-        ping.type = HTTPD_WS_TYPE_PING;
-        esp_err_t ret = httpd_ws_send_frame_async(_server, fd, &ping);
-        if (ret != ESP_OK) {
-            LOG_WARN("Ping failed (fd=%d): %d, cleaning up", fd, ret);
-            int expected = fd;
-            _wsClientFd.compare_exchange_strong(expected, -1);
-            return;
-        }
-    }
+    // Liveness: the 1s push exercises each socket; a dead/half-open socket fails
+    // on send (SO_SNDTIMEO) and esp_http_server reaps it, so the next
+    // collectWsClients() simply omits it. No separate ping loop needed.
 
 #ifdef BLE_ENABLE
     if (BleSensor::pollDiscoveryComplete()) {

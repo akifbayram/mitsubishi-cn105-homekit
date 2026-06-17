@@ -156,11 +156,23 @@ body{
 .temp-step:hover{background:var(--surface2)}
 .temp-step:active{transform:scale(.9);background:var(--mode-accent);color:#fff}
 .slider-val{display:none}
-.dual-wrap{width:100%;margin-top:12px}
-.dual-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:4px}
-.dual-label{font-size:13px;font-weight:500}
-.dual-label.heat-label{color:var(--orange)}
-.dual-label.cool-label{color:var(--accent)}
+.dual-wrap{width:100%;margin-top:18px}
+.range-track{position:relative;height:54px}
+.range-rail{position:absolute;left:0;right:0;top:30px;height:6px;border-radius:3px;background:var(--surface2)}
+.range-band{position:absolute;top:30px;height:6px;border-radius:3px;background:var(--mode-accent)}
+.range-cap{position:absolute;top:2px;transform:translateX(-50%);font-size:12px;font-weight:600;white-space:nowrap;pointer-events:none}
+.range-cap.heat-cap{color:var(--orange)}
+.range-cap.cool-cap{color:var(--accent)}
+.range-tick{position:absolute;top:24px;width:2px;height:18px;background:var(--text2);border-radius:1px;transform:translateX(-50%);pointer-events:none}
+.range-tick-lbl{position:absolute;top:20px;left:50%;transform:translateX(-50%);font-size:9px;color:var(--text2);white-space:nowrap}
+.range-help{font-size:11px;color:var(--text2);text-align:center;line-height:1.4;margin:14px 4px 0}
+.range-track input[type=range]{position:absolute;left:0;right:0;top:19px;width:100%;height:28px;margin:0;background:transparent;pointer-events:none}
+.range-track input[type=range]::-webkit-slider-thumb{pointer-events:auto}
+.range-track input[type=range]::-moz-range-thumb{pointer-events:auto}
+#heatSlider::-webkit-slider-thumb{background:var(--orange)}
+#heatSlider::-moz-range-thumb{background:var(--orange)}
+#coolSlider::-webkit-slider-thumb{background:var(--accent)}
+#coolSlider::-moz-range-thumb{background:var(--accent)}
 input[type=range]{
   -webkit-appearance:none;appearance:none;width:100%;height:4px;
   border-radius:2px;background:var(--surface2);outline:none;margin:8px 0;
@@ -183,6 +195,8 @@ input[type=range]::-moz-range-thumb{
 .collapse-header.open{border-radius:var(--radius) var(--radius) 0 0;margin-bottom:0}
 .collapse-title{font-size:15px;font-weight:500;flex:1;color:var(--text)}
 .collapse-chevron{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:16px;height:16px;line-height:1;flex:none;
   font-size:16px;color:var(--text3);transition:transform .3s cubic-bezier(.4,0,.2,1);
   font-weight:300;
 }
@@ -431,27 +445,29 @@ input:focus-visible,select:focus-visible{outline-offset:0}
         <div class="temp-source" id="tempSource"></div>
       </div>
       <div class="temp-setting">
-        <span class="temp-lbl">Set</span>
+        <span class="temp-lbl" id="setLbl">Set</span>
         <span class="temp-val" id="targetTemp">--</span><span class="temp-unit-label">&deg;C</span>
       </div>
     </div>
-    <div class="slider-row">
+    <div class="slider-row" id="sliderRow">
       <button class="temp-step" onclick="stepTemp(-1)" aria-label="Decrease temperature">&minus;</button>
       <input type="range" id="tempSlider" min="16" max="31" step="0.5" value="22"
              oninput="onSliderInput()" onchange="onSliderChange()">
       <button class="temp-step" onclick="stepTemp(1)" aria-label="Increase temperature">+</button>
     </div>
     <div class="slider-val" id="sliderVal">22.0</div>
-    <!-- Dual setpoint for AUTO mode -->
+    <!-- Dual setpoint range for AUTO mode -->
     <div id="dualTemp" class="dual-wrap" style="display:none">
-      <div class="dual-row">
-        <span class="dual-label heat-label">Heat: <span id="heatThreshVal">20.0</span><span class="temp-unit-label">&deg;C</span></span>
-        <span class="dual-label cool-label">Cool: <span id="coolThreshVal">25.0</span><span class="temp-unit-label">&deg;C</span></span>
+      <div class="range-track">
+        <div class="range-rail"></div>
+        <div class="range-band" id="rangeBand"></div>
+        <div class="range-tick" id="roomTick" style="display:none"><span class="range-tick-lbl" id="roomTickLbl"></span></div>
+        <span class="range-cap heat-cap" id="heatCap">Heat 20&deg;</span>
+        <span class="range-cap cool-cap" id="coolCap">Cool 25&deg;</span>
+        <input type="range" id="heatSlider" min="16" max="31" step="0.5" value="20" aria-label="Heating threshold temperature">
+        <input type="range" id="coolSlider" min="16" max="31" step="0.5" value="25" aria-label="Cooling threshold temperature">
       </div>
-      <input type="range" id="heatSlider" min="16" max="31" step="0.5" value="20"
-        style="accent-color:var(--orange)">
-      <input type="range" id="coolSlider" min="16" max="31" step="0.5" value="25"
-        style="accent-color:var(--accent)">
+      <p class="range-help">Auto change-over is handled by the heat pump: it switches between heating and cooling only after the room sits about 4&deg;F (2&deg;C) past the set point for 15+ minutes, so a switch can lag.</p>
     </div>
   </div>
 
@@ -861,9 +877,10 @@ input:focus-visible,select:focus-visible{outline-offset:0}
   var stageVal=$('stageVal'), subModeVal=$('subModeVal');
   var outsideTempEl=$('outsideTemp');
   var logBox=$('logBox');
-  var dualTemp=$('dualTemp');
+  var dualTemp=$('dualTemp'), sliderRow=$('sliderRow');
   var heatSlider=$('heatSlider'), coolSlider=$('coolSlider');
-  var heatThreshVal=$('heatThreshVal'), coolThreshVal=$('coolThreshVal');
+  var rangeBand=$('rangeBand'), heatCap=$('heatCap'), coolCap=$('coolCap');
+  var roomTick=$('roomTick'), roomTickLbl=$('roomTickLbl');
   var dualLocked=false;
   var hkDot=$('hkDot'), hkDotBody=$('hkDotBody'), hkStatusText=$('hkStatusText');
   var hkControllersEl=$('hkControllers'), hkSetupCodeEl=$('hkSetupCode');
@@ -1216,6 +1233,84 @@ input:focus-visible,select:focus-visible{outline-offset:0}
     toastTimer=setTimeout(function(){t.classList.remove('show')},2600);
   }
 
+  // Show/populate the AUTO dual-setpoint slider from a state-like object.
+  // Shared by onState() (server push) and setMode() (optimistic on click) so
+  // the slider's visibility tracks mode changes instantly instead of waiting
+  // for the post-command lockout to expire.
+  function rangePct(v){var mn=parseFloat(heatSlider.min),mx=parseFloat(heatSlider.max);return (v-mn)/(mx-mn)*100;}
+  function fmtHandle(v){return (tempUnit==='F')?Math.round(v).toString():v.toFixed(1);}
+  // Position the comfort band + handle captions from the current slider values.
+  function renderBand(){
+    var h=parseFloat(heatSlider.value), c=parseFloat(coolSlider.value);
+    var hp=rangePct(h), cp=rangePct(c);
+    rangeBand.style.left=hp+'%'; rangeBand.style.right=(100-cp)+'%';
+    heatCap.style.left=hp+'%'; heatCap.textContent='Heat '+fmtHandle(h)+'°';
+    coolCap.style.left=cp+'%'; coolCap.textContent='Cool '+fmtHandle(c)+'°';
+  }
+  // Position the room-temp tick (roomC is Celsius from state); hide if off-scale/unknown.
+  function renderRoomTick(roomC){
+    if(roomC==null){roomTick.style.display='none';return;}
+    var rd=(tempUnit==='F')?cToFTable(roomC):roomC;
+    var mn=parseFloat(heatSlider.min),mx=parseFloat(heatSlider.max);
+    if(rd<mn||rd>mx){roomTick.style.display='none';return;}
+    roomTick.style.display=''; roomTick.style.left=rangePct(rd)+'%';
+    roomTickLbl.textContent='room '+fmtHandle(rd)+'°';
+  }
+  var MIN_GAP_C=2.0;  // matches the firmware's bidirectional clamp
+  // Keep cool >= heat + 2°C, enforced in Celsius regardless of display unit.
+  function clampHeatBelowCool(){
+    var hc=(tempUnit==='F')?fToCTable(parseFloat(heatSlider.value)):parseFloat(heatSlider.value);
+    var cc=(tempUnit==='F')?fToCTable(parseFloat(coolSlider.value)):parseFloat(coolSlider.value);
+    if(hc>cc-MIN_GAP_C){hc=cc-MIN_GAP_C;heatSlider.value=(tempUnit==='F')?cToFTable(hc):hc;}
+  }
+  function clampCoolAboveHeat(){
+    var hc=(tempUnit==='F')?fToCTable(parseFloat(heatSlider.value)):parseFloat(heatSlider.value);
+    var cc=(tempUnit==='F')?fToCTable(parseFloat(coolSlider.value)):parseFloat(coolSlider.value);
+    if(cc<hc+MIN_GAP_C){cc=hc+MIN_GAP_C;coolSlider.value=(tempUnit==='F')?cToFTable(cc):cc;}
+  }
+  // Headline while the user is setting the band: show the range being chosen (from the sliders).
+  function autoHeadlineRange(){
+    $('setLbl').textContent='Set range';
+    targetTemp.textContent=fmtHandle(parseFloat(heatSlider.value))+'–'+fmtHandle(parseFloat(coolSlider.value));
+    targetTemp.style.color='var(--mode-accent)';
+  }
+  // AUTO headline reflects what the firmware actually commands to CN105, mirroring
+  // resolveAutoTarget(): room below the band -> heating to the heat threshold; above ->
+  // cooling to the cool threshold; within the band -> the unit is told to hold (idle).
+  // Driven by room-vs-band (the command we send), not the unit's laggy autoSubMode.
+  function updateAutoHeadline(s){
+    if(s.heatThresh==null||s.coolThresh==null) return;
+    if(dualLocked){ autoHeadlineRange(); return; }  // user is adjusting the band
+    var lbl=$('setLbl');
+    if(s.room!=null&&s.room<s.heatThresh){
+      lbl.textContent='Heating to'; targetTemp.textContent=fmtTemp(s.heatThresh); targetTemp.style.color='var(--orange)';
+    } else if(s.room!=null&&s.room>s.coolThresh){
+      lbl.textContent='Cooling to'; targetTemp.textContent=fmtTemp(s.coolThresh); targetTemp.style.color='var(--accent)';
+    } else {
+      lbl.textContent='Idle · holding'; targetTemp.textContent=fmtTemp(s.heatThresh)+'–'+fmtTemp(s.coolThresh); targetTemp.style.color='var(--text2)';
+    }
+  }
+  function resetAutoHeadline(){
+    $('setLbl').textContent='Set'; targetTemp.style.color='';
+  }
+  function renderDual(s){
+    if(s&&s.mode==='auto'&&s.connected&&s.power){
+      dualTemp.style.display='';
+      sliderRow.style.display='none';
+      if(!dualLocked&&s.heatThresh!=null&&s.coolThresh!=null){
+        heatSlider.value=(tempUnit==='F')?cToFTable(s.heatThresh):s.heatThresh;
+        coolSlider.value=(tempUnit==='F')?cToFTable(s.coolThresh):s.coolThresh;
+        renderBand();
+      }
+      renderRoomTick(s.room);
+      updateAutoHeadline(s);
+    } else {
+      dualTemp.style.display='none';
+      sliderRow.style.display='';
+      resetAutoHeadline();
+    }
+  }
+
   // ── State handler ──────────────────────────────────────────────────────────
   function onState(s){
     var locked = lastCmdTime > 0 && (Date.now() - lastCmdTime) < 2000;
@@ -1243,24 +1338,7 @@ input:focus-visible,select:focus-visible{outline-offset:0}
         }
       }
 
-      if(s.mode==='auto'&&s.connected&&s.power){
-        dualTemp.style.display='';
-        if(!dualLocked){
-          if(tempUnit==='F'){
-            heatSlider.value=cToFTable(s.heatThresh);
-            heatThreshVal.textContent=cToFTable(s.heatThresh).toString();
-            coolSlider.value=cToFTable(s.coolThresh);
-            coolThreshVal.textContent=cToFTable(s.coolThresh).toString();
-          } else {
-            heatSlider.value=s.heatThresh;
-            heatThreshVal.textContent=s.heatThresh.toFixed(1);
-            coolSlider.value=s.coolThresh;
-            coolThreshVal.textContent=s.coolThresh.toFixed(1);
-          }
-        }
-      } else {
-        dualTemp.style.display='none';
-      }
+      renderDual(s);
 
       setActive('fanGrp', s.fan);
       setActive('vaneGrp', s.vane);
@@ -1714,12 +1792,14 @@ input:focus-visible,select:focus-visible{outline-offset:0}
       state.power=false;
       setActive('modeGrp','off');
       setModeTheme(null);
+      renderDual(state);
       send({cmd:'set',power:false});
     }else{
       state.power=true;
       state.mode=v;
       setActive('modeGrp',v);
       setModeTheme(v);
+      renderDual(state);
       send({cmd:'set',power:true,mode:v});
     }
   };
@@ -1817,24 +1897,28 @@ input:focus-visible,select:focus-visible{outline-offset:0}
   }
 
   heatSlider.oninput=function(){
-    var raw=parseFloat(this.value);
-    heatThreshVal.textContent=(tempUnit==='F')?raw.toString():raw.toFixed(1);
+    clampHeatBelowCool();
+    renderBand();
+    autoHeadlineRange();
   };
   heatSlider.onchange=function(){
     if(!wsReady()){showToast('Not connected — change not sent',true);syncDualFromState();return}
+    clampHeatBelowCool();
     dualLocked=true;
-    var raw=parseFloat(this.value);
+    var raw=parseFloat(heatSlider.value);
     send({cmd:'set',heatThresh:(tempUnit==='F')?fToCTable(raw):raw});
     setTimeout(function(){dualLocked=false},2000);
   };
   coolSlider.oninput=function(){
-    var raw=parseFloat(this.value);
-    coolThreshVal.textContent=(tempUnit==='F')?raw.toString():raw.toFixed(1);
+    clampCoolAboveHeat();
+    renderBand();
+    autoHeadlineRange();
   };
   coolSlider.onchange=function(){
     if(!wsReady()){showToast('Not connected — change not sent',true);syncDualFromState();return}
+    clampCoolAboveHeat();
     dualLocked=true;
-    var raw=parseFloat(this.value);
+    var raw=parseFloat(coolSlider.value);
     send({cmd:'set',coolThresh:(tempUnit==='F')?fToCTable(raw):raw});
     setTimeout(function(){dualLocked=false},2000);
   };
@@ -1842,17 +1926,9 @@ input:focus-visible,select:focus-visible{outline-offset:0}
   // Re-sync the heat/cool threshold sliders from the last confirmed state.
   function syncDualFromState(){
     if(state.heatThresh==null||state.coolThresh==null) return;
-    if(tempUnit==='F'){
-      heatSlider.value=cToFTable(state.heatThresh);
-      heatThreshVal.textContent=cToFTable(state.heatThresh).toString();
-      coolSlider.value=cToFTable(state.coolThresh);
-      coolThreshVal.textContent=cToFTable(state.coolThresh).toString();
-    } else {
-      heatSlider.value=state.heatThresh;
-      heatThreshVal.textContent=state.heatThresh.toFixed(1);
-      coolSlider.value=state.coolThresh;
-      coolThreshVal.textContent=state.coolThresh.toFixed(1);
-    }
+    heatSlider.value=(tempUnit==='F')?cToFTable(state.heatThresh):state.heatThresh;
+    coolSlider.value=(tempUnit==='F')?cToFTable(state.coolThresh):state.coolThresh;
+    renderBand();
   }
 
   window.setTempUnit=function(btn){
@@ -1861,6 +1937,7 @@ input:focus-visible,select:focus-visible{outline-offset:0}
     lastCmdTime=Date.now();
     setActive('unitGrp',u);
     configureSliders();
+    renderDual(state);
     var label=unitStr();
     for(var i=0;i<unitLabels.length;i++) unitLabels[i].textContent=label;
     send({cmd:'config',tempUnit:u});

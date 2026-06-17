@@ -32,7 +32,9 @@ Setting the slider to 0% or deactivating the fan service powers the unit off. Au
 
 ## Dual Setpoint (Auto Mode)
 
-The HomeKit Thermostat service supports independent heating and cooling thresholds, but the CN105 protocol only accepts a **single target temperature**. The controller tracks which side is active via `autoSubMode` from the heat pump's status response and sends the appropriate threshold. A 2°C minimum gap is enforced between thresholds.
+The HomeKit Thermostat service supports independent heating and cooling thresholds, but the CN105 protocol only accepts a **single target temperature**. The controller maps the two thresholds onto that single setpoint with a room-vs-band deadband: room below the heating threshold → send the heating threshold; room above the cooling threshold → send the cooling threshold; room inside the band → send the current room temperature so the unit idles. The heat pump's reported `autoSubMode` is used only for status display, not to choose the setpoint (it lags and can latch to a stale side). A 2°C minimum gap is enforced between thresholds.
+
+**Changeover is performed by the heat pump, not the controller.** In AUTO the firmware sets the single target temperature but does not force the heat/cool direction — the unit decides. Per Mitsubishi's spec, it only changes over (Cool↔Heat) once the room is about 4°F (2°C) from the set temperature for more than 15 minutes. So after the room crosses a threshold the switch can lag several minutes, and a small room-vs-threshold gap may not trigger one at all (e.g. room 74°F with the cooling threshold at 70°F can stay latched on heat). This is expected manufacturer behavior; the web UI surfaces a short note in the AUTO card so users aren't surprised by the delay.
 
 ## Vane Control
 
@@ -41,6 +43,10 @@ Vane positions (including swing mode) are controlled exclusively through the [we
 ## Temperature
 
 The heat pump supports 16–31°C. The web UI offers a °C/°F display toggle, but the protocol always operates in Celsius. Half-degree precision is supported when the unit's enhanced temperature encoding is detected.
+
+### Known issue — °F values differ between Apple Home and the web UI
+
+Both interfaces read the same stored Celsius value but convert to Fahrenheit differently. The web UI uses Mitsubishi's native (non-linear) °F mapping, which matches the °F the heat pump itself displays; Apple Home applies a fixed linear °C→°F conversion that cannot be customized. They diverge by up to 1°F at some setpoints — e.g. 22°C reads **71°F** in the web UI but **72°F** in Home (also around 18–19°C and 28–30.5°C); values such as 20, 23, 24, and 25°C agree. HomeKit, the web UI, and the unit's own panel cannot all match because Apple is hard-wired to linear and the unit uses the table. Left as-is intentionally so the web UI stays accurate to the unit.
 
 ## Web UI–Only Diagnostics
 
