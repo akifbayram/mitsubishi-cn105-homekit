@@ -97,19 +97,22 @@ static uint8_t deriveCurrentState(const CN105State &s) {
     return 0;
 }
 
+// Map the two HomeKit thresholds onto the unit's single AUTO setpoint using a
+// room-vs-band deadband (the approach used by echavet's HEAT_COOL handling):
+//   - room below the heating threshold -> drive heat to the heating threshold
+//   - room above the cooling threshold -> drive cool to the cooling threshold
+//   - room inside the band             -> feed the unit its own room temp so it idles
+// The unit's reported autoSubMode is intentionally NOT used to pick the side: it
+// lags and can latch to a stale side (e.g. left on HEAT after the room warmed past
+// `cool`), which made AUTO send the heating threshold while the room was already hot.
 static float resolveAutoTarget(const CN105State &s) {
     float heat = settings.get().heatingThreshold;
     float cool = settings.get().coolingThreshold;
-    float mid = (heat + cool) / 2.0f;
-    mid = roundf(mid * 2.0f) / 2.0f;
+    float room = s.roomTemp;
 
-    switch (s.autoSubMode) {
-        case 0x02: return heat;  // AUTO_HEAT
-        case 0x01: return cool;  // AUTO_COOL
-        case 0x00:               // AUTO_OFF
-        case 0x03:               // AUTO_LEADER
-        default:   return mid;
-    }
+    if (room < heat) return heat;   // below band -> heat toward heating threshold
+    if (room > cool) return cool;   // above band -> cool toward cooling threshold
+    return room;                    // inside band -> setpoint == room -> unit idles
 }
 
 // ── Write callback ──────────────────────────────────────────────────────────
@@ -386,8 +389,9 @@ void homekit_sync_thermostat(CN105Controller &cn105)
     if (hkTarget == 3) {  // AUTO mode
         float autoTarget = resolveAutoTarget(s);
         if (fabsf(autoTarget - s_lastSentAutoTarget) > 0.1f) {
-            LOG_INFO("[HK:Thermo] AUTO active-side target: %.1f C (autoSub=%d)",
-                     autoTarget, s.autoSubMode);
+            LOG_INFO("[HK:Thermo] AUTO target %.1fC (room %.1f heat %.1f cool %.1f autoSub=%d)",
+                     autoTarget, s.roomTemp, settings.get().heatingThreshold,
+                     settings.get().coolingThreshold, s.autoSubMode);
             cn105.setTargetTemp(autoTarget);
             cn105.sendPendingChanges();
             s_lastSentAutoTarget = autoTarget;
