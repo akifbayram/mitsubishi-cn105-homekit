@@ -115,7 +115,7 @@ void SettingsStore::begin() {
 
     // bleStaleTimeoutS — uint16_t
     {
-        uint16_t val = 90;
+        uint16_t val = 600;
         nvs_get_u16(_handle, "bleTimeout", &val);
         _settings.bleStaleTimeoutS = val;
     }

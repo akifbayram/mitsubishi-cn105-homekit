@@ -1468,7 +1468,7 @@ input:focus-visible,select:focus-visible{outline-offset:0}
       $('bleFeedToggle').checked=!!s.bleFeed;
 
       // Stale timeout (preserve user input while editing)
-      if(!$('bleTimeoutInput').matches(':focus')){$('bleTimeoutInput').value=s.bleTimeout||90}
+      if(!$('bleTimeoutInput').matches(':focus')){$('bleTimeoutInput').value=s.bleTimeout||600}
 
       // Sensor type
       if(s.bleSensorType){$('bleSensorType').textContent=s.bleSensorType}
