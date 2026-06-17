@@ -35,11 +35,9 @@ esp_err_t WebUI::handleOtaUpload(httpd_req_t *req) {
     LOG_INFO("Starting firmware upload: %u bytes -> partition '%s'",
              (unsigned)totalLen, partition->label);
 
-    // Notify WS client
-    char otaMsg[128];
-    snprintf(otaMsg, sizeof(otaMsg),
-        "{\"type\":\"ota\",\"status\":\"starting\",\"size\":%u}", (unsigned)totalLen);
-    webUI.sendWsText(webUI._wsClientFd, otaMsg);
+    // OTA progress is shown client-side via the XHR upload (xhr.upload.onprogress)
+    // and completion via the HTTP 200 response — deliberately no WS frames from
+    // this long-running handler (sending them stalls recv and can trip the OTA WDT).
 
     // Increase WDT timeout during OTA — esp_ota_begin() erases the partition
     // which can block for several seconds on large partitions.
@@ -131,9 +129,6 @@ esp_err_t WebUI::handleOtaUpload(httpd_req_t *req) {
         if ((received % 65536) < 4096) {
             uint8_t pct = (uint8_t)((received * 100) / totalLen);
             LOG_INFO("Progress: %u/%u bytes (%u%%)", (unsigned)received, (unsigned)totalLen, pct);
-            snprintf(otaMsg, sizeof(otaMsg),
-                "{\"type\":\"ota\",\"status\":\"progress\",\"pct\":%u}", pct);
-            webUI.sendWsText(webUI._wsClientFd, otaMsg);
         }
     }
 
@@ -183,10 +178,6 @@ esp_err_t WebUI::handleOtaUpload(httpd_req_t *req) {
 
     httpd_resp_set_type(req, "application/json");
     httpd_resp_sendstr(req, "{\"status\":\"success\"}");
-
-    snprintf(otaMsg, sizeof(otaMsg),
-        "{\"type\":\"ota\",\"status\":\"done\",\"pct\":100}");
-    webUI.sendWsText(webUI._wsClientFd, otaMsg);
 
     vTaskDelay(pdMS_TO_TICKS(1000));
     esp_restart();
