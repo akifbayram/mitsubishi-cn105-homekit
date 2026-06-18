@@ -21,7 +21,7 @@ struct DeviceSettings {
     bool     bleEnabled = false;          // Master BLE on/off (lazy NimBLE init)
     char     bleSensorAddr[18] = "";      // "AA:BB:CC:DD:EE:FF" or empty
     bool     bleFeedEnabled = false;      // Feed BLE temp to heat pump
-    uint16_t bleStaleTimeoutS = 600;      // Seconds before sensor marked stale (30-600)
+    uint16_t bleStaleTimeoutS = 600;      // Seconds before sensor marked stale (30-3600)
 #endif
 };
 

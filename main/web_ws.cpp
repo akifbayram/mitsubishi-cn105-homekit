@@ -265,7 +265,7 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
 
         int bleTimeoutVal;
         if (jsonGetInt(msg, "bleTimeout", &bleTimeoutVal)) {
-            if (bleTimeoutVal >= 30 && bleTimeoutVal <= 600) {
+            if (bleTimeoutVal >= 30 && bleTimeoutVal <= 3600) {
                 settings.get().bleStaleTimeoutS = (uint16_t)bleTimeoutVal;
                 LOG_INFO("Config bleTimeout=%ds", bleTimeoutVal);
                 changed = true;  // saved + pushState() handled by the `changed` block below

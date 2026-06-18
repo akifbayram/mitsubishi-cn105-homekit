@@ -587,7 +587,7 @@ input:focus-visible,select:focus-visible{outline-offset:0}
       <div class="ble-config-row" style="margin-top:10px" id="bleTimeoutRow">
         <label class="status-label" style="margin:0">Sensor Timeout</label>
         <div style="display:flex;align-items:center;gap:8px">
-          <input type="number" id="bleTimeoutInput" min="30" max="600" step="10"
+          <input type="number" id="bleTimeoutInput" min="30" max="3600" step="10"
                  style="width:70px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px 8px;color:var(--text);font-size:13px;text-align:center">
           <span style="font-size:12px;color:var(--text3)">sec</span>
         </div>
@@ -1704,7 +1704,7 @@ input:focus-visible,select:focus-visible{outline-offset:0}
     var mac=$('bleMacInput').value.trim().toUpperCase();
     if(mac&&!/^([0-9A-F]{2}:){5}[0-9A-F]{2}$/.test(mac)){alert('Invalid MAC format');return}
     var t=parseInt($('bleTimeoutInput').value,10);
-    if(isNaN(t)||t<30||t>600){alert('Timeout must be 30–600 seconds');return}
+    if(isNaN(t)||t<30||t>3600){alert('Timeout must be 30–3600 seconds');return}
     if(!send({cmd:'config',bleAddr:mac,bleTimeout:t})) showToast('Not connected — not saved',true);
   };
   window.toggleBleEnabled=function(){

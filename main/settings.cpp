@@ -120,7 +120,7 @@ void SettingsStore::begin() {
         _settings.bleStaleTimeoutS = val;
     }
     if (_settings.bleStaleTimeoutS < 30) _settings.bleStaleTimeoutS = 30;
-    if (_settings.bleStaleTimeoutS > 600) _settings.bleStaleTimeoutS = 600;
+    if (_settings.bleStaleTimeoutS > 3600) _settings.bleStaleTimeoutS = 3600;
 
     LOG_INFO("[Settings] BLE: enabled=%s addr=%s feed=%s timeout=%us",
              _settings.bleEnabled ? "ON" : "OFF",
