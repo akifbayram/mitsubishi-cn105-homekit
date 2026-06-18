@@ -208,6 +208,8 @@ input[type=range]::-moz-range-thumb{
 }
 .collapse-body.open{max-height:800px;padding:0 16px 16px}
 #wifiBody.open{max-height:1200px}
+#settingsBody.open{max-height:1000px}
+#firmwareBody.open{max-height:760px}
 
 /* ── Status Grid ───────────────────────────────────────────────────────── */
 .status-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
@@ -386,10 +388,37 @@ input[type=range]::-moz-range-thumb{
 ::-webkit-scrollbar-track{background:transparent}
 ::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
 
-/* ── Firmware section ──────────────────────────────────────────────────── */
-.fw-section{margin-top:16px;padding-top:16px;border-top:0.5px solid var(--border)}
-.fw-row{display:flex;gap:8px;align-items:center;margin-bottom:10px}
-.fw-row input[type=file]{flex:1;font-size:13px;color:var(--text2)}
+/* ── Settings & Firmware helpers ───────────────────────────────────────── */
+.setting-value{flex:1;text-align:right;color:var(--text2);font-size:15px}
+.setting-caption{font-size:12px;color:var(--text2);line-height:1.45;padding:6px 0 4px}
+
+.fw-status{font-size:13px;color:var(--text2);line-height:1.4;padding:10px 0 0}
+.fw-status.avail{color:var(--accent);font-weight:600}
+.fw-notes{display:block;text-align:center;margin-top:8px;font-size:13px;color:var(--accent)}
+.btn-secondary{
+  width:100%;padding:12px;border:none;border-radius:var(--radius-sm);
+  background:var(--seg-bg);color:var(--text);font-size:15px;font-weight:600;
+  cursor:pointer;font-family:inherit;transition:transform .15s,opacity .15s,background .15s;
+}
+.btn-secondary:hover{background:var(--surface2)}
+.btn-secondary:active{transform:scale(.97);opacity:.8}
+.btn-secondary:disabled{opacity:.4;cursor:default}
+.btn-secondary:disabled:hover{background:var(--seg-bg)}
+.btn-danger{
+  width:100%;padding:12px;border:none;border-radius:var(--radius-sm);
+  background:var(--red);color:#fff;font-size:15px;font-weight:600;
+  cursor:pointer;font-family:inherit;transition:transform .15s,opacity .15s;
+}
+.btn-danger:hover{opacity:.9}
+.btn-danger:active{transform:scale(.97);opacity:.8}
+.fw-manual{margin-top:14px;padding-top:14px;border-top:0.5px solid var(--border)}
+.fw-file-row{display:flex;align-items:center;gap:12px;margin:4px 0 10px}
+.file-btn{
+  flex:none;padding:8px 16px;border-radius:var(--radius-sm);background:var(--seg-bg);
+  color:var(--text);font-size:14px;font-weight:600;cursor:pointer;white-space:nowrap;
+}
+.file-btn:active{opacity:.7}
+.fw-file-name{font-size:13px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 /* ── Heading Reset ────────────────────────────────────────────────────── */
 h1{font:inherit;margin:0}
@@ -749,8 +778,8 @@ input:focus-visible,select:focus-visible{outline-offset:0}
     </div>
     <div class="collapse-body" id="settingsBody">
       <div class="setting-row">
-        <label>Device Name</label>
-        <input type="text" id="cfgDeviceName" maxlength="31" placeholder="{{BRAND_NAME}}" style="flex:1">
+        <label for="cfgDeviceName">Device Name</label>
+        <input type="text" id="cfgDeviceName" maxlength="31" placeholder="{{BRAND_NAME}}">
       </div>
       <div class="setting-row">
         <label>Temp Unit</label>
@@ -761,15 +790,16 @@ input:focus-visible,select:focus-visible{outline-offset:0}
         </div>
       </div>
       <div class="setting-row">
-        <label>Vane Type</label>
+        <label for="cfgVanes">Vane Type</label>
         <select id="cfgVanes">
           <option value="0">No Vanes</option>
           <option value="1">Vertical Only</option>
           <option value="2" selected>Vertical + Horizontal</option>
         </select>
       </div>
+      <p class="setting-caption">Match this to your indoor unit's louvers.</p>
       <div class="setting-row">
-        <label>Log Level</label>
+        <label for="cfgLogLevel">Log Level</label>
         <select id="cfgLogLevel">
           <option value="0">Error</option>
           <option value="1">Warn</option>
@@ -778,33 +808,56 @@ input:focus-visible,select:focus-visible{outline-offset:0}
         </select>
       </div>
       <div class="setting-row">
-        <label>Poll Interval</label>
+        <label for="cfgPoll">Poll Interval</label>
         <input type="number" id="cfgPoll" min="500" max="30000" step="500" value="2000">
         <span class="unit">ms</span>
       </div>
+      <p class="setting-caption">How often the controller polls the heat pump &mdash; lower is more responsive, higher is gentler on the bus.</p>
+
       <button class="save-btn" onclick="saveConfig()">Save Settings</button>
-      <div class="fw-section">
-        <div class="card-label" role="heading" aria-level="2">Firmware Update</div>
-        <div id="fwUpdateCheck" style="display:none;margin-bottom:10px">
-          <div class="fw-row">
-            <button class="save-btn" style="width:auto;padding:10px 20px;margin:0" id="fwCheckBtn" onclick="checkForUpdate()">Check for Updates</button>
-            <span id="fwCheckResult" style="font-size:13px;color:var(--text2)"></span>
-          </div>
-          <div class="fw-row" id="fwInstallRow" style="display:none;margin-top:8px">
-            <button class="save-btn" style="width:auto;padding:10px 20px;margin:0" id="fwInstallBtn" onclick="installUpdate()">Install</button>
-            <a id="fwNotesLink" href="#" target="_blank" rel="noopener" style="display:none;font-size:13px">What's new</a>
-          </div>
-        </div>
-        <div class="fw-row">
-          <input type="file" id="fwFile" accept=".bin">
-          <button class="save-btn" style="width:auto;padding:10px 20px;margin:0" onclick="uploadFirmware()">Upload</button>
-        </div>
-        <div id="otaProgress" style="display:none">
-          <div class="ota-bar-wrap"><div class="ota-bar" id="otaBar"></div></div>
-          <div class="ota-status" id="otaStatus"></div>
-        </div>
-        <button class="save-btn" style="background:var(--red);margin-top:10px" onclick="restartDevice()">Restart Device</button>
+    </div>
+  </div>
+
+  <!-- Firmware -->
+  <div class="card" style="padding:0">
+    <div class="collapse-header" onclick="togglePanel(this)" tabindex="0" role="button" aria-expanded="false">
+      <span class="collapse-title">Firmware</span>
+      <span class="collapse-chevron">&#8250;</span>
+    </div>
+    <div class="collapse-body" id="firmwareBody">
+      <div class="setting-row">
+        <label>Installed</label>
+        <span class="setting-value" id="fwInstalled">{{FW_VERSION}}</span>
       </div>
+
+      <!-- Managed update — shown only on official builds with a manifest -->
+      <div id="fwUpdateCheck" style="display:none">
+        <div class="fw-status" id="fwCheckResult" style="display:none"></div>
+        <button class="save-btn" id="fwCheckBtn" onclick="checkForUpdate()">Check for Updates</button>
+        <div id="fwInstallRow" style="display:none">
+          <button class="save-btn" id="fwInstallBtn" onclick="installUpdate()">Install</button>
+          <a id="fwNotesLink" class="fw-notes" href="#" target="_blank" rel="noopener" style="display:none">What's new</a>
+        </div>
+        <p class="setting-caption">Checks the release server for a newer build, then installs it over the air.</p>
+      </div>
+
+      <!-- OTA progress — shared by managed install and manual upload -->
+      <div id="otaProgress" style="display:none;margin-top:10px">
+        <div class="ota-bar-wrap"><div class="ota-bar" id="otaBar"></div></div>
+        <div class="ota-status" id="otaStatus"></div>
+      </div>
+
+      <!-- Manual .bin upload -->
+      <div class="fw-manual">
+        <p class="setting-caption" style="padding-top:0">Manually flash a firmware .bin from your computer.</p>
+        <div class="fw-file-row">
+          <label class="file-btn">Choose File<input type="file" id="fwFile" accept=".bin" hidden onchange="onFwFile()"></label>
+          <span class="fw-file-name" id="fwFileName">No file selected</span>
+        </div>
+        <button class="btn-secondary" id="fwUploadBtn" onclick="uploadFirmware()" disabled>Upload</button>
+      </div>
+
+      <button class="btn-danger" id="fwRestartBtn" onclick="restartDevice()" style="margin-top:14px">Restart Device</button>
     </div>
   </div>
 
@@ -2029,6 +2082,13 @@ input:focus-visible,select:focus-visible{outline-offset:0}
     xhr.send(new Uint8Array(buf));
   }
 
+  // Reflect the chosen file in the styled picker and gate the Upload button.
+  window.onFwFile=function(){
+    var f=$('fwFile').files[0];
+    $('fwFileName').textContent=f?f.name:'No file selected';
+    $('fwUploadBtn').disabled=!f;
+  };
+
   window.uploadFirmware=function(){
     var fileInput=$('fwFile');
     if(!fileInput.files.length){alert('Select a .bin file first');return}
@@ -2067,8 +2127,9 @@ input:focus-visible,select:focus-visible{outline-offset:0}
     return 0;
   }
 
-  // Show the panel only on official builds with a configured manifest URL.
+  // Show the managed-update controls only on builds with a manifest baked in.
   // The indexOf guard keeps it hidden when viewing the raw unsubstituted file.
+  // (Manual .bin upload is always visible, so no else-branch is needed.)
   if(BOARD_FW_ID&&UPDATE_MANIFEST_URL&&BOARD_FW_ID.indexOf('{{')<0){
     $('fwUpdateCheck').style.display='block';
   }
@@ -2076,7 +2137,9 @@ input:focus-visible,select:focus-visible{outline-offset:0}
   window.checkForUpdate=function(){
     var btn=$('fwCheckBtn'),res=$('fwCheckResult'),row=$('fwInstallRow');
     btn.disabled=true;
-    res.textContent='Checking...';
+    res.style.display='block';
+    res.classList.remove('avail');
+    res.textContent='Checking…';
     row.style.display='none';
     fwLatest=null;
     fetch(UPDATE_MANIFEST_URL+'?t='+Date.now()).then(function(r){
@@ -2089,29 +2152,30 @@ input:focus-visible,select:focus-visible{outline-offset:0}
       (man.builds||[]).forEach(function(b){if(b.board===BOARD_FW_ID)build=b});
       if(!build) throw new Error('no build for this board');
       var cur=normVer(RUNNING_FW_VER);
-      if(isCleanVer(cur)&&cmpVer(latest,cur)<=0){
-        res.textContent='Up to date (v'+cur+')';
-        return;
-      }
-      if(!isCleanVer(cur)){
-        res.textContent='Latest release: v'+latest+'. Dev build running — update manually.';
+      var devBuild=!isCleanVer(cur);
+      // Only declare "up to date" when we can compare a clean running version.
+      // Dev builds fall through so a detected release can still be installed.
+      if(!devBuild&&cmpVer(latest,cur)<=0){
+        res.textContent='Up to date · v'+cur;
         return;
       }
       var part=null;
       (build.parts||[]).forEach(function(p){if(p.path&&p.path.indexOf('firmware.bin')>=0)part=p});
       if(!part||!build.sha256){
-        res.textContent='v'+latest+' available — manifest missing install data, update manually.';
+        res.textContent='v'+latest+' available — manifest missing install data, install manually below.';
         return;
       }
       var base=UPDATE_MANIFEST_URL.slice(0,UPDATE_MANIFEST_URL.lastIndexOf('/')+1);
       fwLatest={version:latest,binUrl:base+part.path,sha256:String(build.sha256).toLowerCase()};
-      res.textContent='v'+latest+' available';
+      res.textContent=devBuild?('Release v'+latest+' available (running dev build)'):('Version '+latest+' available');
+      res.classList.add('avail');
       $('fwInstallBtn').textContent='Install v'+latest;
       $('fwInstallBtn').disabled=false;
       var notes=$('fwNotesLink');
-      if(man.release_url&&/^https?:\/\//.test(man.release_url)){notes.href=man.release_url;notes.style.display='inline'}
+      if(man.release_url&&/^https?:\/\//.test(man.release_url)){notes.href=man.release_url;notes.style.display='block'}
       else{notes.style.display='none'}
-      row.style.display='flex';
+      btn.style.display='none';
+      row.style.display='block';
     }).catch(function(e){
       res.textContent='Check failed: '+e.message;
     }).then(function(){btn.disabled=false});
