@@ -18,7 +18,7 @@ Controls Mitsubishi mini split heat pumps via the CN105 serial connector, compat
 
 ## Features
 
-- **Native Apple HomeKit** — no bridge, cloud, or Home Assistant required
+- **Native Apple HomeKit** — pairs directly with Apple Home; no cloud, bridge hardware, or Home Assistant required
 - **Web UI** — real-time control, diagnostics, and log streaming
 - **Browser-based flashing** — no development tools needed ([web flasher](https://serin-labs.github.io/flash))
 - **BLE remote temperature sensor** — Govee, Xiaomi (PVVX), BTHome v2, with auto-detection
@@ -174,7 +174,9 @@ On the NanoC6, a separate blue LED tracks WiFi (on = disconnected, off = connect
 
 Wall-mounted units measure temperature at ceiling height near the return air intake, which usually reads warmer than the living space. A BLE sensor placed lower in the room gives the heat pump a better reading to work with.
 
-The firmware listens for BLE advertisements from a configured sensor. No Bluetooth pairing needed, just power on the sensor. Temperature is forwarded to the heat pump every 20 seconds. If no BLE data arrives for 90 seconds, the heat pump reverts to its internal thermistor.
+The firmware listens for BLE advertisements from a configured sensor. No Bluetooth pairing needed, just power on the sensor. Temperature is forwarded to the heat pump every 20 seconds. If no BLE data arrives before the stale timeout (default 10 minutes, adjustable from 30 seconds to 10 minutes via the Remote Sensor card), the heat pump reverts to its internal thermistor.
+
+The sensor also shows up in Apple Home as its own accessory (separate from the climate tile) reporting temperature, humidity, and battery level. Home shows a low-battery warning when the cell drops to 20% or below.
 
 ### Supported Sensors
 
@@ -212,6 +214,8 @@ curl --data-binary @build/mitsubishi-cn105-homekit.bin \
      http://<device-ip>/upload
 ```
 
+**Check for updates:** The web UI Settings panel has a "Check for Updates" button. Your browser fetches the release manifest, compares it against the running version, and offers a one-click install when a newer build is available (the device itself does no GitHub I/O). This is hidden on custom and untracked builds.
+
 **Rollback protection:** After an OTA update, the device checks that WiFi and CN105 UART still work before confirming the new firmware. If it reboots before that check passes (crash, power loss), it rolls back to the previous firmware.
 
 ## Web UI
@@ -222,17 +226,19 @@ The web UI includes:
 
 - **Mode** — Off/Heat/Cool/Auto/Dry/Fan mode selector (power integrated as Off mode)
 - **Temperature** — set target temperature with 0.5°C precision, +/− step buttons
-- **Dual Setpoints** — independent heat/cool thresholds in Auto mode (persisted to flash)
+- **Dual Setpoints** — independent heat/cool thresholds in Auto mode, set with a single min/max range slider (persisted to flash)
 - **Fan Speed** — Auto, Quiet, Speed 1–4
 - **Vane Control** — vertical and wide vane positions, swing mode
-- **Remote Sensor** — BLE sensor temperature, humidity, battery, signal strength, MAC config, feed toggle (only visible when built with BLE support)
+- **Remote Sensor** — BLE sensor temperature, humidity, battery, signal strength, MAC config, feed toggle, stale timeout (only visible when built with BLE support)
 - **Diagnostics** — compressor frequency, outside temp, runtime hours, error codes, sub mode/stage
 - **HomeKit** — pairing status, controller count, setup code with copy button, QR code for pairing, reset pairing button
 - **Settings** — device name, poll interval (ms), log level, °C/°F toggle
 - **Logs** — real-time log streaming via WebSocket
-- **OTA** — firmware upload with integrity verification (see [OTA Updates](#ota-updates))
+- **OTA** — firmware upload with integrity verification, plus a "Check for Updates" button for one-click upgrades (see [OTA Updates](#ota-updates))
 
 ## HomeKit Details
+
+The device pairs as a HomeKit bridge (the bridge runs on the ESP32 itself, no separate hardware). The air conditioner and the BLE remote sensor appear as two distinct accessories behind a single pairing. Every service reports a connection state, so the Home app marks an accessory "Not Responding" when the CN105 link or BLE sensor drops.
 
 Thermostat mode mappings, FAN/DRY mode switches, fan speed percentages, dual setpoints, vane control, and diagnostics are documented in [HomeKit Details](docs/homekit.md). For an overview of HomeKit features and setup, see the [Serin Labs HomeKit page](https://serin-labs.github.io/homekit/features).
 
