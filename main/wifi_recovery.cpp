@@ -1,4 +1,5 @@
 #include "wifi_recovery.h"
+#include "improv_serial.h"
 #include "dns_server.h"
 #include "settings.h"
 #include "logging.h"
@@ -19,9 +20,11 @@ uint32_t WifiRecovery::safeUptimeMs() {
     return ms ? ms : 1;  // Avoid 0 sentinel
 }
 
-void WifiRecovery::begin(const char *apName) {
+void WifiRecovery::begin(const char *apName, const char *displayName) {
     strncpy(_apName, apName, sizeof(_apName) - 1);
     _apName[sizeof(_apName) - 1] = '\0';
+    strncpy(_displayName, displayName, sizeof(_displayName) - 1);
+    _displayName[sizeof(_displayName) - 1] = '\0';
 
 #if PIN_BUTTON >= 0
     gpio_set_direction((gpio_num_t)WIFI_RESET_BUTTON_PIN, GPIO_MODE_INPUT);
@@ -111,6 +114,7 @@ void WifiRecovery::enableFallbackAP() {
     dns_captive_start(apIP);
 
     _apActive = true;
+    improv_serial_start(_displayName);
 
     char ipStr[16];
     esp_ip4addr_ntoa(&ipInfo.ip, ipStr, sizeof(ipStr));
@@ -124,6 +128,7 @@ void WifiRecovery::disableFallbackAP() {
     dns_captive_stop();
     WifiManager::disableAP();
     _apActive = false;
+    improv_serial_stop();
 }
 
 void WifiRecovery::setChangePending(bool pending) {

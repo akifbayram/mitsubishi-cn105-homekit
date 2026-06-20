@@ -7,6 +7,7 @@ idf_component_register(
          "wifi_manager.cpp"
          "dns_server.cpp"
          "wifi_recovery.cpp"
+         "improv_serial.cpp"
          "web_server.cpp"
          "web_ws.cpp"
          "web_ota.cpp"

@@ -17,7 +17,7 @@ constexpr int8_t   WIFI_RESET_BUTTON_PIN = PIN_BUTTON;  // From board profile (-
 
 class WifiRecovery {
 public:
-    void begin(const char *apName);    // Initialize: store AP name, configure button GPIO
+    void begin(const char *apName, const char *displayName);    // Initialize: store AP name, configure button GPIO
     void loop();                       // Call from main loop: check WiFi, manage AP, handle button
     bool isAPActive() const { return _apActive; }
     void setChangePending(bool pending); // Set/clear the NVS flag
@@ -33,6 +33,7 @@ private:
     static uint32_t safeUptimeMs();    // uptime_ms() that never returns 0 (sentinel avoidance)
 
     char     _apName[32] = "";
+    char     _displayName[32] = "";
     bool     _apActive = false;
     bool     _wasConnected = false;      // Track previous WiFi state
     uint32_t _disconnectedSince = 0;     // uptime_ms() when WiFi was lost (0 = connected)

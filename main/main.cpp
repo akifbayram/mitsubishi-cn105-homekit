@@ -190,7 +190,7 @@ extern "C" void app_main(void)
     }
 
     // ── 11. WiFi recovery (AP fallback + button handler) ─────────────────
-    wifiRecovery.begin(apName);
+    wifiRecovery.begin(apName, displayName);
 
     // In safe mode or if no WiFi credentials, activate recovery AP immediately
     if (safeMode || !WifiManager::isConnected()) {
