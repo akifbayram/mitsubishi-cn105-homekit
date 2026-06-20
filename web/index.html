@@ -722,6 +722,27 @@ input:focus-visible,select:focus-visible{outline-offset:0}
     </div>
   </div>
 
+  <!-- Remote (Dial) -->
+  <div class="card" id="remoteCard">
+    <h3 style="font-size:15px;font-weight:600;margin-bottom:10px">Remote (Dial)</h3>
+    <div class="status-grid" style="margin-bottom:10px">
+      <div class="status-item">
+        <span class="status-label">Status</span>
+        <span id="remoteStatus">—</span>
+      </div>
+      <div class="status-item">
+        <span class="status-label">MAC</span>
+        <span id="remoteMac" style="font-variant-numeric:tabular-nums;font-size:13px">—</span>
+      </div>
+    </div>
+    <div id="remotePairRow" style="display:flex;gap:8px;align-items:center">
+      <button id="pairRemoteBtn" class="btn-primary">Pair a Remote</button>
+      <button id="cancelPairBtn" class="btn-danger" style="display:none">Cancel</button>
+      <span id="pairStatus" style="font-size:13px;color:var(--muted)"></span>
+    </div>
+    <button id="forgetRemoteBtn" class="btn-danger" style="margin-top:8px">Forget Remote</button>
+  </div>
+
   <!-- WiFi -->
   <div class="card" style="padding:0">
     <div class="collapse-header" onclick="togglePanel(this)" tabindex="0" role="button" aria-expanded="false">
@@ -1630,6 +1651,28 @@ input:focus-visible,select:focus-visible{outline-offset:0}
         $('hkButtons').style.display='flex';
       }
     }
+
+    // ── ESP-NOW remote (Dial) status ──────────────────────────────────────
+    if(s.remoteBonded!=null){
+      var rs=$('remoteStatus');
+      if(s.remoteBonded===false){rs.textContent='Not paired';}
+      else{rs.textContent=s.remoteLive?'Connected':'Idle';}
+      $('remoteMac').textContent=s.remoteMac||'—';
+
+      var pairing=s.remotePairing===true;
+      $('pairRemoteBtn').style.display=pairing?'none':'';
+      $('cancelPairBtn').style.display=pairing?'':'none';
+      var ps=$('pairStatus');
+      if(pairing){
+        ps.textContent='Listening… '+(s.remotePairSecs||0)+'s — hold the Dial button';
+      }else if(s.remotePairResult==='timeout'){
+        ps.textContent='No remote found. Put the Dial in pairing mode and retry.';
+      }else if(s.remoteBonded){
+        ps.textContent='';
+      }else{
+        ps.textContent='';
+      }
+    }
   }
 
   function setActive(grpId,val){
@@ -2215,6 +2258,18 @@ input:focus-visible,select:focus-visible{outline-offset:0}
       send({cmd:'hkReset'});
     }
   };
+
+  document.getElementById('forgetRemoteBtn').addEventListener('click',function(){
+    if(confirm('Forget the paired Dial remote? The device will restart.')){
+      send({cmd:'forgetRemote'});
+    }
+  });
+  document.getElementById('pairRemoteBtn').addEventListener('click',function(){
+    send({cmd:'pairRemote'});
+  });
+  document.getElementById('cancelPairBtn').addEventListener('click',function(){
+    send({cmd:'pairCancel'});
+  });
 
   function copyText(text){
     if(navigator.clipboard&&navigator.clipboard.writeText){

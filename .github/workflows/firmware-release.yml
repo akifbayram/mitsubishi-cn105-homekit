@@ -43,14 +43,20 @@ jobs:
 
       - name: Set up ESP-IDF
         uses: espressif/esp-idf-ci-action@v1
+        env:
+          ESPNOW_PMK: ${{ secrets.ESPNOW_PMK }}
         with:
           esp_idf_version: v5.5
           target: ${{ matrix.target }}
           command: |
             # Derive profile macro from name (e.g. nanoc6 -> NANOC6, m5atoms3-lite -> M5ATOMS3_LITE)
             PROFILE=$(echo "${{ matrix.name }}" | tr '[:lower:]' '[:upper:]' | tr '-' '_')
+            # Release builds MUST carry the real brand PMK, never the dev placeholder.
+            if [ "${#ESPNOW_PMK}" -ne 16 ]; then
+              echo "ERROR: ESPNOW_PMK secret missing or not 16 bytes (len=${#ESPNOW_PMK})"; exit 1
+            fi
             idf.py set-target ${{ matrix.target }}
-            idf.py -DBOARD_PROFILE_${PROFILE}=1 build
+            idf.py -DBOARD_PROFILE_${PROFILE}=1 -DESPNOW_PMK="${ESPNOW_PMK}" build
 
       - name: Collect artifacts
         env:

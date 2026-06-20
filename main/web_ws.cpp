@@ -13,6 +13,8 @@
 #ifdef BLE_ENABLE
 #include "ble_sensor.h"
 #endif
+#include "espnow_link.h"
+#include "espnow_bond.h"
 
 static const char *TAG = "web_ws";
 
@@ -313,6 +315,25 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
         vTaskDelay(pdMS_TO_TICKS(500));
         esp_restart();
 
+    } else if (strcmp(cmd, "forgetRemote") == 0) {
+        LOG_WARN("ESP-NOW remote forget requested");
+        sendWsText(httpd_req_to_sockfd(req), "{\"type\":\"info\",\"msg\":\"Forgetting remote...\"}");
+        espnow_bond_clear();
+        vTaskDelay(pdMS_TO_TICKS(500));
+        esp_restart();
+
+    } else if (strcmp(cmd, "pairRemote") == 0) {
+        LOG_INFO("ESP-NOW pairing window requested");
+        espnowLink.startPairing();
+        sendWsText(httpd_req_to_sockfd(req),
+                   "{\"type\":\"info\",\"msg\":\"Listening for a remote...\"}");
+
+    } else if (strcmp(cmd, "pairCancel") == 0) {
+        LOG_INFO("ESP-NOW pairing cancelled");
+        espnowLink.cancelPairing();
+        sendWsText(httpd_req_to_sockfd(req),
+                   "{\"type\":\"info\",\"msg\":\"Pairing cancelled\"}");
+
     } else {
         LOG_WARN("Unknown command: %s", cmd);
     }
@@ -391,7 +412,7 @@ void WebUI::pushState() {
 
     unsigned long wifiUptimeSec = wifiRecovery.getWifiUptimeSeconds();
 
-    char buf[1200];
+    char buf[1300];
     int n = snprintf(buf, sizeof(buf),
         "{\"type\":\"state\""
         ",\"power\":%s"
@@ -467,6 +488,23 @@ void WebUI::pushState() {
         cfg.heatingThreshold,
         cfg.coolingThreshold
     );
+
+    // ── ESP-NOW remote (Dial) status ──────────────────────────────────────
+    {
+        uint8_t rm[6]; espnowLink.getPeerMac(rm);
+        char macStr[18];
+        snprintf(macStr, sizeof(macStr), "%02X:%02X:%02X:%02X:%02X:%02X",
+                 rm[0],rm[1],rm[2],rm[3],rm[4],rm[5]);
+        jsonAppend(buf, sizeof(buf), &n,
+            ",\"remoteBonded\":%s,\"remoteLive\":%s,\"remoteMac\":\"%s\""
+            ",\"remotePairing\":%s,\"remotePairSecs\":%d,\"remotePairResult\":\"%s\"",
+            espnowLink.isBonded() ? "true" : "false",
+            espnowLink.isPeerLive() ? "true" : "false",
+            espnowLink.isBonded() ? macStr : "",
+            espnowLink.pairingActive() ? "true" : "false",
+            espnowLink.pairingSecondsLeft(),
+            espnowLink.pairResult());
+    }
 
     int hkControllers = homekit_get_controller_count();
 

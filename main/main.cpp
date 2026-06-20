@@ -18,6 +18,7 @@
 #include "esp_utils.h"
 #include "status_led.h"
 #include "cn105_protocol.h"
+#include "espnow_link.h"
 #include "wifi_manager.h"
 #include "wifi_recovery.h"
 #include "homekit_setup.h"
@@ -203,7 +204,11 @@ extern "C" void app_main(void)
         cn105.startTask();
     }
 
-    // ── 13. BLE sensor init ──────────────────────────────────────────────
+    // ── 13. ESP-NOW remote (Dial) — safe no-op when unbonded ───────────────────
+    espnowLink.begin(&cn105);
+    espnow_register_console();
+
+    // ── 14. BLE sensor init ──────────────────────────────────────────────
     // BLE is started later, after web UI is up (skipped in safe mode)
 
     // ════════════════════════════════════════════════════════════════════════
@@ -253,6 +258,9 @@ extern "C" void app_main(void)
             homekit_sensor_loop();
 #endif
         }
+
+        // ── ESP-NOW remote — every iter (~10 ms) ────────────────────────
+        espnowLink.loop();
 
         // ── WiFi recovery — 1 Hz ────────────────────────────────────────
         if (now - lastWifiCheck >= 1000) {

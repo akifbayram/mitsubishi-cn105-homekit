@@ -22,6 +22,11 @@ namespace WifiManager {
     /// WiFi signal strength (returns 0 if not connected).
     int8_t getRSSI();
 
+    /// Current STA SSID into out (NUL-terminated; empty if unknown).
+    void getSSID(char* out, size_t len);
+    /// Current STA IPv4 as a dotted string into out (empty if no IP).
+    void getIP(char* out, size_t len);
+
     /// Enable AP mode (STA+AP). Creates AP netif lazily on first call.
     void enableAP(const char* apName, const char* apPassword);
 

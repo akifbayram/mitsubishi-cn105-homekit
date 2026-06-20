@@ -184,6 +184,24 @@ int8_t WifiManager::getRSSI()
     return 0;
 }
 
+void WifiManager::getSSID(char* out, size_t len)
+{
+    if (!out || !len) return;
+    out[0] = '\0';
+    wifi_config_t cfg = {};
+    if (esp_wifi_get_config(WIFI_IF_STA, &cfg) == ESP_OK)
+        strncpy(out, (const char*)cfg.sta.ssid, len - 1);
+}
+
+void WifiManager::getIP(char* out, size_t len)
+{
+    if (!out || !len) return;
+    out[0] = '\0';
+    esp_netif_ip_info_t ip;
+    if (s_staNetif && esp_netif_get_ip_info(s_staNetif, &ip) == ESP_OK)
+        esp_ip4addr_ntoa(&ip.ip, out, len);
+}
+
 void WifiManager::enableAP(const char* apName, const char* apPassword)
 {
     if (s_apActive) return;
