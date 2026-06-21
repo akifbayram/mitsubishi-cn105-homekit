@@ -115,16 +115,57 @@ ESPNOW_STATIC_ASSERT(sizeof(struct espnow_pair_resp_pkt) == 56, pair_resp_size);
 static inline int16_t espnow_c_to_dc(float c)   { return (int16_t)lroundf(c * 10.0f); }
 static inline float   espnow_dc_to_c(int16_t dc) { return (float)dc / 10.0f; }
 
+/* ── Mitsubishi °F<->°C setpoint table ────────────────────────────────────
+ * °F display is NOT linear on these units: the table below MUST stay
+ * byte-identical to F_TABLE in web/index.html so the Dial, the web UI and the
+ * unit all agree on which °C a given °F means (and back). It is deliberately
+ * non-linear — e.g. 71°F=22.0C, 72°F=22.5C — and 19.5C/20.5C have no °F
+ * representation. Using plain linear math here made the Dial send 22.0C for
+ * "72F", which the unit/web read back as 71F. °F range 61..88. */
+#define ESPNOW_FTAB_MIN_F 61
+#define ESPNOW_FTAB_MAX_F 88
+static inline const float *espnow_ftab(void) {
+    static const float tab[ESPNOW_FTAB_MAX_F - ESPNOW_FTAB_MIN_F + 1] = {
+        16.0f,16.5f,17.0f,17.5f,18.0f,18.5f,19.0f,20.0f,21.0f,21.5f,
+        22.0f,22.5f,23.0f,23.5f,24.0f,24.5f,25.0f,25.5f,26.0f,26.5f,
+        27.0f,27.5f,28.0f,28.5f,29.0f,29.5f,30.0f,30.5f,
+    };
+    return tab;
+}
+/* whole °F -> table °C (clamped to range). Mirrors web fToCTable(). */
+static inline float espnow_ftab_f_to_c(int f) {
+    if (f < ESPNOW_FTAB_MIN_F) f = ESPNOW_FTAB_MIN_F;
+    if (f > ESPNOW_FTAB_MAX_F) f = ESPNOW_FTAB_MAX_F;
+    return espnow_ftab()[f - ESPNOW_FTAB_MIN_F];
+}
+/* °C -> nearest table °F (lowest °F wins on a tie). Mirrors web cToFTable(). */
+static inline int espnow_ftab_c_to_f(float c) {
+    const float *tab = espnow_ftab();
+    int bestF = ESPNOW_FTAB_MIN_F;
+    float bestD = 999.0f;
+    for (int i = 0; i <= ESPNOW_FTAB_MAX_F - ESPNOW_FTAB_MIN_F; i++) {
+        float d = fabsf(tab[i] - c);
+        if (d < bestD) { bestD = d; bestF = ESPNOW_FTAB_MIN_F + i; }
+    }
+    return bestF;
+}
+
 /* Convert wire deci-C to an integer for display in the user's unit. */
 static inline int espnow_dc_to_display(int16_t dc, bool use_f) {
     float c = (float)dc / 10.0f;
-    return use_f ? (int)lroundf(c * 9.0f / 5.0f + 32.0f) : (int)lroundf(c);
+    if (!use_f) return (int)lroundf(c);
+    /* Setpoints live within the table's range; measured temps (room/outside)
+     * can fall outside it -> linear fallback, matching web fmtReadingTemp(). */
+    if (c >= 16.0f && c <= 30.5f) return espnow_ftab_c_to_f(c);
+    return (int)lroundf(c * 9.0f / 5.0f + 32.0f);
 }
 
-/* Convert a display-unit integer back to deci-C, snapped to the 0.5 C grid. */
+/* Convert a display-unit integer back to deci-C. For °F this uses the
+ * Mitsubishi table so a setpoint dialed in °F maps to exactly the °C the web
+ * UI/unit mean by that °F; for °C it snaps to the 0.5 C grid. */
 static inline int16_t espnow_display_to_dc(int v, bool use_f) {
-    float c = use_f ? (((float)v - 32.0f) * 5.0f / 9.0f) : (float)v;
-    return (int16_t)((int)lroundf(c * 2.0f) * 5); /* 0.5C steps -> tenths */
+    if (use_f) return (int16_t)lroundf(espnow_ftab_f_to_c(v) * 10.0f);
+    return (int16_t)((int)lroundf((float)v * 2.0f) * 5); /* 0.5C steps -> tenths */
 }
 
 static inline uint8_t espnow_make_state_flags(bool power, bool cn105, bool operating,
