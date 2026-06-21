@@ -312,8 +312,6 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
         LOG_WARN("HomeKit pairing reset requested");
         sendWsText(httpd_req_to_sockfd(req), "{\"type\":\"info\",\"msg\":\"Removing HomeKit pairings...\"}");
         homekit_reset_pairings();
-        vTaskDelay(pdMS_TO_TICKS(500));
-        esp_restart();
 
     } else if (strcmp(cmd, "forgetRemote") == 0) {
         LOG_WARN("ESP-NOW remote forget requested");
