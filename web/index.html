@@ -111,6 +111,11 @@ body{
 .group-label.collapsible.is-open .section-toggle .chev{transform:rotate(90deg);}
 .section-toggle:active{opacity:.55;}
 @media (hover:hover){.section-toggle:hover{color:var(--text);}.section-toggle:hover .chev{color:var(--text2);}}
+/* Live state summary in a collapsible header (dot + short label, visible collapsed or open) */
+.section-summary{display:inline-flex;align-items:center;gap:7px;margin-left:auto;min-width:0;
+  font-size:12px;font-weight:400;letter-spacing:0;text-transform:none;color:var(--text2);white-space:nowrap;}
+.section-summary .status-dot{flex:none;}
+.section-summary .summary-text{overflow:hidden;text-overflow:ellipsis;}
 /* Body wrapper: animate height via grid-template-rows (1fr⇄0fr); degrades to instant under reduced-motion */
 .section-body{display:grid;grid-template-rows:1fr;transition:grid-template-rows .28s ease;}
 .section-body>.section-body-inner{overflow:hidden;min-height:0;}
@@ -208,7 +213,7 @@ input[type=range].slim::-moz-range-thumb{width:22px;height:22px;}
 .inset-row .sub,.inset-block .sub{font-size:12px;color:var(--text2);margin-top:2px;max-width:230px;}
 .inset-block{padding:14px 18px;border-bottom:1px solid var(--sep);}
 .inset-block:last-child{border-bottom:none;}
-.ble-sep{border:none;border-top:1px solid var(--sep);margin:0;}
+.ble-sep{border:none;border-top:1px solid var(--sep);margin:18px 0;}
 .num-chip{display:flex;align-items:baseline;gap:4px;background:var(--surface2);padding:6px 10px;border-radius:11px;}
 .num-chip input{width:52px;border:none;background:transparent;color:var(--text);font-family:ui-monospace,Menlo,monospace;
   font-size:15px;font-weight:500;text-align:right;outline:none;padding:0;}
@@ -235,6 +240,9 @@ input[type=range].slim::-moz-range-thumb{width:22px;height:22px;}
 .scan-info{flex:1;min-width:0;}
 .scan-type{font-size:14px;color:var(--text);font-weight:500;}
 .scan-addr{font-size:11px;color:var(--text2);margin-top:1px;font-family:ui-monospace,Menlo,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.scan-meta{display:flex;flex-direction:column;align-items:flex-end;flex:none;text-align:right;}
+.scan-reading{font-size:14px;color:var(--text);font-weight:600;white-space:nowrap;}
+.scan-sub{font-size:11px;color:var(--text3);margin-top:1px;white-space:nowrap;}
 .signal-bars{display:inline-flex;align-items:flex-end;gap:2px;height:13px;flex:none;}
 .signal-bars i{width:3px;border-radius:1px;background:var(--text3);}
 .signal-bars i:nth-child(1){height:4px;}
@@ -492,16 +500,9 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   </div>
 
   <!-- ===== HEAT PUMP (CN105) ===== -->
-  <h2 class="group-label">Heat Pump · CN105</h2>
+  <h2 class="group-label">Heat Pump · CN105<span class="section-summary"><span class="status-dot idle" id="cn105Dot"></span><span class="summary-text" id="cn105StatusLabel">—</span></span></h2>
   <div class="card">
     <div id="statusBody">
-      <div class="row-head">
-        <div class="row-head-left">
-          <span class="status-dot idle" id="cn105Dot"></span>
-          <span class="card-title" id="cn105StatusLabel">—</span>
-        </div>
-        <span class="row-head-meta" id="cn105Poll"></span>
-      </div>
       <div id="cn105Banner" class="ble-banner warn hidden" style="margin-bottom:14px"></div>
       <div class="status-grid">
         <div class="status-item">
@@ -536,21 +537,28 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
           <span class="status-label">Error</span>
           <span id="errorCode">None</span>
         </div>
+        <div class="status-item">
+          <span class="status-label">Poll</span>
+          <span id="cn105Poll">--</span>
+        </div>
       </div>
     </div>
   </div>
 
   <!-- ===== REMOTE SENSOR (BLE) ===== -->
-  <h2 class="group-label" id="bleGroupLabel">Remote Sensor · BLE</h2>
+  <h2 class="group-label" id="bleGroupLabel">Remote Sensor · BLE<span class="section-summary"><span class="status-dot idle" id="bleDot"></span><span class="summary-text" id="bleStatusLabel"></span></span></h2>
   <div class="card" id="bleCard">
     <div id="bleBody">
-      <div class="row-head">
-        <div class="row-head-left">
-          <span class="status-dot idle" id="bleDot"></span>
-          <span class="card-title">Remote Sensor</span>
-        </div>
-        <span class="row-head-meta" id="bleStatusLabel"></span>
+      <div id="bleBanner" class="ble-banner info hidden" style="margin-bottom:12px"></div>
+      <div class="status-grid cols3" id="bleStatusGrid">
+        <div class="status-item" id="bleTempRow"><span class="status-label">Temp</span><span id="bleTemp">--</span></div>
+        <div class="status-item" id="bleHumRow"><span class="status-label">Humidity</span><span id="bleHum">--</span></div>
+        <div class="status-item" id="bleBattRow"><span class="status-label">Battery</span><span id="bleBatt">--</span></div>
+        <div class="status-item"><span class="status-label">Signal</span><span id="bleRssiVal">--</span></div>
+        <div class="status-item" id="bleAgeItem"><span class="status-label">Updated</span><span id="bleAge">--</span></div>
+        <div class="status-item" id="bleSensorChip"><span class="status-label">Sensor</span><span id="bleSensorType">--</span></div>
       </div>
+      <hr class="ble-sep" id="bleStatusSep">
 
       <div class="inset-row" id="bleEnableRow" style="padding-left:0;padding-right:0;padding-top:0">
         <div><div class="lbl">Enable Remote Sensor</div><div class="sub">Scans for a nearby BLE temperature sensor.</div></div>
@@ -566,20 +574,9 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
           <span class="ios-toggle-slider"></span>
         </label>
       </div>
-      <div class="inset-row" id="bleTimeoutRow" style="padding-left:0;padding-right:0;border-bottom:none">
+      <div class="inset-row" id="bleTimeoutRow" style="padding-left:0;padding-right:0;padding-bottom:0;border-bottom:none">
         <div><div class="lbl">Sensor Timeout</div><div class="sub" id="bleTimeoutHelp">Falls back to the internal sensor if no reading arrives in time.</div></div>
         <div class="num-chip"><input type="number" id="bleTimeoutInput" min="30" max="3600" step="10" aria-label="Sensor timeout in seconds"><span class="unit">sec</span></div>
-      </div>
-
-      <hr class="ble-sep" id="bleSettingsSep">
-      <div id="bleBanner" class="ble-banner info hidden" style="margin-bottom:12px"></div>
-      <div class="status-grid cols3" id="bleStatusGrid">
-        <div class="status-item" id="bleTempRow"><span class="status-label">Temp</span><span id="bleTemp">--</span></div>
-        <div class="status-item" id="bleHumRow"><span class="status-label">Humidity</span><span id="bleHum">--</span></div>
-        <div class="status-item" id="bleBattRow"><span class="status-label">Battery</span><span id="bleBatt">--</span></div>
-        <div class="status-item"><span class="status-label">Signal</span><span id="bleRssiVal">--</span></div>
-        <div class="status-item" id="bleAgeItem"><span class="status-label">Updated</span><span id="bleAge">--</span></div>
-        <div class="status-item" id="bleSensorChip"><span class="status-label">Sensor</span><span id="bleSensorType">--</span></div>
       </div>
 
       <hr class="ble-sep" id="bleConfigSep">
@@ -598,15 +595,8 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   </div>
 
   <!-- ===== HOMEKIT ===== -->
-  <h2 class="group-label">HomeKit</h2>
+  <h2 class="group-label">HomeKit<span class="section-summary"><span class="status-dot idle" id="hkDot"></span><span class="summary-text" id="hkStatusLabel">—</span></span></h2>
   <div class="card" id="homekitBody">
-    <div class="row-head">
-      <div class="row-head-left">
-        <span class="status-dot idle" id="hkDot"></span>
-        <span class="card-title" id="hkStatusLabel">—</span>
-      </div>
-      <span class="row-head-meta" id="hkControllers">--</span>
-    </div>
     <div id="hkBanner" class="ble-banner info hidden" style="margin-bottom:14px"></div>
     <div class="hk-hero">
       <div class="hk-qr"><canvas id="qrCanvas" width="200" height="200" role="img" aria-label="HomeKit pairing QR code"></canvas></div>
@@ -614,6 +604,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
         <span class="card-label">Setup Code</span>
         <div class="hk-code mono" id="hkSetupCode">--</div>
         <div class="hk-hint">Scan in the Home app, or enter this code to pair.</div>
+        <div class="hk-hint" style="margin-top:6px"><span id="hkControllers">--</span></div>
       </div>
     </div>
     <div class="btn-row" id="hkButtons" style="display:none;margin-top:14px">
@@ -626,7 +617,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   </div>
 
   <!-- ===== DIAL REMOTE ===== -->
-  <h2 class="group-label">Accessory · Dial Remote</h2>
+  <h2 class="group-label">Accessory · Dial Remote<span class="section-summary"><span class="status-dot idle" id="remoteDot"></span><span class="summary-text" id="remoteSummary">—</span></span></h2>
   <div class="card" id="remoteCard">
     <div style="display:flex;align-items:center;gap:12px">
       <span class="icon-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="12" cy="12" r="8"/><path d="M12 8v4" stroke-linecap="round"/></svg></span>
@@ -644,7 +635,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   </div>
 
   <!-- ===== NETWORK ===== -->
-  <h2 class="group-label">Network · Wi-Fi</h2>
+  <h2 class="group-label">Network · Wi-Fi<span class="section-summary"><span class="status-dot idle" id="wifiDot"></span><span class="summary-text" id="wifiStatusLabel">--</span></span></h2>
   <div class="card" id="wifiBody">
     <div style="display:flex;align-items:center;justify-content:space-between;gap:11px;padding-bottom:14px;border-bottom:1px solid var(--sep)">
       <div style="display:flex;align-items:center;gap:11px;min-width:0">
@@ -654,7 +645,6 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
           <div class="b">Connected · <span id="wifiUptimeVal">--:--:--</span></div>
         </div>
       </div>
-      <span style="font-size:13px;font-weight:500;flex:none" id="wifiStatusLabel">--</span>
     </div>
     <div class="wifi-scan-hdr">
       <span class="card-label">Networks</span>
@@ -679,7 +669,6 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       <button class="btn-danger" onclick="restartDevice()">Reboot Now</button>
     </div>
     <span id="rssiVal" class="hidden"></span>
-    <span class="hidden"><span class="status-dot idle" id="wifiDot"></span></span>
   </div>
 
   <!-- ===== DEVICE ===== -->
@@ -889,7 +878,11 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
 
     // 2. Replace the header's text with a disclosure button (label + chevron),
     //    keeping the same <h2> node (and its id) so existing refs still resolve.
-    var label=header.textContent;
+    //    An optional .section-summary child (live state, shown even when collapsed)
+    //    is detached first, then re-seated between the label and the chevron.
+    var summary=header.querySelector('.section-summary');
+    if(summary)summary.parentNode.removeChild(summary);
+    var label=header.textContent.trim();
     header.textContent='';
     header.classList.add('collapsible');
     var btn=document.createElement('button');
@@ -901,6 +894,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     span.className='section-toggle-label';
     span.textContent=label;
     btn.appendChild(span);
+    if(summary)btn.appendChild(summary);
     btn.insertAdjacentHTML('beforeend',CHEVRON_SVG);
     header.appendChild(btn);
     this.button=btn;
@@ -1438,24 +1432,26 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       $('bleGroupLabel').style.display='';
       var bleOn=!!s.bleEnabled;
       $('bleEnableToggle').checked=bleOn;
-      // Hide all BLE content when disabled
+      var noMac=!s.bleAddr;
+      // Live readings (chips + their divider) appear only once a sensor is configured
+      var configured=bleOn&&!noMac;
+      // Hide all BLE content when disabled; hide the readings until configured
       var bleGrid=$('bleStatusGrid');
       var bleSep=$('bleConfigSep');
-      var bleSettingSep=$('bleSettingsSep');
+      var bleStatusSep=$('bleStatusSep');
       var bleConfig=$('bleConfigDiv');
       $('bleFeedRow').style.display=bleOn?'':'none';
       $('bleFeedHelp').style.display=bleOn?'':'none';
       $('bleTimeoutRow').style.display=bleOn?'':'none';
       $('bleTimeoutHelp').style.display=bleOn?'':'none';
-      bleGrid.style.display=bleOn?'':'none';
+      bleGrid.style.display=configured?'':'none';
       bleSep.style.display=bleOn?'':'none';
-      if(bleSettingSep)bleSettingSep.style.display=bleOn?'':'none';
+      if(bleStatusSep)bleStatusSep.style.display=configured?'':'none';
       bleConfig.style.display=bleOn?'':'none';
       var bleDot=$('bleDot');
       var banner=$('bleBanner');
       var statusLbl=$('bleStatusLabel');
       var bleBody=$('bleBody');
-      var noMac=!s.bleAddr;
       var waiting=!noMac&&!s.bleActive&&!s.bleStale;
       var stale=!!s.bleStale;
       var feedOff=!s.bleFeed;
@@ -1478,8 +1474,8 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       else if(s.bleBattery>=0&&s.bleBattery<=15){banner.className='ble-banner warn';banner.textContent='Sensor battery low ('+s.bleBattery+'%)';banner.style.display='flex'}
       else{banner.style.display='none'}
 
-      // Dim hero + health when no data available
-      bleBody.classList.toggle('ble-dimmed',noMac||waiting);
+      // Dim the readings while awaiting the first update (configured but no data yet)
+      bleBody.classList.toggle('ble-dimmed',waiting);
 
       // Temperature
       var tempStr=s.bleTemp!=null?fmtReadingTemp(s.bleTemp):'--';
@@ -1550,7 +1546,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     }
     $('statusBody').classList.toggle('ble-dimmed',!s.connected);
     if(s.connected&&s.operating&&s.errorCode==null) cn105Dot.className='status-dot active pulse';
-    $('cn105Poll').textContent=s.pollInterval?('Polling '+s.pollInterval+' ms'):'';
+    $('cn105Poll').textContent=s.pollInterval?(s.pollInterval+' ms'):'--';
 
     rssiVal.textContent=(s.rssi!=null?s.rssi:'--')+' dBm';
     wifiUptimeVal.textContent=s.wifiUptime?fmtUptime(s.wifiUptime):'--:--:--';
@@ -1619,9 +1615,10 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
 
     // ── ESP-NOW remote (Dial) status ──────────────────────────────────────
     if(s.remoteBonded!=null){
-      var rs=$('remoteStatus');
-      if(s.remoteBonded===false){rs.textContent='Not Paired';}
-      else{rs.textContent=s.remoteLive?'Connected':'Idle';}
+      var rs=$('remoteStatus'),rDot=$('remoteDot'),rSum=$('remoteSummary');
+      if(s.remoteBonded===false){rs.textContent='Not Paired';rDot.className='status-dot idle';rSum.textContent='Not Paired';rSum.style.color='var(--text3)';}
+      else if(s.remoteLive){rs.textContent='Connected';rDot.className='status-dot active';rSum.textContent='Connected';rSum.style.color='var(--green)';}
+      else{rs.textContent='Idle';rDot.className='status-dot idle';rSum.textContent='Idle';rSum.style.color='var(--text2)';}
       $('remoteMac').textContent=s.remoteMac||'—';
 
       var pairing=s.remotePairing===true;
@@ -1828,8 +1825,20 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       var tp=document.createElement('div');tp.className='scan-type';tp.textContent=d.type;
       var ad=document.createElement('div');ad.className='scan-addr';ad.textContent=d.addr+(d.name?' \u00b7 '+d.name:'');
       info.appendChild(tp);info.appendChild(ad);
-      var rssiLbl=document.createElement('span');rssiLbl.style.cssText='font-size:11px;color:var(--text3)';rssiLbl.textContent=d.rssi+' dBm';
-      row.appendChild(bars);row.appendChild(info);row.appendChild(rssiLbl);
+      var meta=document.createElement('div');meta.className='scan-meta';
+      var reading=document.createElement('div');reading.className='scan-reading';
+      var sub=document.createElement('div');sub.className='scan-sub';
+      if(d.temp!=null){
+        var tval=(tempUnit==='F')?(d.temp*9/5+32):d.temp;
+        var rd=tval.toFixed(1)+(tempUnit==='F'?'°F':'°C');
+        if(d.hum!=null&&d.hum>=0)rd+=' / '+Math.round(d.hum)+'%';
+        reading.textContent=rd;
+        sub.textContent=d.rssi+' dBm';
+      }else{
+        reading.textContent=d.rssi+' dBm';
+      }
+      meta.appendChild(reading);meta.appendChild(sub);
+      row.appendChild(bars);row.appendChild(info);row.appendChild(meta);
       el.appendChild(row);
     }
     el.style.display='block';
