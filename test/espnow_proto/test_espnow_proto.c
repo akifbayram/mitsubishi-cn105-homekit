@@ -4,9 +4,10 @@
 #include "espnow_proto.h"
 
 static void test_sizes(void) {
-    assert(sizeof(struct espnow_state_pkt) == 71);
+    assert(sizeof(struct espnow_state_pkt) == 12);
+    assert(sizeof(struct espnow_info_pkt)  == 78);
     assert(sizeof(struct espnow_cmd_pkt)   == 8);
-    assert(sizeof(struct espnow_probe_pkt) == 2);
+    assert(sizeof(struct espnow_probe_pkt) == 3);
 }
 
 static void test_temp_celsius_roundtrip(void) {
@@ -83,15 +84,17 @@ static void test_fahrenheit_web_consistency(void) {
 static void test_state_flags(void) {
     uint8_t f = espnow_make_state_flags(
         /*power*/true, /*cn105*/false, /*operating*/true, /*wifi*/true,
-        /*hk*/false, /*useF*/true, /*outValid*/false, /*runValid*/true);
+        /*hk*/false, /*useF*/true);
     assert(f & ESPNOW_SF_POWER);
     assert(!(f & ESPNOW_SF_CN105));
     assert(f & ESPNOW_SF_OPERATING);
     assert(f & ESPNOW_SF_WIFI);
     assert(!(f & ESPNOW_SF_HK));
     assert(f & ESPNOW_SF_USE_F);
-    assert(!(f & ESPNOW_SF_OUT_VALID));
-    assert(f & ESPNOW_SF_RUNTIME_VALID);
+
+    uint8_t i = espnow_make_info_flags(/*out*/false, /*runtime*/true);
+    assert(!(i & ESPNOW_IF_OUT_VALID));
+    assert(i & ESPNOW_IF_RUNTIME_VALID);
 }
 
 static void test_parse_mac(void) {
@@ -114,15 +117,34 @@ static void test_struct_wire_roundtrip(void) {
     struct espnow_state_pkt p;
     memset(&p, 0, sizeof(p));
     p.type = ESPNOW_PKT_STATE; p.version = ESPNOW_PROTO_VERSION;
-    p.mode = 0x03; p.set_dc = 240; p.room_dc = 231;
-    strcpy((char*)p.ssid, "homenet");
+    p.mode = 0x03; p.set_dc = 240; p.room_dc = 231; p.error_code = 0x80;
     uint8_t buf[sizeof(p)];
-    memcpy(buf, &p, sizeof(p));            /* encode == raw copy (LE both ends) */
+    memcpy(buf, &p, sizeof(p));
     struct espnow_state_pkt q;
-    memcpy(&q, buf, sizeof(q));            /* decode */
+    memcpy(&q, buf, sizeof(q));
     assert(q.type == ESPNOW_PKT_STATE && q.version == ESPNOW_PROTO_VERSION);
-    assert(q.set_dc == 240 && q.room_dc == 231 && q.mode == 0x03);
+    assert(q.set_dc == 240 && q.room_dc == 231 && q.mode == 0x03 && q.error_code == 0x80);
+}
+
+static void test_info_wire_roundtrip(void) {
+    struct espnow_info_pkt p;
+    memset(&p, 0, sizeof(p));
+    p.type = ESPNOW_PKT_INFO; p.version = ESPNOW_PROTO_VERSION;
+    p.iflags = espnow_make_info_flags(true, true);
+    p.compressor_hz = 42; p.outside_dc = 175; p.runtime_h = 1234; p.wifi_rssi = -58;
+    strcpy((char*)p.ssid, "homenet");
+    strcpy((char*)p.ip, "192.168.1.50");
+    strcpy((char*)p.hk_code, "548-94-669");
+    uint8_t buf[sizeof(p)];
+    memcpy(buf, &p, sizeof(p));
+    struct espnow_info_pkt q;
+    memcpy(&q, buf, sizeof(q));
+    assert(q.type == ESPNOW_PKT_INFO && q.compressor_hz == 42);
+    assert(q.outside_dc == 175 && q.runtime_h == 1234 && q.wifi_rssi == -58);
+    assert((q.iflags & ESPNOW_IF_OUT_VALID) && (q.iflags & ESPNOW_IF_RUNTIME_VALID));
     assert(strcmp((char*)q.ssid, "homenet") == 0);
+    assert(strcmp((char*)q.ip, "192.168.1.50") == 0);
+    assert(strcmp((char*)q.hk_code, "548-94-669") == 0);
 }
 
 static void test_pair_packets(void) {
@@ -168,6 +190,7 @@ int main(void) {
     test_fahrenheit_web_consistency();
     test_state_flags();
     test_struct_wire_roundtrip();
+    test_info_wire_roundtrip();
     test_parse_mac();
     test_parse_hex16();
     test_pair_packets();

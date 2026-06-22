@@ -28,6 +28,9 @@ static const char *TAG = "espnow_link";
 #endif
 
 #define ESPNOW_PAIR_WINDOW_MS 120000
+#define STATE_MIN_INTERVAL  250     // ms: floor between event-driven STATEs
+#define STATE_HEARTBEAT_MS  10000   // ms: max gap between STATEs while peer live
+#define INFO_MIN_INTERVAL   2000    // ms: INFO cadence while the Dial asks (want_info)
 
 static const uint8_t BCAST[6] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
 
@@ -41,6 +44,7 @@ static portMUX_TYPE           s_cmdMux = portMUX_INITIALIZER_UNLOCKED;
 static volatile bool          s_haveCmd = false;
 static struct espnow_cmd_pkt  s_cmd;
 static volatile uint32_t      s_lastProbeMs = 0;
+static volatile uint8_t       s_wantInfo = 0;
 
 // Pairing packets handed from the RX callback to pairLoop() (main task) so the
 // WiFi-task callback never runs crypto / esp_now_send / esp_restart (ESP-NOW
@@ -66,7 +70,10 @@ static void onRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len
     if (memcmp(info->src_addr, peer, 6) != 0) return;            // allow-list
     if (memcmp(info->des_addr, s_ownMac, 6) != 0) return;        // unicast only
     switch (data[0]) {
-        case ESPNOW_PKT_PROBE: s_lastProbeMs = uptime_ms(); break;
+        case ESPNOW_PKT_PROBE:
+            s_lastProbeMs = uptime_ms();
+            if (len >= (int)sizeof(struct espnow_probe_pkt)) s_wantInfo = data[2];
+            break;
         case ESPNOW_PKT_CMD:
             if (len == (int)sizeof(struct espnow_cmd_pkt)) {
                 portENTER_CRITICAL(&s_cmdMux);
@@ -121,19 +128,27 @@ void EspnowLink::buildState(struct espnow_state_pkt *p) {
     p->type = ESPNOW_PKT_STATE; p->version = ESPNOW_PROTO_VERSION;
     p->flags = espnow_make_state_flags(
         st.power, _ctrl->isConnected(), st.operating, WifiManager::isConnected(),
-        homekit_get_controller_count() > 0, settings.get().useFahrenheit,
-        st.outsideTempValid, st.runtimeValid);
+        homekit_get_controller_count() > 0, settings.get().useFahrenheit);
     p->mode = st.mode; p->fan = st.fanSpeed; p->vane = st.vane; p->wide_vane = st.wideVane;
-    p->compressor_hz = st.compressorHz; p->sub_mode = st.subMode;
-    p->stage = st.stage; p->auto_sub_mode = st.autoSubMode; p->error_code = st.errorCode;
+    p->error_code = st.errorCode;
     p->room_dc = espnow_c_to_dc(st.roomTemp);
     p->set_dc  = espnow_c_to_dc(st.targetTemp);
+}
+
+void EspnowLink::buildInfo(struct espnow_info_pkt *p) {
+    memset(p, 0, sizeof(*p));
+    const CN105State st = _ctrl->getEffectiveState();
+    p->type = ESPNOW_PKT_INFO; p->version = ESPNOW_PROTO_VERSION;
+    p->iflags = espnow_make_info_flags(st.outsideTempValid, st.runtimeValid);
+    p->compressor_hz = st.compressorHz;
+    p->sub_mode = st.subMode; p->stage = st.stage; p->auto_sub_mode = st.autoSubMode;
     p->outside_dc = espnow_c_to_dc(st.outsideTemp);
     p->runtime_h = (uint16_t)st.runtimeHours;
     p->hk_paired = (uint8_t)homekit_get_controller_count();
     p->wifi_rssi = WifiManager::getRSSI();
     WifiManager::getSSID((char*)p->ssid, sizeof(p->ssid));
     WifiManager::getIP((char*)p->ip, sizeof(p->ip));
+    strncpy((char*)p->hk_code, homekit_get_setup_code(), sizeof(p->hk_code) - 1);
 }
 
 void EspnowLink::startPairing() {
@@ -277,17 +292,33 @@ void EspnowLink::loop() {
         if (c.mask & ESPNOW_CM_MODE)  _ctrl->setMode(c.mode);
         if (c.mask & ESPNOW_CM_FAN)   _ctrl->setFanSpeed(c.fan);
         if (c.mask & ESPNOW_CM_TEMP)  _ctrl->setTargetTemp(espnow_dc_to_c(c.set_dc));
-        struct espnow_state_pkt p; buildState(&p);
-        esp_now_send(_peer, (const uint8_t*)&p, sizeof(p));
+        buildState(&_lastState);
+        esp_now_send(_peer, (const uint8_t*)&_lastState, sizeof(_lastState));
         _lastStateTxMs = uptime_ms();
     }
 
-    // Stream STATE at ~1Hz while the Dial is live.
     uint32_t now = uptime_ms();
-    if (isPeerLive() && now - _lastStateTxMs >= 1000) {
-        struct espnow_state_pkt p; buildState(&p);
+    bool live = isPeerLive();
+    if (!live) { _peerWasLive = false; return; }
+
+    // Build current slim STATE; send if (a) the Dial just appeared (initial sync),
+    // (b) a field changed and we're past the min-interval, or (c) the heartbeat is due.
+    struct espnow_state_pkt p; buildState(&p);
+    bool firstSinceLive = !_peerWasLive;
+    _peerWasLive = true;
+    bool changed = memcmp(&p, &_lastState, sizeof(p)) != 0;
+    if (firstSinceLive ||
+        (changed && now - _lastStateTxMs >= STATE_MIN_INTERVAL) ||
+        (now - _lastStateTxMs >= STATE_HEARTBEAT_MS)) {
         esp_now_send(_peer, (const uint8_t*)&p, sizeof(p));
-        _lastStateTxMs = now;
+        _lastState = p; _lastStateTxMs = now;
+    }
+
+    // INFO is pull-only: emit while the Dial reports a cold screen, rate-limited.
+    if (s_wantInfo && now - _lastInfoTxMs >= INFO_MIN_INTERVAL) {
+        struct espnow_info_pkt info; buildInfo(&info);
+        esp_now_send(_peer, (const uint8_t*)&info, sizeof(info));
+        _lastInfoTxMs = now;
     }
 }
 

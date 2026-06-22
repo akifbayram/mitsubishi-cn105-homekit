@@ -1,6 +1,7 @@
 #pragma once
 #include "ble_config.h"   // brings nothing harmful; keeps include order consistent
 #include <cstdint>
+#include "espnow_proto.h"
 
 #ifndef ESPNOW_REMOTE_ENABLE
 #define ESPNOW_REMOTE_ENABLE 1
@@ -27,10 +28,14 @@ private:
     void ensureEspnowInit();
     void pairLoop();
     void buildState(struct espnow_state_pkt *p);
+    void buildInfo(struct espnow_info_pkt *p);
     CN105Controller *_ctrl = nullptr;
     bool     _bonded = false;
     uint8_t  _peer[6] = {0};
     uint32_t _lastStateTxMs = 0;
+    uint32_t _lastInfoTxMs = 0;
+    struct espnow_state_pkt _lastState{};
+    bool     _peerWasLive = false;
     PairState _pair = PAIR_OFF;
     bool      _espnowReady = false;
     uint32_t  _pairStartMs = 0;

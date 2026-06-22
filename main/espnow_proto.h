@@ -18,7 +18,7 @@
 extern "C" {
 #endif
 
-#define ESPNOW_PROTO_VERSION 1
+#define ESPNOW_PROTO_VERSION 2
 
 enum espnow_pkt_type {
     ESPNOW_PKT_STATE = 1,
@@ -26,18 +26,24 @@ enum espnow_pkt_type {
     ESPNOW_PKT_PROBE = 3,
     ESPNOW_PKT_PAIR_REQ  = 4,   /* dial -> broadcast */
     ESPNOW_PKT_PAIR_RESP = 5,   /* unit -> broadcast, only while window open */
+    ESPNOW_PKT_INFO  = 6,       /* unit -> dial, pull-only (PROBE want_info) */
 };
 
-/* STATE flag bits */
+/* STATE flag bits — home-dial status only */
 enum {
-    ESPNOW_SF_POWER         = 1u << 0,
-    ESPNOW_SF_CN105         = 1u << 1,
-    ESPNOW_SF_OPERATING     = 1u << 2,
-    ESPNOW_SF_WIFI          = 1u << 3,
-    ESPNOW_SF_HK            = 1u << 4,
-    ESPNOW_SF_USE_F         = 1u << 5,
-    ESPNOW_SF_OUT_VALID     = 1u << 6,
-    ESPNOW_SF_RUNTIME_VALID = 1u << 7,
+    ESPNOW_SF_POWER     = 1u << 0,
+    ESPNOW_SF_CN105     = 1u << 1,
+    ESPNOW_SF_OPERATING = 1u << 2,
+    ESPNOW_SF_WIFI      = 1u << 3,
+    ESPNOW_SF_HK        = 1u << 4,
+    ESPNOW_SF_USE_F     = 1u << 5,
+    /* bits 6,7 reserved (were OUT_VALID/RUNTIME_VALID; now in INFO iflags) */
+};
+
+/* INFO flag bits — validity travels with the data in espnow_info_pkt */
+enum {
+    ESPNOW_IF_OUT_VALID     = 1u << 0,
+    ESPNOW_IF_RUNTIME_VALID = 1u << 1,
 };
 
 /* CMD field-mask bits */
@@ -56,19 +62,26 @@ struct __attribute__((packed)) espnow_state_pkt {
     uint8_t  fan;           /* CN105 fan byte */
     uint8_t  vane;          /* CN105 vane byte */
     uint8_t  wide_vane;     /* CN105 wide vane byte */
-    uint8_t  compressor_hz;  /* raw CN105 byte; 0-255 Hz */
+    uint8_t  error_code;    /* 0x80 = normal; drives home-dial fault alert */
+    int16_t  room_dc;       /* room temp, deci-C */
+    int16_t  set_dc;        /* setpoint, deci-C */
+};
+
+struct __attribute__((packed)) espnow_info_pkt {
+    uint8_t  type;          /* ESPNOW_PKT_INFO */
+    uint8_t  version;       /* ESPNOW_PROTO_VERSION */
+    uint8_t  iflags;        /* ESPNOW_IF_* */
+    uint8_t  compressor_hz;
     uint8_t  sub_mode;
     uint8_t  stage;
     uint8_t  auto_sub_mode;
-    uint8_t  error_code;    /* 0x80 = normal */
-    int16_t  room_dc;       /* room temp, deci-C */
-    int16_t  set_dc;        /* setpoint, deci-C */
     int16_t  outside_dc;    /* outside temp, deci-C */
     uint16_t runtime_h;     /* runtime hours (whole) */
     uint8_t  hk_paired;     /* paired controller count */
     int8_t   wifi_rssi;
     uint8_t  ssid[33];      /* null-terminated */
     uint8_t  ip[16];        /* "255.255.255.255\0" */
+    uint8_t  hk_code[16];   /* "XXX-XX-XXX\0" */
 };
 
 struct __attribute__((packed)) espnow_cmd_pkt {
@@ -84,6 +97,7 @@ struct __attribute__((packed)) espnow_cmd_pkt {
 struct __attribute__((packed)) espnow_probe_pkt {
     uint8_t type;           /* ESPNOW_PKT_PROBE */
     uint8_t version;        /* ESPNOW_PROTO_VERSION */
+    uint8_t want_info;      /* 1 while dial is on SYSTEM/HOMEKIT/WIFI screen */
 };
 
 struct __attribute__((packed)) espnow_pair_req_pkt {
@@ -104,9 +118,10 @@ struct __attribute__((packed)) espnow_pair_resp_pkt {
 
 /* sizeof guards — both copies of this header must agree */
 #define ESPNOW_STATIC_ASSERT(c, m) typedef char espnow_sa_##m[(c) ? 1 : -1]
-ESPNOW_STATIC_ASSERT(sizeof(struct espnow_state_pkt) == 71, state_size);
+ESPNOW_STATIC_ASSERT(sizeof(struct espnow_state_pkt) == 12, state_size);
+ESPNOW_STATIC_ASSERT(sizeof(struct espnow_info_pkt)  == 78, info_size);
 ESPNOW_STATIC_ASSERT(sizeof(struct espnow_cmd_pkt)   == 8,  cmd_size);
-ESPNOW_STATIC_ASSERT(sizeof(struct espnow_probe_pkt) == 2,  probe_size);
+ESPNOW_STATIC_ASSERT(sizeof(struct espnow_probe_pkt) == 3,  probe_size);
 ESPNOW_STATIC_ASSERT(sizeof(struct espnow_pair_req_pkt)  == 56, pair_req_size);
 ESPNOW_STATIC_ASSERT(sizeof(struct espnow_pair_resp_pkt) == 56, pair_resp_size);
 
@@ -169,17 +184,21 @@ static inline int16_t espnow_display_to_dc(int v, bool use_f) {
 }
 
 static inline uint8_t espnow_make_state_flags(bool power, bool cn105, bool operating,
-                                              bool wifi, bool hk, bool use_f,
-                                              bool out_valid, bool runtime_valid) {
+                                              bool wifi, bool hk, bool use_f) {
     uint8_t f = 0;
-    if (power)         f |= ESPNOW_SF_POWER;
-    if (cn105)         f |= ESPNOW_SF_CN105;
-    if (operating)     f |= ESPNOW_SF_OPERATING;
-    if (wifi)          f |= ESPNOW_SF_WIFI;
-    if (hk)            f |= ESPNOW_SF_HK;
-    if (use_f)         f |= ESPNOW_SF_USE_F;
-    if (out_valid)     f |= ESPNOW_SF_OUT_VALID;
-    if (runtime_valid) f |= ESPNOW_SF_RUNTIME_VALID;
+    if (power)     f |= ESPNOW_SF_POWER;
+    if (cn105)     f |= ESPNOW_SF_CN105;
+    if (operating) f |= ESPNOW_SF_OPERATING;
+    if (wifi)      f |= ESPNOW_SF_WIFI;
+    if (hk)        f |= ESPNOW_SF_HK;
+    if (use_f)     f |= ESPNOW_SF_USE_F;
+    return f;
+}
+
+static inline uint8_t espnow_make_info_flags(bool out_valid, bool runtime_valid) {
+    uint8_t f = 0;
+    if (out_valid)     f |= ESPNOW_IF_OUT_VALID;
+    if (runtime_valid) f |= ESPNOW_IF_RUNTIME_VALID;
     return f;
 }
 
