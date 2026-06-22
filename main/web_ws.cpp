@@ -614,18 +614,21 @@ void WebUI::pushDiscoveryResults(bool done) {
     int count = 0;
     const BleDiscoveredDevice* devs = BleSensor::discoveryResults(count);
 
-    char buf[1024];
+    char buf[1536];
     int n = snprintf(buf, sizeof(buf), "{\"type\":\"bleScanResults\",\"done\":%s,\"devices\":[",
                      done ? "true" : "false");
 
     for (int i = 0; i < count; i++) {
-        if (n >= (int)sizeof(buf) - 100) break;  // Reserve space for entry + closing
+        if (n >= (int)sizeof(buf) - 160) break;  // Reserve space for entry + closing
         char escName[50];
         jsonEscape(devs[i].name, escName, sizeof(escName));
+        char tStr[8] = "null", hStr[8] = "null";
+        if (!std::isnan(devs[i].temperature)) snprintf(tStr, sizeof(tStr), "%.1f", devs[i].temperature);
+        if (!std::isnan(devs[i].humidity))    snprintf(hStr, sizeof(hStr), "%.0f", devs[i].humidity);
         jsonAppend(buf, sizeof(buf), &n,
-            "%s{\"addr\":\"%s\",\"name\":\"%s\",\"type\":\"%s\",\"rssi\":%d}",
+            "%s{\"addr\":\"%s\",\"name\":\"%s\",\"type\":\"%s\",\"rssi\":%d,\"temp\":%s,\"hum\":%s}",
             i > 0 ? "," : "",
-            devs[i].addr, escName, devs[i].type, devs[i].rssi);
+            devs[i].addr, escName, devs[i].type, devs[i].rssi, tStr, hStr);
     }
 
     jsonAppend(buf, sizeof(buf), &n, "]}");

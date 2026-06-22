@@ -89,12 +89,19 @@ static void updateTargetLower() {
              s_targetAddr[3], s_targetAddr[4], s_targetAddr[5]);
 }
 
+// ── Decoded sensor reading — filled by decoders (NAN/-1 mean "not present") ──
+struct SensorReading {
+    float  temp = NAN;
+    float  hum  = NAN;
+    int8_t batt = -1;
+};
+
 // ══════════════════════════════════════════════════════════════════════════════
 // Decoders — all compiled in, dispatched at runtime
 // ══════════════════════════════════════════════════════════════════════════════
 
 // Shared Govee 3-byte combined temp+hum decoder (V3 offset 3, V1 offset 4)
-static bool decodeGoveeCombined(const uint8_t* data, uint8_t offset) {
+static bool decodeGoveeCombined(const uint8_t* data, uint8_t offset, SensorReading& out) {
     int32_t val = ((int32_t)data[offset] << 16)
                 | ((int32_t)data[offset+1] << 8)
                 | data[offset+2];
@@ -104,61 +111,61 @@ static bool decodeGoveeCombined(const uint8_t* data, uint8_t offset) {
     if (negative) temp = -temp;
     float hum = (float)(val % 1000) / 10.0f;
     if (!validTemp(temp) || !validHum(hum)) return false;
-    s_temperature = temp;
-    s_humidity = hum;
+    out.temp = temp;
+    out.hum = hum;
     return true;
 }
 
 // Govee H5072/H5075 — 3-byte combined temp+hum encoding
 // Manufacturer data 0xEC88: [0-1]=company ID, [2]=padding, [3-5]=combined, [6]=battery|error
-static bool decodeGoveeV3(const uint8_t* mfr, uint8_t len) {
+static bool decodeGoveeV3(const uint8_t* mfr, uint8_t len, SensorReading& out) {
     if (len < 7 || (mfr[6] & 0x80)) return false;
-    if (!decodeGoveeCombined(mfr, 3)) return false;
-    s_battery = (int8_t)(mfr[6] & 0x7F);
+    if (!decodeGoveeCombined(mfr, 3, out)) return false;
+    out.batt = (int8_t)(mfr[6] & 0x7F);
     return true;
 }
 
 // Govee H5074/H5051/H5052/H5071 — little-endian temp/hum
 // Manufacturer data 0xEC88: [0-1]=company ID, [2]=reserved, [3-4]=temp LE, [5-6]=hum LE, [7]=battery
-static bool decodeGoveeV2(const uint8_t* mfr, uint8_t len) {
+static bool decodeGoveeV2(const uint8_t* mfr, uint8_t len, SensorReading& out) {
     if (len < 8) return false;
     int16_t rawTemp = (int16_t)(mfr[3] | (mfr[4] << 8));
     uint16_t rawHum = (uint16_t)(mfr[5] | (mfr[6] << 8));
     float temp = (float)rawTemp / 100.0f;
     float hum = (float)rawHum / 100.0f;
     if (!validTemp(temp) || !validHum(hum)) return false;
-    s_temperature = temp;
-    s_humidity = hum;
-    if (len >= 8 && validBatt((int8_t)mfr[7])) s_battery = (int8_t)mfr[7];
+    out.temp = temp;
+    out.hum = hum;
+    if (len >= 8 && validBatt((int8_t)mfr[7])) out.batt = (int8_t)mfr[7];
     return true;
 }
 
 // Govee H510x/H5174/H5177/GV5179 — 3-byte combined at offset 4
 // Manufacturer data 0x0001: [0-1]=company ID, [2-3]=header, [4-6]=combined, [7]=battery|error
-static bool decodeGoveeV1(const uint8_t* mfr, uint8_t len) {
+static bool decodeGoveeV1(const uint8_t* mfr, uint8_t len, SensorReading& out) {
     if (len < 8 || (mfr[7] & 0x80)) return false;
-    if (!decodeGoveeCombined(mfr, 4)) return false;
-    s_battery = (int8_t)(mfr[7] & 0x7F);
+    if (!decodeGoveeCombined(mfr, 4, out)) return false;
+    out.batt = (int8_t)(mfr[7] & 0x7F);
     return true;
 }
 
 // Xiaomi LYWSD03MMC / CGG1 with PVVX custom firmware
 // Service data UUID 0x181A: [0-5]=MAC, [6-7]=temp LE, [8-9]=hum LE, ..., [12]=battery
-static bool decodePVVX(const uint8_t* svc, uint8_t len) {
+static bool decodePVVX(const uint8_t* svc, uint8_t len, SensorReading& out) {
     if (len < 13) return false;
     int16_t rawTemp = (int16_t)(svc[6] | (svc[7] << 8));
     uint16_t rawHum = (uint16_t)(svc[8] | (svc[9] << 8));
     float temp = (float)rawTemp / 100.0f;
     float hum = (float)rawHum / 100.0f;
     if (!validTemp(temp) || !validHum(hum)) return false;
-    s_temperature = temp;
-    s_humidity = hum;
-    if (validBatt((int8_t)svc[12])) s_battery = (int8_t)svc[12];
+    out.temp = temp;
+    out.hum = hum;
+    if (validBatt((int8_t)svc[12])) out.batt = (int8_t)svc[12];
     return true;
 }
 
 // BTHome v2 — Service data UUID 0xFCD2, TLV objects
-static bool decodeBTHome(const uint8_t* svc, uint8_t len) {
+static bool decodeBTHome(const uint8_t* svc, uint8_t len, SensorReading& out) {
     if (len < 3) return false;
     uint8_t devInfo = svc[0];
     if ((devInfo & 0x01) != 0) return false;  // Encrypted
@@ -172,7 +179,7 @@ static bool decodeBTHome(const uint8_t* svc, uint8_t len) {
                 if (i + 2 > len) return gotTemp;
                 int16_t raw = (int16_t)(svc[i] | (svc[i+1] << 8));
                 float t = (float)raw / 100.0f;
-                if (validTemp(t)) { s_temperature = t; gotTemp = true; }
+                if (validTemp(t)) { out.temp = t; gotTemp = true; }
                 i += 2;
                 break;
             }
@@ -180,13 +187,13 @@ static bool decodeBTHome(const uint8_t* svc, uint8_t len) {
                 if (i + 2 > len) return gotTemp;
                 uint16_t raw = (uint16_t)(svc[i] | (svc[i+1] << 8));
                 float h = (float)raw / 100.0f;
-                if (validHum(h)) s_humidity = h;
+                if (validHum(h)) out.hum = h;
                 i += 2;
                 break;
             }
             case 0x01: {
                 if (i + 1 > len) return gotTemp;
-                if (validBatt((int8_t)svc[i])) s_battery = (int8_t)svc[i];
+                if (validBatt((int8_t)svc[i])) out.batt = (int8_t)svc[i];
                 i += 1;
                 break;
             }
@@ -203,23 +210,23 @@ static bool decodeBTHome(const uint8_t* svc, uint8_t len) {
 
 struct DecodeResult { bool decoded; const char* type; };
 
-static DecodeResult tryDecode(uint8_t fieldType, const uint8_t* data, uint8_t len) {
+static DecodeResult tryDecode(uint8_t fieldType, const uint8_t* data, uint8_t len, SensorReading& out) {
     if (fieldType == 0xFF && len >= 2) {
         uint16_t cid = data[0] | (data[1] << 8);
         if (cid == 0xEC88) {
-            if (len <= 7 && decodeGoveeV3(data, len))
+            if (len <= 7 && decodeGoveeV3(data, len, out))
                 return {true, "Govee V3"};
-            if (len > 7 && decodeGoveeV2(data, len))
+            if (len > 7 && decodeGoveeV2(data, len, out))
                 return {true, "Govee V2"};
         }
-        if (cid == 0x0001 && len >= 8 && decodeGoveeV1(data, len))
+        if (cid == 0x0001 && len >= 8 && decodeGoveeV1(data, len, out))
             return {true, "Govee V1"};
     }
     if (fieldType == 0x16 && len >= 2) {
         uint16_t uuid = data[0] | (data[1] << 8);
-        if (uuid == 0x181A && len >= 15 && decodePVVX(data + 2, len - 2))
+        if (uuid == 0x181A && len >= 15 && decodePVVX(data + 2, len - 2, out))
             return {true, "PVVX"};
-        if (uuid == 0xFCD2 && decodeBTHome(data + 2, len - 2))
+        if (uuid == 0xFCD2 && decodeBTHome(data + 2, len - 2, out))
             return {true, "BTHome v2"};
     }
     return {false, nullptr};
@@ -229,42 +236,26 @@ static DecodeResult tryDecode(uint8_t fieldType, const uint8_t* data, uint8_t le
 // Discovery helpers
 // ══════════════════════════════════════════════════════════════════════════════
 
-// Identify sensor type from raw advertisement without decoding values
-static const char* identifySensorType(const uint8_t* adv, size_t totalLen) {
+// Walk every AD field, decoding sensor values into `out`. Returns the detected
+// sensor type (string literal), or nullptr if no known sensor matched. Used by
+// both the live feed and discovery, so the two paths can never disagree on what
+// counts as a recognised sensor.
+static const char* decodeAdvertisement(const uint8_t* adv, size_t totalLen, SensorReading& out) {
+    const char* type = nullptr;
     uint8_t i = 0;
     while (i + 1 < totalLen) {
         uint8_t fieldLen = adv[i];
         if (fieldLen == 0 || i + fieldLen >= totalLen) break;
-        uint8_t fieldType = adv[i + 1];
-        const uint8_t* fd = &adv[i + 2];
-        uint8_t dl = fieldLen - 1;
-
-        if (fieldType == 0xFF && dl >= 2) {
-            uint16_t cid = fd[0] | (fd[1] << 8);
-            if (cid == 0xEC88 && dl >= 7)
-                return dl <= 7 ? "Govee V3" : "Govee V2";
-            if (cid == 0x0001 && dl >= 8 && !(fd[7] & 0x80)) {
-                int32_t val = ((int32_t)fd[4] << 16) | ((int32_t)fd[5] << 8) | fd[6];
-                if (val & 0x800000) val ^= 0x800000;
-                float t = (float)(val / 1000) / 10.0f;
-                if (t >= -40.0f && t <= 80.0f) return "Govee V1";
-            }
-        }
-
-        if (fieldType == 0x16 && dl >= 2) {
-            uint16_t uuid = fd[0] | (fd[1] << 8);
-            if (uuid == 0x181A && dl >= 15) return "PVVX";
-            if (uuid == 0xFCD2 && dl >= 3) return "BTHome v2";
-        }
-
+        DecodeResult r = tryDecode(adv[i + 1], &adv[i + 2], fieldLen - 1, out);
+        if (r.decoded) type = r.type;
         i += fieldLen + 1;
     }
-    return nullptr;
+    return type;
 }
 
 // Add a discovered device to the results array (deduplicate by MAC)
 static void addDiscoveryResult(const char* addrLower, const char* name,
-                               const char* type, int rssi) {
+                               const char* type, int rssi, float temp, float hum) {
     // Convert to uppercase for display
     char addr[18];
     strncpy(addr, addrLower, 17);
@@ -273,10 +264,12 @@ static void addDiscoveryResult(const char* addrLower, const char* name,
         if (addr[j] >= 'a' && addr[j] <= 'f') addr[j] -= 32;
     }
 
-    // Update RSSI if already seen
+    // Already seen — refresh RSSI and the latest valid reading
     for (int j = 0; j < s_discoveryCount; j++) {
         if (strcmp(s_discovered[j].addr, addr) == 0) {
             s_discovered[j].rssi = rssi;
+            if (!std::isnan(temp)) s_discovered[j].temperature = temp;
+            if (!std::isnan(hum))  s_discovered[j].humidity    = hum;
             return;
         }
     }
@@ -288,6 +281,8 @@ static void addDiscoveryResult(const char* addrLower, const char* name,
         snprintf(d.name, sizeof(d.name), "%s", name ? name : "");
         d.type = type;
         d.rssi = rssi;
+        d.temperature = temp;
+        d.humidity = hum;
         s_discoveryCount++;
     }
 }
@@ -328,13 +323,15 @@ static int gap_event_cb(struct ble_gap_event *event, void *arg) {
         snprintf(addrStr, sizeof(addrStr), "%02x:%02x:%02x:%02x:%02x:%02x",
             addr[5], addr[4], addr[3], addr[2], addr[1], addr[0]);
 
-        // Discovery mode: identify any sensor-type device
+        // Discovery mode: decode any sensor-type device for the results list so
+        // the user can confirm the right device by its temperature/humidity
         if (s_discoveryMode) {
-            const char* type = identifySensorType(disc->data, disc->length_data);
+            SensorReading r;
+            const char* type = decodeAdvertisement(disc->data, disc->length_data, r);
             if (type) {
                 char name[24];
                 extractDeviceName(disc->data, disc->length_data, name, sizeof(name));
-                addDiscoveryResult(addrStr, name, type, disc->rssi);
+                addDiscoveryResult(addrStr, name, type, disc->rssi, r.temp, r.hum);
             }
         }
 
@@ -342,30 +339,24 @@ static int gap_event_cb(struct ble_gap_event *event, void *arg) {
         if (!s_addrValid) return 0;
         if (strcasecmp(addrStr, s_targetLower) != 0) return 0;
 
-        // Iterate AD structures and try to decode
-        const uint8_t* adv = disc->data;
-        size_t totalLen = disc->length_data;
-        uint8_t i = 0;
-        while (i + 1 < totalLen) {
-            uint8_t fieldLen = adv[i];
-            if (fieldLen == 0 || i + fieldLen >= totalLen) break;
-
+        // Decode the live advertisement and publish the freshest reading
+        SensorReading reading;
+        const char* liveType = decodeAdvertisement(disc->data, disc->length_data, reading);
+        if (liveType) {
             taskENTER_CRITICAL(&s_mux);
-            DecodeResult result = tryDecode(adv[i + 1], &adv[i + 2], fieldLen - 1);
-            if (result.decoded) {
-                s_sensorType = result.type;
-                s_rssi = disc->rssi;
-                s_lastUpdate = uptime_ms();
-                s_staleReverted = false;
-            }
+            if (!std::isnan(reading.temp)) s_temperature = reading.temp;
+            if (!std::isnan(reading.hum))  s_humidity    = reading.hum;
+            if (reading.batt >= 0)         s_battery     = reading.batt;
+            s_sensorType    = liveType;
+            s_rssi          = disc->rssi;
+            s_lastUpdate    = uptime_ms();
+            s_staleReverted = false;
             taskEXIT_CRITICAL(&s_mux);
 
-            if (result.decoded && !s_typeLogged) {
-                LOG_INFO("Detected sensor type: %s", result.type);
+            if (!s_typeLogged) {
+                LOG_INFO("Detected sensor type: %s", liveType);
                 s_typeLogged = true;
             }
-
-            i += fieldLen + 1;
         }
 
         return 0;

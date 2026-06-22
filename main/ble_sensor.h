@@ -19,6 +19,8 @@ struct BleDiscoveredDevice {
     char name[24];        // BLE advertised name (may be empty)
     const char* type;     // Sensor type (string literal)
     int rssi;
+    float temperature;    // °C decoded from advertisement (NAN if unavailable)
+    float humidity;       // %RH decoded from advertisement (NAN if unavailable)
 };
 
 namespace BleSensor {
