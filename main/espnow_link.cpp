@@ -345,7 +345,12 @@ static int cmd_selftest(int, char **) {
     return (kdf && tag && diff) ? 0 : 1;
 }
 
+static bool s_console_started = false;
+
+bool espnow_console_started(void) { return s_console_started; }
+
 void espnow_register_console(void) {
+    if (s_console_started) return;   // idempotent; single console owner
     esp_console_repl_t *repl = nullptr;
     esp_console_repl_config_t rc = ESP_CONSOLE_REPL_CONFIG_DEFAULT();
     rc.prompt = "serin>";
@@ -374,6 +379,7 @@ void espnow_register_console(void) {
     selftest_cmd.func    = &cmd_selftest;
     esp_console_cmd_register(&selftest_cmd);
     esp_console_start_repl(repl);
+    s_console_started = true;
 }
 
 #else  // ESPNOW_REMOTE_ENABLE == 0
@@ -389,4 +395,5 @@ int  EspnowLink::pairingSecondsLeft() const { return 0; }
 const char *EspnowLink::pairResult() const { return "idle"; }
 void EspnowLink::onPairRecv(const uint8_t *, const uint8_t *, int) {}
 void espnow_register_console(void) {}
+bool espnow_console_started(void) { return false; }
 #endif

@@ -1,5 +1,6 @@
 #include "wifi_recovery.h"
 #include "improv_serial.h"
+#include "espnow_link.h"
 #include "dns_server.h"
 #include "settings.h"
 #include "logging.h"
@@ -114,7 +115,15 @@ void WifiRecovery::enableFallbackAP() {
     dns_captive_start(apIP);
 
     _apActive = true;
-    improv_serial_start(_displayName);
+    // Improv Serial and the ESP-NOW REPL share the single USB-Serial-JTAG console;
+    // starting both deadlocks app_main. Only start Improv if the REPL hasn't taken
+    // the console (it's deferred until WiFi is up + AP down, so in this AP path it
+    // normally hasn't). Without this guard, the recovery web UI never comes up.
+    if (!espnow_console_started()) {
+        improv_serial_start(_displayName);
+    } else {
+        LOG_INFO("[WiFiRecovery] Improv skipped (ESP-NOW console owns serial)");
+    }
 
     char ipStr[16];
     esp_ip4addr_ntoa(&ipInfo.ip, ipStr, sizeof(ipStr));

@@ -43,3 +43,7 @@ private:
 
 extern EspnowLink espnowLink;
 void espnow_register_console(void);
+// True once the ESP-NOW serial REPL has taken ownership of the USB-Serial-JTAG
+// console. Used to keep Improv Serial and this REPL mutually exclusive (a single
+// console owner) — see enableFallbackAP().
+bool espnow_console_started(void);

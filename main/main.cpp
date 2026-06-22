@@ -68,6 +68,7 @@ static const char *resetReasonStr(esp_reset_reason_t r) {
 // ── State flags ─────────────────────────────────────────────────────────────
 static bool webUIStarted      = false;
 static bool homekitStarted    = false;
+static bool espnowConsoleInit = false;   // ESP-NOW REPL one-shot attempted
 static bool firmwareValidated = false;
 static bool lastAPState       = false;
 static bool lastWifiState     = true;   // force initial setWifi() call
@@ -206,7 +207,11 @@ extern "C" void app_main(void)
 
     // ── 13. ESP-NOW remote (Dial) — safe no-op when unbonded ───────────────────
     espnowLink.begin(&cn105);
-    espnow_register_console();
+    // NOTE: the ESP-NOW serial REPL is NOT registered here. It and Improv Serial
+    // both read the single USB-Serial-JTAG console; starting both deadlocks
+    // app_main in the recovery path. The REPL is deferred to a main-loop one-shot
+    // gated on (connected && !apActive); Improv only starts when the REPL hasn't
+    // (see enableFallbackAP). This guarantees a single console owner.
 
     // ── 14. BLE sensor init ──────────────────────────────────────────────
     // BLE is started later, after web UI is up (skipped in safe mode)
@@ -247,6 +252,17 @@ extern "C" void app_main(void)
             if (!homekitStarted) {
                 LOG_ERROR("HomeKit init failed, will retry next loop");
             }
+        }
+
+        // ── Deferred ESP-NOW serial REPL (one-shot) ──────────────────────
+        // Only take the USB-Serial-JTAG console once WiFi is up AND the fallback
+        // AP is down — i.e. when Improv Serial is not running. This keeps a single
+        // console owner and avoids the recovery-path deadlock. Consequence: Improv
+        // is first-provisioning-only; later re-provisioning is via the AP web UI.
+        if (!espnowConsoleInit &&
+            WifiManager::isConnected() && !wifiRecovery.isAPActive()) {
+            espnowConsoleInit = true;   // attempt once (no-op stub when ESP-NOW off)
+            espnow_register_console();
         }
 
         // ── Push state to HomeKit (throttled internally) ─────────────────
