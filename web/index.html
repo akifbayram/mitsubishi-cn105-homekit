@@ -458,8 +458,8 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     </div>
   </div>
 
-  <!-- ===== AIR ===== -->
-  <h2 class="group-label">Air</h2>
+  <!-- ===== AIRFLOW ===== -->
+  <h2 class="group-label">Airflow</h2>
   <div class="card">
     <div class="card-label">Fan Speed</div>
     <div class="seg" id="fanGrp" style="margin-top:11px">
@@ -546,7 +546,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   </div>
 
   <!-- ===== REMOTE SENSOR (BLE) ===== -->
-  <h2 class="group-label" id="bleGroupLabel">Remote Sensor · BLE<span class="section-summary"><span class="status-dot idle" id="bleDot"></span><span class="summary-text" id="bleStatusLabel"></span></span></h2>
+  <h2 class="group-label" id="bleGroupLabel">Remote Sensor<span class="section-summary"><span class="status-dot idle" id="bleDot"></span><span class="summary-text" id="bleStatusLabel"></span></span></h2>
   <div class="card" id="bleCard">
     <div id="bleBody">
       <div id="bleBanner" class="ble-banner info hidden" style="margin-bottom:12px"></div>
@@ -616,20 +616,20 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     <span class="hidden"><span class="status-dot idle" id="hkDotBody"></span></span>
   </div>
 
-  <!-- ===== DIAL REMOTE ===== -->
-  <h2 class="group-label">Accessory · Dial Remote<span class="section-summary"><span class="status-dot idle" id="remoteDot"></span><span class="summary-text" id="remoteSummary">—</span></span></h2>
+  <!-- ===== DISPLAY LINK ===== -->
+  <h2 class="group-label">Display Link<span class="section-summary"><span class="status-dot idle" id="remoteDot"></span><span class="summary-text" id="remoteSummary">—</span></span></h2>
   <div class="card" id="remoteCard">
     <div style="display:flex;align-items:center;gap:12px">
       <span class="icon-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="12" cy="12" r="8"/><path d="M12 8v4" stroke-linecap="round"/></svg></span>
       <div class="stack-tight" style="flex:1;min-width:0">
-        <div class="t">Dial Remote</div>
-        <div class="b"><span id="remoteStatus">—</span> · <span id="remoteMac" class="mono">—</span></div>
+        <div class="t">Display Link</div>
+        <div class="b"><span id="remoteStatus">—</span><span id="remoteMacWrap" style="display:none"> · <span id="remoteMac" class="mono">—</span></span></div>
       </div>
     </div>
     <div class="btn-row" id="remotePairRow" style="margin-top:14px">
       <button id="pairRemoteBtn" class="btn-primary">Pair</button>
       <button id="cancelPairBtn" class="btn-danger" style="display:none">Cancel</button>
-      <button id="forgetRemoteBtn" class="btn-danger">Forget</button>
+      <button id="forgetRemoteBtn" class="btn-danger" style="display:none">Forget</button>
     </div>
     <div id="pairStatus" style="font-size:12.5px;color:var(--text2);margin-top:8px"></div>
   </div>
@@ -1617,18 +1617,20 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     if(s.remoteBonded!=null){
       var rs=$('remoteStatus'),rDot=$('remoteDot'),rSum=$('remoteSummary');
       if(s.remoteBonded===false){rs.textContent='Not Paired';rDot.className='status-dot idle';rSum.textContent='Not Paired';rSum.style.color='var(--text3)';}
-      else if(s.remoteLive){rs.textContent='Connected';rDot.className='status-dot active';rSum.textContent='Connected';rSum.style.color='var(--green)';}
+      else if(s.remoteLive){rs.textContent='Paired';rDot.className='status-dot active';rSum.textContent='Paired';rSum.style.color='var(--green)';}
       else{rs.textContent='Idle';rDot.className='status-dot idle';rSum.textContent='Idle';rSum.style.color='var(--text2)';}
       $('remoteMac').textContent=s.remoteMac||'—';
+      $('remoteMacWrap').style.display=(s.remoteBonded&&s.remoteMac)?'':'none';
 
       var pairing=s.remotePairing===true;
-      $('pairRemoteBtn').style.display=pairing?'none':'';
+      $('pairRemoteBtn').style.display=(pairing||s.remoteBonded)?'none':'';
       $('cancelPairBtn').style.display=pairing?'':'none';
+      $('forgetRemoteBtn').style.display=s.remoteBonded?'':'none';
       var ps=$('pairStatus');
       if(pairing){
-        ps.textContent='Listening… '+(s.remotePairSecs||0)+'s — hold the Dial button';
+        ps.textContent='Listening… '+(s.remotePairSecs||0)+'s — hold the button on the Display Link';
       }else if(s.remotePairResult==='timeout'){
-        ps.textContent='No remote found. Put the Dial in pairing mode and retry.';
+        ps.textContent='No Display Link found. Put it in pairing mode and retry.';
       }else if(s.remoteBonded){
         ps.textContent='';
       }else{
@@ -2246,7 +2248,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   };
 
   document.getElementById('forgetRemoteBtn').addEventListener('click',function(){
-    if(confirm('Forget the paired Dial remote? The device will restart.')){
+    if(confirm('Forget the paired Display Link? The device will restart.')){
       send({cmd:'forgetRemote'});
     }
   });
