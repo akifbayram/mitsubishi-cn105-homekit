@@ -5,8 +5,8 @@
 
 static void test_sizes(void) {
     assert(sizeof(struct espnow_state_pkt) == 12);
-    assert(sizeof(struct espnow_info_pkt)  == 78);
-    assert(sizeof(struct espnow_cmd_pkt)   == 8);
+    assert(sizeof(struct espnow_info_pkt)  == 75);
+    assert(sizeof(struct espnow_cmd_pkt)   == 11);
     assert(sizeof(struct espnow_probe_pkt) == 3);
 }
 
@@ -92,9 +92,28 @@ static void test_state_flags(void) {
     assert(!(f & ESPNOW_SF_HK));
     assert(f & ESPNOW_SF_USE_F);
 
-    uint8_t i = espnow_make_info_flags(/*out*/false, /*runtime*/true);
+    uint8_t i = espnow_make_info_flags(/*out*/false);
     assert(!(i & ESPNOW_IF_OUT_VALID));
-    assert(i & ESPNOW_IF_RUNTIME_VALID);
+    assert(espnow_make_info_flags(/*out*/true) & ESPNOW_IF_OUT_VALID);
+}
+
+/* Regression for the unit<->Dial pairing failure: the Dial bumped
+ * ESPNOW_PROTO_VERSION to 4 and added a unit-wide units field to
+ * espnow_cmd_pkt without porting the change back into the unit's copy of
+ * this header, so the unit's onRecv version gate silently dropped every
+ * Dial packet (including PAIR_REQ). Pin the v4 shape here. */
+static void test_cmd_units_field(void) {
+    assert(ESPNOW_PROTO_VERSION == 4);
+    struct espnow_cmd_pkt c;
+    memset(&c, 0, sizeof(c));
+    c.type = ESPNOW_PKT_CMD; c.version = ESPNOW_PROTO_VERSION;
+    c.mask = ESPNOW_CM_UNITS; c.use_f = 1;
+    uint8_t buf[sizeof(c)];
+    memcpy(buf, &c, sizeof(c));
+    struct espnow_cmd_pkt d;
+    memcpy(&d, buf, sizeof(d));
+    assert(d.mask & ESPNOW_CM_UNITS);
+    assert(d.use_f == 1);
 }
 
 static void test_parse_mac(void) {
@@ -130,8 +149,8 @@ static void test_info_wire_roundtrip(void) {
     struct espnow_info_pkt p;
     memset(&p, 0, sizeof(p));
     p.type = ESPNOW_PKT_INFO; p.version = ESPNOW_PROTO_VERSION;
-    p.iflags = espnow_make_info_flags(true, true);
-    p.compressor_hz = 42; p.outside_dc = 175; p.runtime_h = 1234; p.wifi_rssi = -58;
+    p.iflags = espnow_make_info_flags(true);
+    p.compressor_hz = 42; p.outside_dc = 175; p.sub_mode = 0x02; p.wifi_rssi = -58;
     strcpy((char*)p.ssid, "homenet");
     strcpy((char*)p.ip, "192.168.1.50");
     strcpy((char*)p.hk_code, "548-94-669");
@@ -140,8 +159,8 @@ static void test_info_wire_roundtrip(void) {
     struct espnow_info_pkt q;
     memcpy(&q, buf, sizeof(q));
     assert(q.type == ESPNOW_PKT_INFO && q.compressor_hz == 42);
-    assert(q.outside_dc == 175 && q.runtime_h == 1234 && q.wifi_rssi == -58);
-    assert((q.iflags & ESPNOW_IF_OUT_VALID) && (q.iflags & ESPNOW_IF_RUNTIME_VALID));
+    assert(q.outside_dc == 175 && q.sub_mode == 0x02 && q.wifi_rssi == -58);
+    assert(q.iflags & ESPNOW_IF_OUT_VALID);
     assert(strcmp((char*)q.ssid, "homenet") == 0);
     assert(strcmp((char*)q.ip, "192.168.1.50") == 0);
     assert(strcmp((char*)q.hk_code, "548-94-669") == 0);
@@ -189,6 +208,7 @@ int main(void) {
     test_display_fahrenheit();
     test_fahrenheit_web_consistency();
     test_state_flags();
+    test_cmd_units_field();
     test_struct_wire_roundtrip();
     test_info_wire_roundtrip();
     test_parse_mac();

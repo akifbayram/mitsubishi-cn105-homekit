@@ -139,11 +139,10 @@ void EspnowLink::buildInfo(struct espnow_info_pkt *p) {
     memset(p, 0, sizeof(*p));
     const CN105State st = _ctrl->getEffectiveState();
     p->type = ESPNOW_PKT_INFO; p->version = ESPNOW_PROTO_VERSION;
-    p->iflags = espnow_make_info_flags(st.outsideTempValid, st.runtimeValid);
+    p->iflags = espnow_make_info_flags(st.outsideTempValid);
     p->compressor_hz = st.compressorHz;
-    p->sub_mode = st.subMode; p->stage = st.stage; p->auto_sub_mode = st.autoSubMode;
+    p->sub_mode = st.subMode; p->stage = st.stage;
     p->outside_dc = espnow_c_to_dc(st.outsideTemp);
-    p->runtime_h = (uint16_t)st.runtimeHours;
     p->hk_paired = (uint8_t)homekit_get_controller_count();
     p->wifi_rssi = WifiManager::getRSSI();
     WifiManager::getSSID((char*)p->ssid, sizeof(p->ssid));
@@ -288,10 +287,17 @@ void EspnowLink::loop() {
     if (haveCmd) { c = s_cmd; s_haveCmd = false; }
     portEXIT_CRITICAL(&s_cmdMux);
     if (haveCmd) {
-        if (c.mask & ESPNOW_CM_POWER) _ctrl->setPower(c.power != 0);
-        if (c.mask & ESPNOW_CM_MODE)  _ctrl->setMode(c.mode);
-        if (c.mask & ESPNOW_CM_FAN)   _ctrl->setFanSpeed(c.fan);
-        if (c.mask & ESPNOW_CM_TEMP)  _ctrl->setTargetTemp(espnow_dc_to_c(c.set_dc));
+        if (c.mask & ESPNOW_CM_POWER)    _ctrl->setPower(c.power != 0);
+        if (c.mask & ESPNOW_CM_MODE)     _ctrl->setMode(c.mode);
+        if (c.mask & ESPNOW_CM_FAN)      _ctrl->setFanSpeed(c.fan);
+        if (c.mask & ESPNOW_CM_TEMP)     _ctrl->setTargetTemp(espnow_dc_to_c(c.set_dc));
+        if (c.mask & ESPNOW_CM_VANE)     _ctrl->setVane(c.vane);
+        if (c.mask & ESPNOW_CM_WIDEVANE) _ctrl->setWideVane(c.wide_vane);
+        if (c.mask & ESPNOW_CM_UNITS) {
+            settings.get().useFahrenheit = (c.use_f != 0);
+            settings.save();
+            LOG_INFO("Dial set display units: %s", c.use_f ? "F" : "C");
+        }
         buildState(&_lastState);
         esp_now_send(_peer, (const uint8_t*)&_lastState, sizeof(_lastState));
         _lastStateTxMs = uptime_ms();

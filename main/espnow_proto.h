@@ -18,7 +18,7 @@
 extern "C" {
 #endif
 
-#define ESPNOW_PROTO_VERSION 2
+#define ESPNOW_PROTO_VERSION 4
 
 enum espnow_pkt_type {
     ESPNOW_PKT_STATE = 1,
@@ -43,15 +43,18 @@ enum {
 /* INFO flag bits — validity travels with the data in espnow_info_pkt */
 enum {
     ESPNOW_IF_OUT_VALID     = 1u << 0,
-    ESPNOW_IF_RUNTIME_VALID = 1u << 1,
+    /* bit 1 reserved (was RUNTIME_VALID; runtime_h dropped in proto v3) */
 };
 
 /* CMD field-mask bits */
 enum {
-    ESPNOW_CM_POWER = 1u << 0,
-    ESPNOW_CM_MODE  = 1u << 1,
-    ESPNOW_CM_TEMP  = 1u << 2,
-    ESPNOW_CM_FAN   = 1u << 3,
+    ESPNOW_CM_POWER    = 1u << 0,
+    ESPNOW_CM_MODE     = 1u << 1,
+    ESPNOW_CM_TEMP     = 1u << 2,
+    ESPNOW_CM_FAN      = 1u << 3,
+    ESPNOW_CM_VANE     = 1u << 4,   /* vertical vane (proto v3) */
+    ESPNOW_CM_WIDEVANE = 1u << 5,   /* horizontal/wide vane (proto v3) */
+    ESPNOW_CM_UNITS    = 1u << 6,   /* °C/°F display unit, unit-wide (proto v4) */
 };
 
 struct __attribute__((packed)) espnow_state_pkt {
@@ -72,11 +75,9 @@ struct __attribute__((packed)) espnow_info_pkt {
     uint8_t  version;       /* ESPNOW_PROTO_VERSION */
     uint8_t  iflags;        /* ESPNOW_IF_* */
     uint8_t  compressor_hz;
-    uint8_t  sub_mode;
+    uint8_t  sub_mode;      /* 0x00=NORMAL,0x02=DEFROST,0x04=PREHEAT,0x08=STANDBY */
     uint8_t  stage;
-    uint8_t  auto_sub_mode;
-    int16_t  outside_dc;    /* outside temp, deci-C */
-    uint16_t runtime_h;     /* runtime hours (whole) */
+    int16_t  outside_dc;    /* outside temp, deci-C (valid per ESPNOW_IF_OUT_VALID) */
     uint8_t  hk_paired;     /* paired controller count */
     int8_t   wifi_rssi;
     uint8_t  ssid[33];      /* null-terminated */
@@ -92,6 +93,9 @@ struct __attribute__((packed)) espnow_cmd_pkt {
     uint8_t mode;           /* CN105 mode byte */
     uint8_t fan;            /* CN105 fan byte */
     int16_t set_dc;         /* setpoint, deci-C */
+    uint8_t vane;           /* CN105 vane byte (ESPNOW_CM_VANE) */
+    uint8_t wide_vane;      /* CN105 wide vane byte (ESPNOW_CM_WIDEVANE) */
+    uint8_t use_f;          /* 0=°C 1=°F, unit-wide display unit (ESPNOW_CM_UNITS) */
 };
 
 struct __attribute__((packed)) espnow_probe_pkt {
@@ -119,8 +123,8 @@ struct __attribute__((packed)) espnow_pair_resp_pkt {
 /* sizeof guards — both copies of this header must agree */
 #define ESPNOW_STATIC_ASSERT(c, m) typedef char espnow_sa_##m[(c) ? 1 : -1]
 ESPNOW_STATIC_ASSERT(sizeof(struct espnow_state_pkt) == 12, state_size);
-ESPNOW_STATIC_ASSERT(sizeof(struct espnow_info_pkt)  == 78, info_size);
-ESPNOW_STATIC_ASSERT(sizeof(struct espnow_cmd_pkt)   == 8,  cmd_size);
+ESPNOW_STATIC_ASSERT(sizeof(struct espnow_info_pkt)  == 75, info_size);
+ESPNOW_STATIC_ASSERT(sizeof(struct espnow_cmd_pkt)   == 11, cmd_size);
 ESPNOW_STATIC_ASSERT(sizeof(struct espnow_probe_pkt) == 3,  probe_size);
 ESPNOW_STATIC_ASSERT(sizeof(struct espnow_pair_req_pkt)  == 56, pair_req_size);
 ESPNOW_STATIC_ASSERT(sizeof(struct espnow_pair_resp_pkt) == 56, pair_resp_size);
@@ -195,10 +199,9 @@ static inline uint8_t espnow_make_state_flags(bool power, bool cn105, bool opera
     return f;
 }
 
-static inline uint8_t espnow_make_info_flags(bool out_valid, bool runtime_valid) {
+static inline uint8_t espnow_make_info_flags(bool out_valid) {
     uint8_t f = 0;
-    if (out_valid)     f |= ESPNOW_IF_OUT_VALID;
-    if (runtime_valid) f |= ESPNOW_IF_RUNTIME_VALID;
+    if (out_valid) f |= ESPNOW_IF_OUT_VALID;
     return f;
 }
 
