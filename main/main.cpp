@@ -73,6 +73,9 @@ static bool firmwareValidated = false;
 static bool lastAPState       = false;
 static bool lastWifiState     = true;   // force initial setWifi() call
 static uint32_t webUIStartTime = 0;
+static char     lastPairResult[16] = "idle";
+static uint32_t pairLedHoldUntil   = 0;      // uptime_ms() deadline, 0 = none
+static LEDState pairLedHoldState    = SLED_OFF;
 
 // ════════════════════════════════════════════════════════════════════════════
 // app_main — initialization + main loop
@@ -344,9 +347,32 @@ extern "C" void app_main(void)
             }
         }
 
-        // RGB LED: boot → device status
+        // Detect a terminal pairing result (edge) and start a timed LED hold.
+        {
+            const char *pr = espnowLink.pairResult();
+            uint32_t nowMs = uptime_ms();
+            if (strcmp(pr, lastPairResult) != 0) {
+                if (strcmp(pr, "paired") == 0) {
+                    pairLedHoldState = SLED_PAIR_OK;
+                    pairLedHoldUntil = nowMs + 5000;
+                } else if (strcmp(pr, "timeout") == 0) {
+                    pairLedHoldState = SLED_PAIR_FAIL;
+                    pairLedHoldUntil = nowMs + 3000;
+                }
+                strncpy(lastPairResult, pr, sizeof(lastPairResult) - 1);
+                lastPairResult[sizeof(lastPairResult) - 1] = '\0';
+            }
+        }
+        bool pairHold = pairLedHoldUntil &&
+                        (int32_t)(pairLedHoldUntil - uptime_ms()) > 0;
+
+        // RGB LED priority: OTA > pairing OK/FAIL hold > pairing listening > status
         if (statusLED.getState() != SLED_OTA) {
-            if (webUIStarted) {
+            if (pairHold) {
+                statusLED.setState(pairLedHoldState);
+            } else if (espnowLink.pairingActive()) {
+                statusLED.setState(SLED_PAIR_LISTEN);
+            } else if (webUIStarted) {
                 const CN105State &st = cn105.getState();
                 if (st.hasError) {
                     statusLED.setState(SLED_ERROR_CODE);

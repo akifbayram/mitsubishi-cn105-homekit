@@ -20,6 +20,9 @@ static const char* stateName(LEDState s) {
         case SLED_WIFI_DISCONNECTED:  return "WIFI_DISC";
         case SLED_ERROR_CODE:         return "ERROR";
         case SLED_OTA:                return "OTA";
+        case SLED_PAIR_LISTEN:        return "PAIR_LISTEN";
+        case SLED_PAIR_OK:            return "PAIR_OK";
+        case SLED_PAIR_FAIL:          return "PAIR_FAIL";
         default:                      return "?";
     }
 }
@@ -101,6 +104,17 @@ void StatusLED::setState(LEDState state) {
             _rgbOn = true;
             setColor(MAX_BRIGHT, 0, 0);  // red on immediately
             break;
+        case SLED_PAIR_OK:
+            _rgbOn = true;
+            setColor(0, MAX_BRIGHT, 0);  // solid green
+            break;
+        case SLED_PAIR_FAIL:
+            _rgbOn = true;
+            setColor(MAX_BRIGHT, 0, 0);  // red on immediately, blinks in loop()
+            break;
+        case SLED_PAIR_LISTEN:
+            // animated in loop(); leave dark until first loop tick
+            break;
         default:
             break;
     }
@@ -125,6 +139,7 @@ void StatusLED::loop() {
         case SLED_OFF:
         case SLED_CN105_DISCONNECTED:
         case SLED_WIFI_DISCONNECTED:
+        case SLED_PAIR_OK:  // solid — set once in setState(), no animation here
             break;
 
         case SLED_BOOT: {
@@ -158,6 +173,30 @@ void StatusLED::loop() {
                 brightness = (uint8_t)(((2000 - phase) * MAX_BRIGHT) / 1000);
             }
             setColor(0, 0, brightness);
+            break;
+        }
+
+        case SLED_PAIR_LISTEN: {
+            if (elapsed < 20) break;  // Rate-limit: ~50 Hz
+            _lastToggle = now;
+            uint32_t phase = stateAge % 2000;
+            uint8_t brightness;
+            if (phase < 1000) {
+                brightness = (uint8_t)((phase * MAX_BRIGHT) / 1000);
+            } else {
+                brightness = (uint8_t)(((2000 - phase) * MAX_BRIGHT) / 1000);
+            }
+            setColor(brightness, 0, brightness);  // purple pulse
+            break;
+        }
+
+        case SLED_PAIR_FAIL: {
+            if (elapsed >= 200) {
+                _lastToggle = now;
+                _rgbOn = !_rgbOn;
+                if (_rgbOn) setColor(MAX_BRIGHT, 0, 0);
+                else off();
+            }
             break;
         }
     }

@@ -1,18 +1,24 @@
 #include "wifi_recovery.h"
 #include "improv_serial.h"
 #include "espnow_link.h"
+#include "espnow_bond.h"
 #include "dns_server.h"
 #include "settings.h"
 #include "logging.h"
 #include "branding.h"
 #include "wifi_manager.h"
 #include "esp_utils.h"
+#include "status_led.h"
 
 #include <esp_netif.h>
 #include <driver/gpio.h>
 #include <esp_system.h>
 
 static const char *TAG = "wifi_rec";
+
+#if PIN_LED_DATA >= 0
+extern StatusLED statusLED;   // defined in main.cpp — used only for the OTA gate
+#endif
 
 WifiRecovery wifiRecovery;
 
@@ -187,6 +193,31 @@ void WifiRecovery::checkButton() {
             esp_restart();
         }
     } else if (!pressed) {
+        if (_buttonPressStart != 0 && !_buttonTriggered) {
+            uint32_t held = uptime_ms() - _buttonPressStart;
+            if (held >= PAIR_BUTTON_HOLD_MS) {  // 10s path already set _buttonTriggered + restarted
+#if ESPNOW_REMOTE_ENABLE
+                bool otaBusy = false;
+#if PIN_LED_DATA >= 0
+                otaBusy = (statusLED.getState() == SLED_OTA);
+#endif
+                if (otaBusy) {
+                    LOG_INFO("[WiFiRecovery] Button pairing ignored (OTA in progress)");
+                } else if (espnowLink.pairingActive()) {
+                    LOG_INFO("[WiFiRecovery] Button: cancelling Display Link pairing");
+                    espnowLink.cancelPairing();
+                } else if (espnowLink.isBonded()) {
+                    LOG_WARN("[WiFiRecovery] Button hold — forgetting Display Link remote");
+                    espnow_bond_clear();
+                    vTaskDelay(pdMS_TO_TICKS(500));
+                    esp_restart();
+                } else {
+                    LOG_INFO("[WiFiRecovery] Button hold — opening Display Link pairing");
+                    espnowLink.startPairing();
+                }
+#endif
+            }
+        }
         _buttonPressStart = 0;
         _buttonTriggered = false;
     }

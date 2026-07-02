@@ -171,7 +171,8 @@ void EspnowLink::cancelPairing() {
     _pair = PAIR_OFF;
     if (esp_now_is_peer_exist(BCAST)) esp_now_del_peer(BCAST);
     if (!_bonded && esp_now_is_peer_exist(_candMac)) esp_now_del_peer(_candMac);
-    if (strcmp(_pairResult, "paired") != 0) _pairResult = "idle";
+    if (strcmp(_pairResult, "paired") != 0 && strcmp(_pairResult, "timeout") != 0)
+        _pairResult = "idle";
 }
 
 bool EspnowLink::pairingActive() const { return _pair != PAIR_OFF; }
@@ -201,6 +202,10 @@ void EspnowLink::onPairRecv(const uint8_t src[6], const uint8_t *data, int len) 
 }
 
 void EspnowLink::pairLoop() {
+    if (_restartAtMs) {
+        if ((int32_t)(uptime_ms() - _restartAtMs) >= 0) esp_restart();
+        return;
+    }
     if (_pair == PAIR_OFF) return;
 
     if (uptime_ms() - _pairStartMs >= ESPNOW_PAIR_WINDOW_MS) {
@@ -265,13 +270,13 @@ void EspnowLink::pairLoop() {
         s_havePairProbe = false;
         espnow_bond_save(_candMac, _candLmk);
         _pairResult = "paired";
-        LOG_INFO("ESP-NOW pairing confirmed; saving bond + restarting");
+        LOG_INFO("ESP-NOW pairing confirmed; saving bond, restart in 5s (green LED)");
         struct espnow_state_pkt p; buildState(&p);
         for (int i = 0; i < 8; i++) {
             esp_now_send(_candMac, (const uint8_t *)&p, sizeof(p));
             vTaskDelay(pdMS_TO_TICKS(50));
         }
-        esp_restart();
+        _restartAtMs = uptime_ms() + 5000;  // let main.cpp show SLED_PAIR_OK for 5s
     }
 }
 

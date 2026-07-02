@@ -39,6 +39,7 @@ private:
     PairState _pair = PAIR_OFF;
     bool      _espnowReady = false;
     uint32_t  _pairStartMs = 0;
+    uint32_t  _restartAtMs = 0;   // 0 = no pending restart; else uptime_ms() deadline
     uint8_t   _candMac[6] = {0};
     uint8_t   _candLmk[16] = {0};
     uint8_t   _ownPriv[32] = {0};
