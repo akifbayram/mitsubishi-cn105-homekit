@@ -128,7 +128,8 @@ void EspnowLink::buildState(struct espnow_state_pkt *p) {
     p->type = ESPNOW_PKT_STATE; p->version = ESPNOW_PROTO_VERSION;
     p->flags = espnow_make_state_flags(
         st.power, _ctrl->isConnected(), st.operating, WifiManager::isConnected(),
-        homekit_get_controller_count() > 0, settings.get().useFahrenheit);
+        homekit_get_controller_count() > 0, settings.get().useFahrenheit,
+        settings.get().vaneConfig);
     p->mode = st.mode; p->fan = st.fanSpeed; p->vane = st.vane; p->wide_vane = st.wideVane;
     p->error_code = st.errorCode;
     p->room_dc = espnow_c_to_dc(st.roomTemp);

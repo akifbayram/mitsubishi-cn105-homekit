@@ -18,7 +18,7 @@
 extern "C" {
 #endif
 
-#define ESPNOW_PROTO_VERSION 4
+#define ESPNOW_PROTO_VERSION 5
 
 enum espnow_pkt_type {
     ESPNOW_PKT_STATE = 1,
@@ -37,8 +37,12 @@ enum {
     ESPNOW_SF_WIFI      = 1u << 3,
     ESPNOW_SF_HK        = 1u << 4,
     ESPNOW_SF_USE_F     = 1u << 5,
-    /* bits 6,7 reserved (were OUT_VALID/RUNTIME_VALID; now in INFO iflags) */
+    ESPNOW_SF_VANECFG_LO = 1u << 6,   /* vane_config bit0 (0=none,1=vert,2=vert+horiz) */
+    ESPNOW_SF_VANECFG_HI = 1u << 7,   /* vane_config bit1                              */
 };
+
+/* vane_config (0=none,1=vertical,2=vertical+horizontal) packed in STATE flags bits 6,7 */
+static inline uint8_t espnow_state_vanecfg(uint8_t flags) { return (flags >> 6) & 0x3; }
 
 /* INFO flag bits — validity travels with the data in espnow_info_pkt */
 enum {
@@ -188,7 +192,8 @@ static inline int16_t espnow_display_to_dc(int v, bool use_f) {
 }
 
 static inline uint8_t espnow_make_state_flags(bool power, bool cn105, bool operating,
-                                              bool wifi, bool hk, bool use_f) {
+                                              bool wifi, bool hk, bool use_f,
+                                              uint8_t vane_config) {
     uint8_t f = 0;
     if (power)     f |= ESPNOW_SF_POWER;
     if (cn105)     f |= ESPNOW_SF_CN105;
@@ -196,6 +201,7 @@ static inline uint8_t espnow_make_state_flags(bool power, bool cn105, bool opera
     if (wifi)      f |= ESPNOW_SF_WIFI;
     if (hk)        f |= ESPNOW_SF_HK;
     if (use_f)     f |= ESPNOW_SF_USE_F;
+    f |= (uint8_t)((vane_config & 0x3) << 6);
     return f;
 }
 
