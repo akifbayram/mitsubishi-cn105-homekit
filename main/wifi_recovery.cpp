@@ -13,6 +13,8 @@
 #include <esp_netif.h>
 #include <driver/gpio.h>
 #include <esp_system.h>
+#include <freertos/FreeRTOS.h>   // vTaskDelay/pdMS_TO_TICKS — do not rely on a
+#include <freertos/task.h>       // transitive include (absent on esp32c6)
 
 static const char *TAG = "wifi_rec";
 
