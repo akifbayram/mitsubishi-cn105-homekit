@@ -34,6 +34,7 @@ private:
     uint8_t  _peer[6] = {0};
     uint32_t _lastStateTxMs = 0;
     uint32_t _lastInfoTxMs = 0;
+    uint32_t _lastVerWarnMs = 0;   // throttle for the proto-version-skew warning
     struct espnow_state_pkt _lastState{};
     bool     _peerWasLive = false;
     PairState _pair = PAIR_OFF;

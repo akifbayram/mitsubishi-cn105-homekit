@@ -26,6 +26,7 @@ Controls Mitsubishi mini split heat pumps via the CN105 serial connector, compat
 - **Dual setpoint Auto mode** — independent heating and cooling thresholds
 - **Multi-board support** — ESP32, ESP32-C3, ESP32-C6, ESP32-S3
 - **WiFi recovery** — automatic fallback AP with web-based credential entry
+- **Display Link remote** — optional M5Dial physical dial over an encrypted ESP-NOW link
 
 ## Quick Start
 
@@ -198,6 +199,23 @@ A **Remote Sensor** card appears in the web UI on boards with Bluetooth:
 - **Feed Toggle** — enable/disable sending the sensor temperature to the heat pump (disabling the feed keeps scanning and displaying sensor data, it just stops overriding the HP's internal thermistor)
 - **Status** — live temperature, humidity, battery level, signal strength, and last update time
 - **Indicators** — green (active), orange (feed disabled), red (stale data), gray (scanning/not configured)
+
+## Display Link Remote (ESP-NOW)
+
+An optional M5Dial gives the headless unit a physical control surface over an **encrypted 1:1 ESP-NOW link**. The Dial mirrors live state and can change power, mode, setpoint, fan, and vanes; all HVAC logic stays on the unit. The link is idle until a Dial is bonded, so a unit with no remote behaves exactly as before.
+
+**Pairing:** Hold the unit's button to open a pairing window (LED feedback), then pair from the Dial — or provision both at a bench with `scripts/pair_dial.sh`. "Forget remote" in the web UI clears the bond.
+
+### Firmware compatibility
+
+The unit and the Dial run separate firmwares that update independently (the unit via OTA, the Dial via USB), so the two ends are routinely a version apart between updates. The ESP-NOW wire protocol is versioned to tolerate that instead of going dark:
+
+- **Compatibility floor** — each firmware declares the oldest peer protocol version it can still parse (`ESPNOW_PROTO_MIN_COMPAT`). Any peer at or above the floor is accepted; the receiver reads the fields it understands and ignores anything newer it doesn't. Only a **breaking** layout change raises the floor.
+- **Additive changes are free** — a new field appended to a packet, or a new flag bit in a byte with room, bumps the protocol version but **not** the floor, so a peer one (or more) versions behind keeps working.
+- **Skew is visible, not silent** — when a bonded peer is seen on a different protocol version, the unit logs a throttled warning naming which side (Dial or unit) should be updated, rather than dropping its packets without explanation.
+- **Pairing and keepalive bypass the floor** — so an out-of-date remote is still *seen* (and can be told to update) instead of vanishing entirely.
+
+This means an OTA that bumps the unit's protocol version with an additive change will not brick an already-paired Dial; a breaking change (rare) requires reflashing both, and the log warning makes the mismatch obvious.
 
 ## OTA Updates
 

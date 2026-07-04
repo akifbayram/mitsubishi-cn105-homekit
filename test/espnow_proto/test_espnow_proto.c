@@ -8,6 +8,8 @@ static void test_sizes(void) {
     assert(sizeof(struct espnow_info_pkt)  == 75);
     assert(sizeof(struct espnow_cmd_pkt)   == 11);
     assert(sizeof(struct espnow_probe_pkt) == 3);
+    /* The compat floor must never exceed the current version. */
+    assert(ESPNOW_PROTO_MIN_COMPAT <= ESPNOW_PROTO_VERSION);
 }
 
 static void test_temp_celsius_roundtrip(void) {
@@ -84,13 +86,14 @@ static void test_fahrenheit_web_consistency(void) {
 static void test_state_flags(void) {
     uint8_t f = espnow_make_state_flags(
         /*power*/true, /*cn105*/false, /*operating*/true, /*wifi*/true,
-        /*hk*/false, /*useF*/true);
+        /*hk*/false, /*useF*/true, /*vane_config*/2);
     assert(f & ESPNOW_SF_POWER);
     assert(!(f & ESPNOW_SF_CN105));
     assert(f & ESPNOW_SF_OPERATING);
     assert(f & ESPNOW_SF_WIFI);
     assert(!(f & ESPNOW_SF_HK));
     assert(f & ESPNOW_SF_USE_F);
+    assert(espnow_state_vanecfg(f) == 2);   /* vane_config packed in bits 6,7 */
 
     uint8_t i = espnow_make_info_flags(/*out*/false);
     assert(!(i & ESPNOW_IF_OUT_VALID));
@@ -101,9 +104,14 @@ static void test_state_flags(void) {
  * ESPNOW_PROTO_VERSION to 4 and added a unit-wide units field to
  * espnow_cmd_pkt without porting the change back into the unit's copy of
  * this header, so the unit's onRecv version gate silently dropped every
- * Dial packet (including PAIR_REQ). Pin the v4 shape here. */
+ * Dial packet (including PAIR_REQ).
+ *
+ * Deliberate tripwire: this equality FAILS the moment ESPNOW_PROTO_VERSION
+ * changes, forcing whoever bumps it to (a) sync both header copies and (b)
+ * decide whether the change is additive (leave MIN_COMPAT) or breaking (raise
+ * it). Update the constant below only after doing both. */
 static void test_cmd_units_field(void) {
-    assert(ESPNOW_PROTO_VERSION == 4);
+    assert(ESPNOW_PROTO_VERSION == 5);
     struct espnow_cmd_pkt c;
     memset(&c, 0, sizeof(c));
     c.type = ESPNOW_PKT_CMD; c.version = ESPNOW_PROTO_VERSION;
@@ -114,6 +122,28 @@ static void test_cmd_units_field(void) {
     memcpy(&d, buf, sizeof(d));
     assert(d.mask & ESPNOW_CM_UNITS);
     assert(d.use_f == 1);
+}
+
+/* Forward-compat contract: a future peer may append fields (bumping VERSION but
+ * not MIN_COMPAT) and send a LONGER packet. The receiver copies only the prefix
+ * it understands (memcpy sizeof(known_struct)) and ignores the tail — mirroring
+ * the `len >= sizeof(...)` checks in onRecv(). The known fields must survive. */
+static void test_forward_compat_prefix(void) {
+    struct espnow_cmd_pkt c;
+    memset(&c, 0, sizeof(c));
+    c.type = ESPNOW_PKT_CMD; c.version = ESPNOW_PROTO_VERSION + 3; /* "newer" peer */
+    c.mask = ESPNOW_CM_TEMP; c.set_dc = 235;
+
+    /* Wire frame is longer than our struct (appended future fields = junk here). */
+    uint8_t wire[sizeof(c) + 5];
+    memset(wire, 0xAB, sizeof(wire));
+    memcpy(wire, &c, sizeof(c));
+
+    struct espnow_cmd_pkt got;
+    memcpy(&got, wire, sizeof(got));         /* prefix copy, ignore 5-byte tail */
+    assert(got.type == ESPNOW_PKT_CMD);
+    assert(got.version == ESPNOW_PROTO_VERSION + 3);
+    assert(got.mask == ESPNOW_CM_TEMP && got.set_dc == 235);
 }
 
 static void test_parse_mac(void) {
@@ -209,6 +239,7 @@ int main(void) {
     test_fahrenheit_web_consistency();
     test_state_flags();
     test_cmd_units_field();
+    test_forward_compat_prefix();
     test_struct_wire_roundtrip();
     test_info_wire_roundtrip();
     test_parse_mac();

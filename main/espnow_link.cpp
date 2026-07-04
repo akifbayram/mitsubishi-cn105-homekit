@@ -45,6 +45,9 @@ static volatile bool          s_haveCmd = false;
 static struct espnow_cmd_pkt  s_cmd;
 static volatile uint32_t      s_lastProbeMs = 0;
 static volatile uint8_t       s_wantInfo = 0;
+// Protocol version of the last accepted peer packet. Lets the unit notice an
+// out-of-date (or ahead-of-us) Dial and warn instead of silently ignoring it.
+static volatile uint8_t       s_peerVer = 0;
 
 // Pairing packets handed from the RX callback to pairLoop() (main task) so the
 // WiFi-task callback never runs crypto / esp_now_send / esp_restart (ESP-NOW
@@ -57,7 +60,19 @@ static EspnowLink *s_self = nullptr;
 
 static void onRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
     if (!s_self) return;
-    if (len < 2 || data[1] != ESPNOW_PROTO_VERSION) return;     // version gate
+    if (len < 2) return;
+    const uint8_t type = data[0];
+    const uint8_t ver  = data[1];
+    // Version gate (see ESPNOW_PROTO_MIN_COMPAT). Accept anything at or above the
+    // compat floor — a newer peer's additively-grown packet parses fine because
+    // we read only the prefix we know and the `len >=` checks below tolerate the
+    // extra tail. PROBE and PAIR bypass the floor so an out-of-date peer is still
+    // *seen* (version recorded, warned in loop()) rather than vanishing, which is
+    // what lets a stale Dial be told to update instead of just going dark.
+    const bool negotiation = (type == ESPNOW_PKT_PROBE ||
+                              type == ESPNOW_PKT_PAIR_REQ ||
+                              type == ESPNOW_PKT_PAIR_RESP);
+    if (!negotiation && ver < ESPNOW_PROTO_MIN_COMPAT) return;
 
     // Pairing path: PAIR_REQ on broadcast, and the confirming PROBE.
     if (s_self->pairingActive()) {
@@ -69,13 +84,19 @@ static void onRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len
     uint8_t peer[6]; s_self->getPeerMac(peer);
     if (memcmp(info->src_addr, peer, 6) != 0) return;            // allow-list
     if (memcmp(info->des_addr, s_ownMac, 6) != 0) return;        // unicast only
+    // Record the bonded peer's protocol version for the skew warning in loop().
+    // An old bonded Dial whose STATE/CMD fail the floor still gets here via its
+    // PROBE (which bypasses the floor), so a real breaking skew is still seen.
+    s_peerVer = ver;
     switch (data[0]) {
         case ESPNOW_PKT_PROBE:
             s_lastProbeMs = uptime_ms();
             if (len >= (int)sizeof(struct espnow_probe_pkt)) s_wantInfo = data[2];
             break;
         case ESPNOW_PKT_CMD:
-            if (len == (int)sizeof(struct espnow_cmd_pkt)) {
+            // `>=` not `==`: a newer Dial may append fields; copy the prefix we
+            // understand and ignore any tail.
+            if (len >= (int)sizeof(struct espnow_cmd_pkt)) {
                 portENTER_CRITICAL(&s_cmdMux);
                 memcpy((void*)&s_cmd, data, sizeof(s_cmd)); s_haveCmd = true;
                 portEXIT_CRITICAL(&s_cmdMux);
@@ -284,6 +305,20 @@ void EspnowLink::pairLoop() {
 void EspnowLink::loop() {
     pairLoop();
     if (!_bonded) return;
+
+    // Surface a version-skewed peer instead of silently tolerating it. The gate
+    // still accepts the peer (>= MIN_COMPAT, or PROBE/PAIR bypass), so this is a
+    // heads-up that the Dial firmware and unit firmware are on different proto
+    // versions and one side should be updated. Throttled to once a minute.
+    if (s_peerVer != 0 && s_peerVer != ESPNOW_PROTO_VERSION) {
+        uint32_t nowV = uptime_ms();
+        if (_lastVerWarnMs == 0 || nowV - _lastVerWarnMs >= 60000) {
+            LOG_WARN("ESP-NOW peer on proto v%u, unit on v%u (compat floor v%u) — update the %s",
+                     s_peerVer, ESPNOW_PROTO_VERSION, ESPNOW_PROTO_MIN_COMPAT,
+                     s_peerVer < ESPNOW_PROTO_VERSION ? "Dial" : "unit");
+            _lastVerWarnMs = nowV;
+        }
+    }
 
     // Apply any decoded command on the main task (inherits anti-flicker logic).
     struct espnow_cmd_pkt c;

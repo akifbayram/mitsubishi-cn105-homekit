@@ -20,6 +20,26 @@ extern "C" {
 
 #define ESPNOW_PROTO_VERSION 5
 
+/* Oldest peer protocol version this firmware still parses. Bump ONLY on a
+ * breaking layout change (a field's type/offset moves, or a struct shrinks).
+ * ADDITIVE changes — a field APPENDED to the end of a struct, or a new flag/mask
+ * bit in a byte that already has room — bump ESPNOW_PROTO_VERSION but leave this
+ * floor where it is, so a peer one (or more) versions behind keeps working
+ * instead of going silently dark. The receive path accepts any version >= this
+ * floor and ignores bytes/bits it does not recognise: it length-checks with
+ * `len >=` (not `==`) and memcpy()s only the prefix it understands (see
+ * onRecv()). The unit and the Dial update independently (unit via OTA, Dial via
+ * USB), so this floor is what keeps a mixed-version pair alive between updates.
+ *
+ * Additive-growth discipline: APPEND new fields at the end of a struct; never
+ * insert or resize an existing field. When you grow a struct, the receiver's
+ * `len >=` check must stay against the OLD minimum size so it still accepts
+ * shorter packets from not-yet-updated senders. (A future joint unit+Dial bump
+ * may instead reserve a couple of trailing pad bytes per struct so additive
+ * fields never change sizeof at all — the cleanest option, but it costs one
+ * coordinated flag-day and so is deferred out of a unit-only point release.) */
+#define ESPNOW_PROTO_MIN_COMPAT 5
+
 enum espnow_pkt_type {
     ESPNOW_PKT_STATE = 1,
     ESPNOW_PKT_CMD   = 2,
@@ -72,6 +92,8 @@ struct __attribute__((packed)) espnow_state_pkt {
     uint8_t  error_code;    /* 0x80 = normal; drives home-dial fault alert */
     int16_t  room_dc;       /* room temp, deci-C */
     int16_t  set_dc;        /* setpoint, deci-C */
+    /* NOTE: `flags` is FULL (bits 0-7 all assigned). The next status bit must be
+     * an APPENDED byte here (a `flags2`), bumping VERSION but not MIN_COMPAT. */
 };
 
 struct __attribute__((packed)) espnow_info_pkt {
@@ -100,6 +122,7 @@ struct __attribute__((packed)) espnow_cmd_pkt {
     uint8_t vane;           /* CN105 vane byte (ESPNOW_CM_VANE) */
     uint8_t wide_vane;      /* CN105 wide vane byte (ESPNOW_CM_WIDEVANE) */
     uint8_t use_f;          /* 0=°C 1=°F, unit-wide display unit (ESPNOW_CM_UNITS) */
+    /* `mask` has one free bit (0x80). A future command field is APPENDED here. */
 };
 
 struct __attribute__((packed)) espnow_probe_pkt {
