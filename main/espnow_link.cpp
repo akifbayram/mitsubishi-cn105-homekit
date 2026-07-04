@@ -91,14 +91,19 @@ static void onRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len
     switch (data[0]) {
         case ESPNOW_PKT_PROBE:
             s_lastProbeMs = uptime_ms();
-            if (len >= (int)sizeof(struct espnow_probe_pkt)) s_wantInfo = data[2];
+            // MIN_LEN, not sizeof: a MIN_COMPAT-era probe is shorter than the
+            // current struct (v6 added a reserved tail) and must still count.
+            if (len >= ESPNOW_PROBE_MIN_LEN) s_wantInfo = data[2];
             break;
         case ESPNOW_PKT_CMD:
-            // `>=` not `==`: a newer Dial may append fields; copy the prefix we
-            // understand and ignore any tail.
-            if (len >= (int)sizeof(struct espnow_cmd_pkt)) {
+            // MIN_LEN + tolerant decode: a MIN_COMPAT-era Dial sends a shorter
+            // CMD (missing tail decodes as zeros); a newer Dial may send a
+            // longer one (unknown tail ignored).
+            if (len >= ESPNOW_CMD_MIN_LEN) {
+                struct espnow_cmd_pkt c;
+                espnow_decode_pkt(&c, sizeof(c), data, len);
                 portENTER_CRITICAL(&s_cmdMux);
-                memcpy((void*)&s_cmd, data, sizeof(s_cmd)); s_haveCmd = true;
+                memcpy((void*)&s_cmd, &c, sizeof(s_cmd)); s_haveCmd = true;
                 portEXIT_CRITICAL(&s_cmdMux);
                 s_lastProbeMs = uptime_ms();
             }

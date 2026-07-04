@@ -18,27 +18,44 @@
 extern "C" {
 #endif
 
-#define ESPNOW_PROTO_VERSION 5
+#define ESPNOW_PROTO_VERSION 6
 
 /* Oldest peer protocol version this firmware still parses. Bump ONLY on a
  * breaking layout change (a field's type/offset moves, or a struct shrinks).
- * ADDITIVE changes — a field APPENDED to the end of a struct, or a new flag/mask
- * bit in a byte that already has room — bump ESPNOW_PROTO_VERSION but leave this
- * floor where it is, so a peer one (or more) versions behind keeps working
- * instead of going silently dark. The receive path accepts any version >= this
- * floor and ignores bytes/bits it does not recognise: it length-checks with
- * `len >=` (not `==`) and memcpy()s only the prefix it understands (see
- * onRecv()). The unit and the Dial update independently (unit via OTA, Dial via
- * USB), so this floor is what keeps a mixed-version pair alive between updates.
+ * ADDITIVE changes — a new flag/mask bit in a byte that already has room, a
+ * byte claimed from a `reserved[]` tail, or a field APPENDED to the end of a
+ * struct — bump ESPNOW_PROTO_VERSION but leave this floor where it is, so a
+ * peer one (or more) versions behind keeps working instead of going silently
+ * dark. The receive path accepts any version >= this floor, length-checks
+ * against the floor-era ESPNOW_*_MIN_LEN (not sizeof), and decodes with
+ * espnow_decode_pkt() (zero-fill + prefix copy) so both shorter old packets and
+ * longer future packets parse. The unit and the Dial update independently
+ * (unit via OTA, Dial via USB), so this floor is what keeps a mixed-version
+ * pair alive between updates.
  *
- * Additive-growth discipline: APPEND new fields at the end of a struct; never
- * insert or resize an existing field. When you grow a struct, the receiver's
- * `len >=` check must stay against the OLD minimum size so it still accepts
- * shorter packets from not-yet-updated senders. (A future joint unit+Dial bump
- * may instead reserve a couple of trailing pad bytes per struct so additive
- * fields never change sizeof at all — the cleanest option, but it costs one
- * coordinated flag-day and so is deferred out of a unit-only point release.) */
+ * Growth discipline, in order of preference:
+ *  1. Claim a spare bit in an existing flags/mask byte.
+ *  2. Claim a byte from the struct's trailing `reserved[]` (senders already
+ *     zero-fill, receivers already ignore — sizeof does not change).
+ *  3. Append a new field after `reserved[]` (sizeof grows; receivers keep
+ *     accepting the shorter old packets because the MIN_LEN check is pinned
+ *     to the floor-era size).
+ * Never insert or resize an existing field — that is the breaking case that
+ * bumps this floor and forces a coordinated unit+Dial reflash.
+ *
+ * v6 (this floor is 5): reserved[] tails added to STATE/CMD/INFO/PROBE. v5
+ * peers' shorter packets still parse per rule 3; v5 RECEIVERS, however,
+ * version-gate strictly and drop v6 frames, so a v5 Dial shows NOLINK against
+ * a v6 unit until reflashed (the unit logs which side is behind). */
 #define ESPNOW_PROTO_MIN_COMPAT 5
+
+/* Floor-era (v5) wire sizes — the receive path's length checks are pinned to
+ * these, NOT to sizeof(), so packets from a MIN_COMPAT-era peer still pass.
+ * Only raise these when ESPNOW_PROTO_MIN_COMPAT itself is raised. */
+#define ESPNOW_STATE_MIN_LEN 12
+#define ESPNOW_INFO_MIN_LEN  75
+#define ESPNOW_CMD_MIN_LEN   11
+#define ESPNOW_PROBE_MIN_LEN 3
 
 enum espnow_pkt_type {
     ESPNOW_PKT_STATE = 1,
@@ -92,8 +109,10 @@ struct __attribute__((packed)) espnow_state_pkt {
     uint8_t  error_code;    /* 0x80 = normal; drives home-dial fault alert */
     int16_t  room_dc;       /* room temp, deci-C */
     int16_t  set_dc;        /* setpoint, deci-C */
-    /* NOTE: `flags` is FULL (bits 0-7 all assigned). The next status bit must be
-     * an APPENDED byte here (a `flags2`), bumping VERSION but not MIN_COMPAT. */
+    /* Senders zero-fill (memset in buildState()), receivers ignore. `flags` is
+     * FULL (bits 0-7 all assigned): the next status bit claims reserved[0] as a
+     * `flags2` — VERSION bump, no MIN_COMPAT bump, sizeof unchanged. */
+    uint8_t  reserved[2];   /* v6 */
 };
 
 struct __attribute__((packed)) espnow_info_pkt {
@@ -109,6 +128,9 @@ struct __attribute__((packed)) espnow_info_pkt {
     uint8_t  ssid[33];      /* null-terminated */
     uint8_t  ip[16];        /* "255.255.255.255\0" */
     uint8_t  hk_code[16];   /* "XXX-XX-XXX\0" */
+    /* Senders zero-fill (memset in buildInfo()), receivers ignore. iflags also
+     * has 6 spare bits — prefer those for new validity flags. */
+    uint8_t  reserved[2];   /* v6 */
 };
 
 struct __attribute__((packed)) espnow_cmd_pkt {
@@ -122,13 +144,18 @@ struct __attribute__((packed)) espnow_cmd_pkt {
     uint8_t vane;           /* CN105 vane byte (ESPNOW_CM_VANE) */
     uint8_t wide_vane;      /* CN105 wide vane byte (ESPNOW_CM_WIDEVANE) */
     uint8_t use_f;          /* 0=°C 1=°F, unit-wide display unit (ESPNOW_CM_UNITS) */
-    /* `mask` has one free bit (0x80). A future command field is APPENDED here. */
+    /* Senders zero-fill (memset before building), receivers ignore. `mask` has
+     * one free bit (0x80); its data field claims reserved[0]. */
+    uint8_t reserved[1];    /* v6 */
 };
 
 struct __attribute__((packed)) espnow_probe_pkt {
     uint8_t type;           /* ESPNOW_PKT_PROBE */
     uint8_t version;        /* ESPNOW_PROTO_VERSION */
     uint8_t want_info;      /* 1 while dial is on SYSTEM/HOMEKIT/WIFI screen */
+    /* Senders zero-fill, receivers ignore. First claim is expected to be a
+     * device-class/capability byte if a second accessory type ever ships. */
+    uint8_t reserved[1];    /* v6 */
 };
 
 struct __attribute__((packed)) espnow_pair_req_pkt {
@@ -149,14 +176,30 @@ struct __attribute__((packed)) espnow_pair_resp_pkt {
 
 /* sizeof guards — both copies of this header must agree */
 #define ESPNOW_STATIC_ASSERT(c, m) typedef char espnow_sa_##m[(c) ? 1 : -1]
-ESPNOW_STATIC_ASSERT(sizeof(struct espnow_state_pkt) == 12, state_size);
-ESPNOW_STATIC_ASSERT(sizeof(struct espnow_info_pkt)  == 75, info_size);
-ESPNOW_STATIC_ASSERT(sizeof(struct espnow_cmd_pkt)   == 11, cmd_size);
-ESPNOW_STATIC_ASSERT(sizeof(struct espnow_probe_pkt) == 3,  probe_size);
+ESPNOW_STATIC_ASSERT(sizeof(struct espnow_state_pkt) == 14, state_size);
+ESPNOW_STATIC_ASSERT(sizeof(struct espnow_info_pkt)  == 77, info_size);
+ESPNOW_STATIC_ASSERT(sizeof(struct espnow_cmd_pkt)   == 12, cmd_size);
+ESPNOW_STATIC_ASSERT(sizeof(struct espnow_probe_pkt) == 4,  probe_size);
 ESPNOW_STATIC_ASSERT(sizeof(struct espnow_pair_req_pkt)  == 56, pair_req_size);
 ESPNOW_STATIC_ASSERT(sizeof(struct espnow_pair_resp_pkt) == 56, pair_resp_size);
+/* MIN_LEN never exceeds the current wire size. */
+ESPNOW_STATIC_ASSERT(ESPNOW_STATE_MIN_LEN <= (int)sizeof(struct espnow_state_pkt), state_minlen);
+ESPNOW_STATIC_ASSERT(ESPNOW_INFO_MIN_LEN  <= (int)sizeof(struct espnow_info_pkt),  info_minlen);
+ESPNOW_STATIC_ASSERT(ESPNOW_CMD_MIN_LEN   <= (int)sizeof(struct espnow_cmd_pkt),   cmd_minlen);
+ESPNOW_STATIC_ASSERT(ESPNOW_PROBE_MIN_LEN <= (int)sizeof(struct espnow_probe_pkt), probe_minlen);
 
 /* ── pure helpers ─────────────────────────────────────────────────────── */
+
+/* Tolerant packet decode: zero-fill the struct, then copy min(len, dstsz).
+ * A shorter MIN_COMPAT-era packet leaves its missing tail (reserved bytes /
+ * appended fields) zeroed; a longer future packet has its unknown tail
+ * ignored. Callers gate on `len >= ESPNOW_*_MIN_LEN` first. */
+static inline void espnow_decode_pkt(void *dst, size_t dstsz,
+                                     const void *src, int len) {
+    memset(dst, 0, dstsz);
+    size_t n = (size_t)len < dstsz ? (size_t)len : dstsz;
+    memcpy(dst, src, n);
+}
 
 static inline int16_t espnow_c_to_dc(float c)   { return (int16_t)lroundf(c * 10.0f); }
 static inline float   espnow_dc_to_c(int16_t dc) { return (float)dc / 10.0f; }

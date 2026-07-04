@@ -4,12 +4,15 @@
 #include "espnow_proto.h"
 
 static void test_sizes(void) {
-    assert(sizeof(struct espnow_state_pkt) == 12);
-    assert(sizeof(struct espnow_info_pkt)  == 75);
-    assert(sizeof(struct espnow_cmd_pkt)   == 11);
-    assert(sizeof(struct espnow_probe_pkt) == 3);
+    assert(sizeof(struct espnow_state_pkt) == 14);  /* v6: +reserved[2] */
+    assert(sizeof(struct espnow_info_pkt)  == 77);  /* v6: +reserved[2] */
+    assert(sizeof(struct espnow_cmd_pkt)   == 12);  /* v6: +reserved[1] */
+    assert(sizeof(struct espnow_probe_pkt) == 4);   /* v6: +reserved[1] */
     /* The compat floor must never exceed the current version. */
     assert(ESPNOW_PROTO_MIN_COMPAT <= ESPNOW_PROTO_VERSION);
+    /* MIN_LEN stays pinned to the floor-era (v5) sizes. */
+    assert(ESPNOW_STATE_MIN_LEN == 12 && ESPNOW_INFO_MIN_LEN == 75);
+    assert(ESPNOW_CMD_MIN_LEN == 11 && ESPNOW_PROBE_MIN_LEN == 3);
 }
 
 static void test_temp_celsius_roundtrip(void) {
@@ -111,7 +114,7 @@ static void test_state_flags(void) {
  * decide whether the change is additive (leave MIN_COMPAT) or breaking (raise
  * it). Update the constant below only after doing both. */
 static void test_cmd_units_field(void) {
-    assert(ESPNOW_PROTO_VERSION == 5);
+    assert(ESPNOW_PROTO_VERSION == 6);
     struct espnow_cmd_pkt c;
     memset(&c, 0, sizeof(c));
     c.type = ESPNOW_PKT_CMD; c.version = ESPNOW_PROTO_VERSION;
@@ -140,10 +143,35 @@ static void test_forward_compat_prefix(void) {
     memcpy(wire, &c, sizeof(c));
 
     struct espnow_cmd_pkt got;
-    memcpy(&got, wire, sizeof(got));         /* prefix copy, ignore 5-byte tail */
+    espnow_decode_pkt(&got, sizeof(got), wire, (int)sizeof(wire));
     assert(got.type == ESPNOW_PKT_CMD);
     assert(got.version == ESPNOW_PROTO_VERSION + 3);
     assert(got.mask == ESPNOW_CM_TEMP && got.set_dc == 235);
+    assert(got.reserved[0] == 0);            /* unknown tail did NOT leak in */
+}
+
+/* Backward-compat contract: a MIN_COMPAT-era (v5) peer sends SHORTER packets —
+ * the structs grew reserved tails in v6. The receiver gates on the floor-era
+ * ESPNOW_*_MIN_LEN and decodes with zero-fill + prefix copy, so the missing
+ * tail reads as zeros. This is exactly what a v6 unit does with a v5 Dial's
+ * 11-byte CMD and 3-byte PROBE. */
+static void test_backward_compat_short(void) {
+    /* Build a v5-shaped 11-byte CMD: today's layout minus the reserved tail. */
+    struct espnow_cmd_pkt full;
+    memset(&full, 0, sizeof(full));
+    full.type = ESPNOW_PKT_CMD; full.version = 5;
+    full.mask = ESPNOW_CM_TEMP | ESPNOW_CM_FAN; full.fan = 2; full.set_dc = 215;
+    uint8_t wire[ESPNOW_CMD_MIN_LEN];
+    memcpy(wire, &full, sizeof(wire));       /* truncate to the v5 size */
+
+    assert((int)sizeof(wire) >= ESPNOW_CMD_MIN_LEN);   /* receiver's gate */
+    struct espnow_cmd_pkt got;
+    memset(&got, 0xEE, sizeof(got));         /* dirty struct: decode must clear */
+    espnow_decode_pkt(&got, sizeof(got), wire, (int)sizeof(wire));
+    assert(got.version == 5);
+    assert(got.mask == (ESPNOW_CM_TEMP | ESPNOW_CM_FAN));
+    assert(got.fan == 2 && got.set_dc == 215);
+    assert(got.reserved[0] == 0);            /* absent tail zero-filled */
 }
 
 static void test_parse_mac(void) {
@@ -240,6 +268,7 @@ int main(void) {
     test_state_flags();
     test_cmd_units_field();
     test_forward_compat_prefix();
+    test_backward_compat_short();
     test_struct_wire_roundtrip();
     test_info_wire_roundtrip();
     test_parse_mac();
