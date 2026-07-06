@@ -21,7 +21,7 @@ Controls Mitsubishi mini split heat pumps via the CN105 serial connector, compat
 - **Native Apple HomeKit** — pairs directly with Apple Home; no cloud, bridge hardware, or Home Assistant required
 - **Web UI** — real-time control, diagnostics, and log streaming
 - **Browser-based flashing** — no development tools needed ([web flasher](https://serin-labs.github.io/flash))
-- **BLE remote temperature sensor** — Govee, Xiaomi (PVVX), BTHome v2, with auto-detection
+- **BLE remote temperature sensor** — Govee, Xiaomi (PVVX), SwitchBot, BTHome v2, with auto-detection
 - **OTA firmware updates** — with SHA256 verification and automatic rollback
 - **Dual setpoint Auto mode** — independent heating and cooling thresholds
 - **Multi-board support** — ESP32, ESP32-C3, ESP32-C6, ESP32-S3
@@ -189,7 +189,8 @@ The firmware auto-detects the sensor type from the BLE advertisement format.
 | Govee V2 | H5074, H5051, H5052, H5071 | ✅ |
 | Govee V1 | H5100, H5101, H5102, H5103, H5104, H5105, H5108, H5110, H5174, H5177, GV5179 | ✅ |
 | PVVX | Xiaomi LYWSD03MMC, CGG1 (requires [PVVX custom firmware](https://github.com/pvvx/ATC_MiThermometer)) | ❌ |
-| BTHome v2 | SwitchBot, Shelly, or any BTHome v2 device | ❌ |
+| SwitchBot | Meter (W2300000), Meter Plus (W2301500), Meter Pro (W4900010) ✅, Meter Pro CO2 (W4900030), Indoor/Outdoor Meter (W3400010) | ✅ |
+| BTHome v2 | Shelly BLU H&T, or any BTHome v2 device | ❌ |
 
 ### Web UI Configuration
 

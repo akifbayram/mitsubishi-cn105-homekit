@@ -204,13 +204,121 @@ static bool decodeBTHome(const uint8_t* svc, uint8_t len, SensorReading& out) {
     return gotTemp;
 }
 
+// SwitchBot Meter family — proprietary format, readings split across AD fields.
+// Company ID 0x0969 is shared by every SwitchBot product with unrelated bytes
+// at the same offsets, so the 0x0969 temp+hum decode is gated on a meter-type
+// 0xFD3D service-data field. Each decoder fills what its field carries.
+static bool isSwitchBotMeter(uint8_t devType) {
+    return devType == 'T' ||   // Meter
+           devType == 'i' ||   // Meter Plus
+           devType == '4' ||   // Meter Pro
+           devType == '5' ||   // Meter Pro CO2
+           devType == 'w';     // Indoor/Outdoor Meter
+}
+
+// Device-type byte from the 0xFD3D service data (0 if absent) — gates the
+// 0x0969 manufacturer decoder to meters only.
+static uint8_t switchBotType(const uint8_t* adv, size_t totalLen) {
+    uint8_t i = 0;
+    while (i + 1 < totalLen) {
+        uint8_t fieldLen = adv[i];
+        if (fieldLen == 0 || i + fieldLen >= totalLen) break;
+        if (adv[i + 1] == 0x16 && fieldLen >= 4) {
+            uint16_t uuid = adv[i + 2] | (adv[i + 3] << 8);
+            if (uuid == 0xFD3D) return adv[i + 4] & 0x7F;  // bit7 flags "new data"
+        }
+        i += fieldLen + 1;
+    }
+    return 0;
+}
+
+// A meter splits across two PDUs — 0xFD3D (type+battery) in the ADV_IND, 0x0969
+// (temp+hum) in the SCAN_RSP — which NimBLE delivers as separate callbacks. So
+// cache the meter type per MAC to carry the gate across the pair. Scan-callback
+// only, no locking.
+struct SbTypeCacheEntry { char mac[18]; uint8_t type; uint32_t seen; };
+static SbTypeCacheEntry s_sbTypeCache[BLE_MAX_DISCOVERED];
+static int s_sbTypeCacheCount = 0;
+
+static uint8_t resolveSwitchBotType(const uint8_t* adv, size_t totalLen, const char* mac) {
+    uint8_t t = switchBotType(adv, totalLen);
+    if (mac == nullptr) return t;
+
+    if (t != 0) {                                    // 0xFD3D present — cache it
+        for (int i = 0; i < s_sbTypeCacheCount; i++) {
+            if (strcasecmp(s_sbTypeCache[i].mac, mac) == 0) {
+                s_sbTypeCache[i].type = t;
+                s_sbTypeCache[i].seen = uptime_ms();
+                return t;
+            }
+        }
+        int slot;
+        if (s_sbTypeCacheCount < (int)BLE_MAX_DISCOVERED) {
+            slot = s_sbTypeCacheCount++;
+        } else {                                     // evict least-recently-seen
+            slot = 0;
+            for (int i = 1; i < s_sbTypeCacheCount; i++)
+                if (s_sbTypeCache[i].seen < s_sbTypeCache[slot].seen) slot = i;
+        }
+        strncpy(s_sbTypeCache[slot].mac, mac, sizeof(s_sbTypeCache[slot].mac) - 1);
+        s_sbTypeCache[slot].mac[sizeof(s_sbTypeCache[slot].mac) - 1] = '\0';
+        s_sbTypeCache[slot].type = t;
+        s_sbTypeCache[slot].seen = uptime_ms();
+        return t;
+    }
+
+    // Scan response (no 0xFD3D) — reuse the cached type
+    for (int i = 0; i < s_sbTypeCacheCount; i++)
+        if (strcasecmp(s_sbTypeCache[i].mac, mac) == 0)
+            return s_sbTypeCache[i].type;
+    return 0;
+}
+
+// Shared 3-byte temp+hum: [0] low nibble = 0.1°C (high nibble = alert flags,
+// masked), [1] bits 0-6 = integer °C (bit7 = positive), [2] bits 0-6 = humidity.
+// Integer-only range checks — runs in the scan callback and C3/C6 have no FPU.
+static bool decodeSwitchBotTempHum(const uint8_t* d, SensorReading& out) {
+    int frac    = d[0] & 0x0F;
+    int tempInt = d[1] & 0x7F;
+    int hum     = d[2] & 0x7F;
+    bool positive = (d[1] & 0x80) != 0;
+    int tenths  = tempInt * 10 + frac;                     // |temp| in 0.1°C
+    if (frac > 9 || hum > 100 || tenths > (positive ? 800 : 400))
+        return false;                                      // mirrors validTemp/validHum
+    out.temp = positive ? (float)tenths / 10.0f : -(float)tenths / 10.0f;
+    out.hum  = (float)hum;
+    return true;
+}
+
+// Manufacturer data 0x0969, including the 2-byte company ID: temp+hum block at
+// [10-12]. Only called once the 0xFD3D field confirmed a meter device type
+static bool decodeSwitchBotMfr(const uint8_t* mfr, uint8_t len, SensorReading& out) {
+    if (len < 13) return false;
+    return decodeSwitchBotTempHum(mfr + 10, out);
+}
+
+// Service data UUID 0xFD3D, after the 2-byte UUID: [0]=device type,
+// [2]=battery, temp+hum block at [3-5] on Meter/Meter Plus
+static bool decodeSwitchBotSvc(const uint8_t* svc, uint8_t len, SensorReading& out) {
+    if (len < 3) return false;
+    uint8_t devType = svc[0] & 0x7F;
+    if (!isSwitchBotMeter(devType)) return false;   // Bot, Curtain, ...
+    bool gotData = false;
+    if ((devType == 'T' || devType == 'i') && len >= 6)
+        gotData = decodeSwitchBotTempHum(svc + 3, out);
+    int8_t batt = (int8_t)(svc[2] & 0x7F);
+    if (validBatt(batt)) { out.batt = batt; gotData = true; }
+    return gotData;   // false when the frame yielded nothing usable
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 // Decoder dispatch — try all decoders for a single AD field
 // ══════════════════════════════════════════════════════════════════════════════
 
 struct DecodeResult { bool decoded; const char* type; };
 
-static DecodeResult tryDecode(uint8_t fieldType, const uint8_t* data, uint8_t len, SensorReading& out) {
+static DecodeResult tryDecode(uint8_t fieldType, const uint8_t* data, uint8_t len,
+                              uint8_t sbType, SensorReading& out) {
     if (fieldType == 0xFF && len >= 2) {
         uint16_t cid = data[0] | (data[1] << 8);
         if (cid == 0xEC88) {
@@ -221,6 +329,9 @@ static DecodeResult tryDecode(uint8_t fieldType, const uint8_t* data, uint8_t le
         }
         if (cid == 0x0001 && len >= 8 && decodeGoveeV1(data, len, out))
             return {true, "Govee V1"};
+        if (cid == 0x0969 && len >= 13 && isSwitchBotMeter(sbType) &&
+            decodeSwitchBotMfr(data, len, out))
+            return {true, "SwitchBot"};
     }
     if (fieldType == 0x16 && len >= 2) {
         uint16_t uuid = data[0] | (data[1] << 8);
@@ -228,6 +339,8 @@ static DecodeResult tryDecode(uint8_t fieldType, const uint8_t* data, uint8_t le
             return {true, "PVVX"};
         if (uuid == 0xFCD2 && decodeBTHome(data + 2, len - 2, out))
             return {true, "BTHome v2"};
+        if (uuid == 0xFD3D && decodeSwitchBotSvc(data + 2, len - 2, out))
+            return {true, "SwitchBot"};
     }
     return {false, nullptr};
 }
@@ -240,13 +353,15 @@ static DecodeResult tryDecode(uint8_t fieldType, const uint8_t* data, uint8_t le
 // sensor type (string literal), or nullptr if no known sensor matched. Used by
 // both the live feed and discovery, so the two paths can never disagree on what
 // counts as a recognised sensor.
-static const char* decodeAdvertisement(const uint8_t* adv, size_t totalLen, SensorReading& out) {
+static const char* decodeAdvertisement(const uint8_t* adv, size_t totalLen,
+                                       const char* mac, SensorReading& out) {
     const char* type = nullptr;
+    const uint8_t sbType = resolveSwitchBotType(adv, totalLen, mac);
     uint8_t i = 0;
     while (i + 1 < totalLen) {
         uint8_t fieldLen = adv[i];
         if (fieldLen == 0 || i + fieldLen >= totalLen) break;
-        DecodeResult r = tryDecode(adv[i + 1], &adv[i + 2], fieldLen - 1, out);
+        DecodeResult r = tryDecode(adv[i + 1], &adv[i + 2], fieldLen - 1, sbType, out);
         if (r.decoded) type = r.type;
         i += fieldLen + 1;
     }
@@ -274,7 +389,8 @@ static void addDiscoveryResult(const char* addrLower, const char* name,
         }
     }
 
-    // Add new entry
+    // List only once a temperature decodes — a battery-only frame can't identify it
+    if (std::isnan(temp)) return;
     if (s_discoveryCount < BLE_MAX_DISCOVERED) {
         auto& d = s_discovered[s_discoveryCount];
         snprintf(d.addr, sizeof(d.addr), "%s", addr);
@@ -327,7 +443,7 @@ static int gap_event_cb(struct ble_gap_event *event, void *arg) {
         // the user can confirm the right device by its temperature/humidity
         if (s_discoveryMode) {
             SensorReading r;
-            const char* type = decodeAdvertisement(disc->data, disc->length_data, r);
+            const char* type = decodeAdvertisement(disc->data, disc->length_data, addrStr, r);
             if (type) {
                 char name[24];
                 extractDeviceName(disc->data, disc->length_data, name, sizeof(name));
@@ -341,16 +457,21 @@ static int gap_event_cb(struct ble_gap_event *event, void *arg) {
 
         // Decode the live advertisement and publish the freshest reading
         SensorReading reading;
-        const char* liveType = decodeAdvertisement(disc->data, disc->length_data, reading);
+        const char* liveType = decodeAdvertisement(disc->data, disc->length_data, addrStr, reading);
         if (liveType) {
             taskENTER_CRITICAL(&s_mux);
-            if (!std::isnan(reading.temp)) s_temperature = reading.temp;
-            if (!std::isnan(reading.hum))  s_humidity    = reading.hum;
-            if (reading.batt >= 0)         s_battery     = reading.batt;
-            s_sensorType    = liveType;
-            s_rssi          = disc->rssi;
-            s_lastUpdate    = uptime_ms();
-            s_staleReverted = false;
+            if (!std::isnan(reading.temp)) {
+                s_temperature   = reading.temp;
+                // Freshness follows the temperature: battery-only frames from
+                // split-field sensors (SwitchBot Pro family) must not keep the
+                // stale-revert watchdog from firing
+                s_lastUpdate    = uptime_ms();
+                s_staleReverted = false;
+            }
+            if (!std::isnan(reading.hum))  s_humidity = reading.hum;
+            if (reading.batt >= 0)         s_battery  = reading.batt;
+            s_sensorType = liveType;
+            s_rssi       = disc->rssi;
             taskEXIT_CRITICAL(&s_mux);
 
             if (!s_typeLogged) {
