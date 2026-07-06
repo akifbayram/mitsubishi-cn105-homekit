@@ -226,7 +226,9 @@ void EspnowLink::buildDiag(struct espnow_diag_pkt *p) {
 #ifdef FW_VERSION
     strncpy((char*)p->fw_ver, FW_VERSION, sizeof(p->fw_ver) - 1);
 #endif
-    strncpy((char*)p->build_date, esp_app_get_description()->date, sizeof(p->build_date) - 1);
+    /* bounded memcpy, not strncpy: date[16] > build_date[12] trips -Werror=stringop-truncation */
+    const char *date = esp_app_get_description()->date;
+    memcpy(p->build_date, date, strnlen(date, sizeof(p->build_date) - 1));
     /* esp_timer (64-bit µs), not uptime_ms(): the 32-bit ms tick wraps at ~49.7 days */
     p->uptime_s = (uint32_t)(esp_timer_get_time() / 1000000);
     p->reset_reason = (uint8_t)esp_reset_reason();
