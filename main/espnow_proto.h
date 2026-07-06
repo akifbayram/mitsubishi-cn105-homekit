@@ -18,7 +18,7 @@
 extern "C" {
 #endif
 
-#define ESPNOW_PROTO_VERSION 6
+#define ESPNOW_PROTO_VERSION 9
 
 /* Oldest peer protocol version this firmware still parses. Bump ONLY on a
  * breaking layout change (a field's type/offset moves, or a struct shrinks).
@@ -46,7 +46,15 @@ extern "C" {
  * v6 (this floor is 5): reserved[] tails added to STATE/CMD/INFO/PROBE. v5
  * peers' shorter packets still parse per rule 3; v5 RECEIVERS, however,
  * version-gate strictly and drop v6 frames, so a v5 Dial shows NOLINK against
- * a v6 unit until reflashed (the unit logs which side is behind). */
+ * a v6 unit until reflashed (the unit logs which side is behind).
+ * v7: WIFI_REQ/WIFI_RESP (Link OTA credential relay) — new packet types only;
+ * old peers ignore unknown types, so the floor is unchanged.
+ * v8: STATE gains flags2 (claims reserved[0]) with SF2_SENSOR_BATT_LOW; INFO
+ * gains sensor_batt_pct (claims reserved[0]) gated by IF_SENSORBATT_VALID.
+ * Additive per rule 2 (reserved byte) — sizeof unchanged, floor stays 5.
+ * v9: DIAG packet (unit -> dial device-info page) — new packet type only,
+ * pull-gated by PROBE.want_info like INFO; old peers ignore unknown types, so
+ * the floor is unchanged. */
 #define ESPNOW_PROTO_MIN_COMPAT 5
 
 /* Floor-era (v5) wire sizes — the receive path's length checks are pinned to
@@ -56,6 +64,12 @@ extern "C" {
 #define ESPNOW_INFO_MIN_LEN  75
 #define ESPNOW_CMD_MIN_LEN   11
 #define ESPNOW_PROBE_MIN_LEN 3
+/* v7 packets: new at v7, so their MIN_LEN == their v7 sizeof. */
+#define ESPNOW_WIFI_REQ_MIN_LEN  4
+#define ESPNOW_WIFI_RESP_MIN_LEN 103
+
+/* v9 packet: new at v9, so its MIN_LEN == its v9 sizeof. */
+#define ESPNOW_DIAG_MIN_LEN 56
 
 enum espnow_pkt_type {
     ESPNOW_PKT_STATE = 1,
@@ -64,6 +78,9 @@ enum espnow_pkt_type {
     ESPNOW_PKT_PAIR_REQ  = 4,   /* dial -> broadcast */
     ESPNOW_PKT_PAIR_RESP = 5,   /* unit -> broadcast, only while window open */
     ESPNOW_PKT_INFO  = 6,       /* unit -> dial, pull-only (PROBE want_info) */
+    ESPNOW_PKT_WIFI_REQ  = 7,   /* link -> unit: request home Wi-Fi creds (bonded/encrypted, Link OTA) */
+    ESPNOW_PKT_WIFI_RESP = 8,   /* unit -> link: creds reply (bonded/encrypted; ok=0 -> none stored) */
+    ESPNOW_PKT_DIAG  = 9,       /* unit -> dial, pull-only (PROBE want_info): device-info page */
 };
 
 /* STATE flag bits — home-dial status only */
@@ -81,10 +98,23 @@ enum {
 /* vane_config (0=none,1=vertical,2=vertical+horizontal) packed in STATE flags bits 6,7 */
 static inline uint8_t espnow_state_vanecfg(uint8_t flags) { return (flags >> 6) & 0x3; }
 
+/* STATE flags2 bits (claims reserved[0]; `flags` bits 0-7 are all assigned) */
+enum {
+    ESPNOW_SF2_SENSOR_BATT_LOW = 1u << 0,  /* remote sensor battery critical (unit-thresholded) */
+};
+
 /* INFO flag bits — validity travels with the data in espnow_info_pkt */
 enum {
     ESPNOW_IF_OUT_VALID     = 1u << 0,
     /* bit 1 reserved (was RUNTIME_VALID; runtime_h dropped in proto v3) */
+    ESPNOW_IF_SENSORBATT_VALID = 1u << 2,   /* sensor_batt_pct is valid (v8) */
+};
+
+/* DIAG flag bits — validity travels with the data in espnow_diag_pkt */
+enum {
+    ESPNOW_DF_RUNTIME_VALID   = 1u << 0,   /* runtime_h is valid */
+    ESPNOW_DF_BLE_VALID       = 1u << 1,   /* ble_temp_dc/ble_hum_pct/ble_rssi are valid */
+    ESPNOW_DF_TEMP_SRC_REMOTE = 1u << 2,   /* unit controls off the BLE remote sensor */
 };
 
 /* CMD field-mask bits */
@@ -112,7 +142,8 @@ struct __attribute__((packed)) espnow_state_pkt {
     /* Senders zero-fill (memset in buildState()), receivers ignore. `flags` is
      * FULL (bits 0-7 all assigned): the next status bit claims reserved[0] as a
      * `flags2` — VERSION bump, no MIN_COMPAT bump, sizeof unchanged. */
-    uint8_t  reserved[2];   /* v6 */
+    uint8_t  flags2;        /* v8: ESPNOW_SF2_* (was reserved[0]) */
+    uint8_t  reserved[1];   /* v6 */
 };
 
 struct __attribute__((packed)) espnow_info_pkt {
@@ -130,7 +161,8 @@ struct __attribute__((packed)) espnow_info_pkt {
     uint8_t  hk_code[16];   /* "XXX-XX-XXX\0" */
     /* Senders zero-fill (memset in buildInfo()), receivers ignore. iflags also
      * has 6 spare bits — prefer those for new validity flags. */
-    uint8_t  reserved[2];   /* v6 */
+    uint8_t  sensor_batt_pct; /* v8: remote sensor battery 0-100 (valid per IF_SENSORBATT_VALID; was reserved[0]) */
+    uint8_t  reserved[1];   /* v6 */
 };
 
 struct __attribute__((packed)) espnow_cmd_pkt {
@@ -158,6 +190,45 @@ struct __attribute__((packed)) espnow_probe_pkt {
     uint8_t reserved[1];    /* v6 */
 };
 
+/* ── DIAG (v9): unit diagnostics for the dial's About/device-info page ──────
+ * Pull-only like INFO (sent while PROBE.want_info is set). Everything here is
+ * informational — the dial renders it verbatim and shows "—" when absent. */
+struct __attribute__((packed)) espnow_diag_pkt {
+    uint8_t  type;            /* ESPNOW_PKT_DIAG */
+    uint8_t  version;         /* ESPNOW_PROTO_VERSION */
+    uint8_t  dflags;          /* ESPNOW_DF_* */
+    uint8_t  fw_ver[24];      /* unit firmware version, null-terminated */
+    uint8_t  build_date[12];  /* esp_app_desc date, e.g. "Jul  5 2026" */
+    uint32_t uptime_s;        /* unit uptime, seconds */
+    uint8_t  reset_reason;    /* raw esp_reset_reason_t value */
+    uint8_t  wifi_channel;    /* unit STA channel; 0 = not connected */
+    uint8_t  auto_sub_mode;   /* 0=OFF 1=COOL 2=HEAT 3=LEADER (Auto only) */
+    uint32_t runtime_h;       /* heat-pump accumulated runtime, hours (DF_RUNTIME_VALID) */
+    int16_t  ble_temp_dc;     /* BLE sensor temp, deci-C (DF_BLE_VALID) */
+    uint8_t  ble_hum_pct;     /* BLE sensor humidity %; 0xFF = unsupported */
+    int8_t   ble_rssi;        /* BLE advertisement RSSI, dBm */
+    uint8_t  reserved[2];     /* senders zero-fill, receivers ignore */
+};
+
+/* ── Link OTA credential relay (v7) ─────────────────────────────────────────
+ * Both packets travel ONLY unicast between bonded peers, so the ESP-NOW LMK
+ * encrypts them on the air. The link keeps the credentials in RAM for the
+ * duration of one update attempt and zeroizes them afterwards. */
+struct __attribute__((packed)) espnow_wifi_req_pkt {
+    uint8_t type;           /* ESPNOW_PKT_WIFI_REQ */
+    uint8_t version;        /* ESPNOW_PROTO_VERSION */
+    uint8_t reserved[2];    /* senders zero-fill, receivers ignore */
+};
+
+struct __attribute__((packed)) espnow_wifi_resp_pkt {
+    uint8_t type;           /* ESPNOW_PKT_WIFI_RESP */
+    uint8_t version;        /* ESPNOW_PROTO_VERSION */
+    uint8_t ok;             /* 1 = ssid/psk valid; 0 = unit has no stored creds */
+    uint8_t ssid[33];       /* null-terminated */
+    uint8_t psk[65];        /* null-terminated (WPA passphrase max 64) */
+    uint8_t reserved[2];    /* senders zero-fill, receivers ignore */
+};
+
 struct __attribute__((packed)) espnow_pair_req_pkt {
     uint8_t type;        /* ESPNOW_PKT_PAIR_REQ */
     uint8_t version;     /* ESPNOW_PROTO_VERSION */
@@ -180,13 +251,19 @@ ESPNOW_STATIC_ASSERT(sizeof(struct espnow_state_pkt) == 14, state_size);
 ESPNOW_STATIC_ASSERT(sizeof(struct espnow_info_pkt)  == 77, info_size);
 ESPNOW_STATIC_ASSERT(sizeof(struct espnow_cmd_pkt)   == 12, cmd_size);
 ESPNOW_STATIC_ASSERT(sizeof(struct espnow_probe_pkt) == 4,  probe_size);
+ESPNOW_STATIC_ASSERT(sizeof(struct espnow_wifi_req_pkt)  == 4,   wifi_req_size);
+ESPNOW_STATIC_ASSERT(sizeof(struct espnow_wifi_resp_pkt) == 103, wifi_resp_size);
 ESPNOW_STATIC_ASSERT(sizeof(struct espnow_pair_req_pkt)  == 56, pair_req_size);
 ESPNOW_STATIC_ASSERT(sizeof(struct espnow_pair_resp_pkt) == 56, pair_resp_size);
+ESPNOW_STATIC_ASSERT(sizeof(struct espnow_diag_pkt) == 56, diag_size);
 /* MIN_LEN never exceeds the current wire size. */
 ESPNOW_STATIC_ASSERT(ESPNOW_STATE_MIN_LEN <= (int)sizeof(struct espnow_state_pkt), state_minlen);
 ESPNOW_STATIC_ASSERT(ESPNOW_INFO_MIN_LEN  <= (int)sizeof(struct espnow_info_pkt),  info_minlen);
 ESPNOW_STATIC_ASSERT(ESPNOW_CMD_MIN_LEN   <= (int)sizeof(struct espnow_cmd_pkt),   cmd_minlen);
 ESPNOW_STATIC_ASSERT(ESPNOW_PROBE_MIN_LEN <= (int)sizeof(struct espnow_probe_pkt), probe_minlen);
+ESPNOW_STATIC_ASSERT(ESPNOW_WIFI_REQ_MIN_LEN  <= (int)sizeof(struct espnow_wifi_req_pkt),  wifi_req_minlen);
+ESPNOW_STATIC_ASSERT(ESPNOW_WIFI_RESP_MIN_LEN <= (int)sizeof(struct espnow_wifi_resp_pkt), wifi_resp_minlen);
+ESPNOW_STATIC_ASSERT(ESPNOW_DIAG_MIN_LEN <= (int)sizeof(struct espnow_diag_pkt), diag_minlen);
 
 /* ── pure helpers ─────────────────────────────────────────────────────── */
 

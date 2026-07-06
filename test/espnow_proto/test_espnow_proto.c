@@ -114,7 +114,7 @@ static void test_state_flags(void) {
  * decide whether the change is additive (leave MIN_COMPAT) or breaking (raise
  * it). Update the constant below only after doing both. */
 static void test_cmd_units_field(void) {
-    assert(ESPNOW_PROTO_VERSION == 6);
+    assert(ESPNOW_PROTO_VERSION == 9);
     struct espnow_cmd_pkt c;
     memset(&c, 0, sizeof(c));
     c.type = ESPNOW_PKT_CMD; c.version = ESPNOW_PROTO_VERSION;
@@ -259,6 +259,104 @@ static void test_pair_packets(void) {
     assert(salt[0] == 0 && salt[31] == 31 && salt[32] == 0x40 && salt[63] == 0x5F);
 }
 
+static void test_wifi_pkts(void) {
+    /* v7: Link OTA credential relay (new packet types; floor unchanged) */
+    assert(ESPNOW_PKT_WIFI_REQ == 7 && ESPNOW_PKT_WIFI_RESP == 8);
+    assert(sizeof(struct espnow_wifi_req_pkt)  == 4);
+    assert(sizeof(struct espnow_wifi_resp_pkt) == 103);
+    assert(ESPNOW_WIFI_REQ_MIN_LEN == 4 && ESPNOW_WIFI_RESP_MIN_LEN == 103);
+    assert(ESPNOW_PROTO_MIN_COMPAT == 5);     /* additive change: floor must not move */
+    /* tolerant decode zero-fills the tail beyond a short frame */
+    uint8_t raw[4] = { ESPNOW_PKT_WIFI_RESP, ESPNOW_PROTO_VERSION, 1, 'A' };
+    struct espnow_wifi_resp_pkt r;
+    espnow_decode_pkt(&r, sizeof(r), raw, (int)sizeof(raw));
+    assert(r.type == ESPNOW_PKT_WIFI_RESP && r.ok == 1);
+    assert(r.ssid[0] == 'A' && r.ssid[1] == 0 && r.psk[0] == 0);
+}
+
+/* v8: STATE flags2 carries the remote-sensor low-battery bit. reserved[0] was
+ * claimed as flags2 (sizeof unchanged), and a MIN_COMPAT-era 12-byte STATE
+ * must decode with flags2 == 0 (zero-fill), i.e. no battery UI. */
+static void test_state_flags2_sensor_batt(void) {
+    struct espnow_state_pkt p;
+    memset(&p, 0, sizeof(p));
+    p.type = ESPNOW_PKT_STATE; p.version = ESPNOW_PROTO_VERSION;
+    p.flags2 = ESPNOW_SF2_SENSOR_BATT_LOW;
+    uint8_t buf[sizeof(p)];
+    memcpy(buf, &p, sizeof(p));
+    struct espnow_state_pkt q;
+    memcpy(&q, buf, sizeof(q));
+    assert(q.flags2 & ESPNOW_SF2_SENSOR_BATT_LOW);
+
+    /* v5-shaped 12-byte STATE (pre-reserved-tail): flags2 must read 0. */
+    struct espnow_state_pkt full;
+    memset(&full, 0, sizeof(full));
+    full.type = ESPNOW_PKT_STATE; full.version = 5;
+    full.flags2 = ESPNOW_SF2_SENSOR_BATT_LOW;   /* would-be junk from a newer field */
+    uint8_t wire[ESPNOW_STATE_MIN_LEN];
+    memcpy(wire, &full, sizeof(wire));          /* truncate to v5 size (12) */
+    assert((int)sizeof(wire) >= ESPNOW_STATE_MIN_LEN);
+    struct espnow_state_pkt got;
+    memset(&got, 0xEE, sizeof(got));
+    espnow_decode_pkt(&got, sizeof(got), wire, (int)sizeof(wire));
+    assert(got.flags2 == 0);                    /* absent tail zero-filled */
+}
+
+/* v8: INFO carries the raw sensor battery %, valid per IF_SENSORBATT_VALID.
+ * A short v7-era 75-byte INFO decodes with the byte 0 and the valid bit clear. */
+static void test_info_sensor_batt(void) {
+    struct espnow_info_pkt p;
+    memset(&p, 0, sizeof(p));
+    p.type = ESPNOW_PKT_INFO; p.version = ESPNOW_PROTO_VERSION;
+    p.iflags = ESPNOW_IF_SENSORBATT_VALID;
+    p.sensor_batt_pct = 87;
+    uint8_t buf[sizeof(p)];
+    memcpy(buf, &p, sizeof(p));
+    struct espnow_info_pkt q;
+    memcpy(&q, buf, sizeof(q));
+    assert(q.iflags & ESPNOW_IF_SENSORBATT_VALID);
+    assert(q.sensor_batt_pct == 87);
+
+    /* MIN_COMPAT-era 75-byte INFO: valid bit clear, byte zero-filled. */
+    uint8_t wire[ESPNOW_INFO_MIN_LEN];
+    memset(wire, 0, sizeof(wire));
+    wire[0] = ESPNOW_PKT_INFO; wire[1] = 5;
+    struct espnow_info_pkt got;
+    memset(&got, 0xEE, sizeof(got));
+    espnow_decode_pkt(&got, sizeof(got), wire, (int)sizeof(wire));
+    assert(!(got.iflags & ESPNOW_IF_SENSORBATT_VALID));
+    assert(got.sensor_batt_pct == 0);
+}
+
+static void test_diag_pkt(void) {
+    /* v9: new pull-only unit->dial diagnostics packet. New at v9, so its
+     * MIN_LEN == its sizeof (no shorter-era senders exist). */
+    assert(ESPNOW_PROTO_VERSION == 9);
+    assert(ESPNOW_PROTO_MIN_COMPAT == 5);          /* additive: floor unchanged */
+    assert(ESPNOW_PKT_DIAG == 9);
+    assert(sizeof(struct espnow_diag_pkt) == 56);
+    assert(ESPNOW_DIAG_MIN_LEN == 56);
+
+    struct espnow_diag_pkt p; memset(&p, 0, sizeof p);
+    p.type = ESPNOW_PKT_DIAG; p.version = ESPNOW_PROTO_VERSION;
+    p.dflags = ESPNOW_DF_RUNTIME_VALID | ESPNOW_DF_BLE_VALID | ESPNOW_DF_TEMP_SRC_REMOTE;
+    strcpy((char*)p.fw_ver, "1.4.0");
+    strcpy((char*)p.build_date, "Jul  5 2026");
+    p.uptime_s = 123456; p.reset_reason = 1; p.wifi_channel = 6;
+    p.auto_sub_mode = 2; p.runtime_h = 4321;
+    p.ble_temp_dc = 215; p.ble_hum_pct = 55; p.ble_rssi = -60;
+
+    /* exact-size decode is an identity */
+    struct espnow_diag_pkt q;
+    espnow_decode_pkt(&q, sizeof q, &p, (int)sizeof p);
+    assert(memcmp(&p, &q, sizeof p) == 0);
+
+    /* a longer future packet's unknown tail is ignored */
+    uint8_t buf[64]; memset(buf, 0xAA, sizeof buf); memcpy(buf, &p, sizeof p);
+    espnow_decode_pkt(&q, sizeof q, buf, (int)sizeof buf);
+    assert(memcmp(&p, &q, sizeof p) == 0);
+}
+
 int main(void) {
     test_sizes();
     test_temp_celsius_roundtrip();
@@ -266,6 +364,8 @@ int main(void) {
     test_display_fahrenheit();
     test_fahrenheit_web_consistency();
     test_state_flags();
+    test_state_flags2_sensor_batt();
+    test_info_sensor_batt();
     test_cmd_units_field();
     test_forward_compat_prefix();
     test_backward_compat_short();
@@ -274,6 +374,8 @@ int main(void) {
     test_parse_mac();
     test_parse_hex16();
     test_pair_packets();
+    test_wifi_pkts();
+    test_diag_pkt();
     printf("ALL TESTS PASSED\n");
     return 0;
 }

@@ -29,11 +29,13 @@ private:
     void pairLoop();
     void buildState(struct espnow_state_pkt *p);
     void buildInfo(struct espnow_info_pkt *p);
+    void buildDiag(struct espnow_diag_pkt *p);
     CN105Controller *_ctrl = nullptr;
     bool     _bonded = false;
     uint8_t  _peer[6] = {0};
     uint32_t _lastStateTxMs = 0;
     uint32_t _lastInfoTxMs = 0;
+    uint32_t _lastDiagTxMs = 0;
     uint32_t _lastVerWarnMs = 0;   // throttle for the proto-version-skew warning
     struct espnow_state_pkt _lastState{};
     bool     _peerWasLive = false;

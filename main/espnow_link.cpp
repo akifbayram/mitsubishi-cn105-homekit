@@ -6,6 +6,10 @@
 #include <esp_wifi.h>
 #include <esp_console.h>
 #include <esp_mac.h>
+#include <esp_app_desc.h>
+#include <esp_system.h>
+#include <esp_timer.h>
+#include <cmath>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include "esp_utils.h"
@@ -17,6 +21,10 @@
 #include "wifi_manager.h"
 #include "homekit_setup.h"
 #include "settings.h"
+#include "ble_config.h"
+#ifdef BLE_ENABLE
+#include "ble_sensor.h"
+#endif
 
 static const char *TAG = "espnow_link";
 
@@ -45,6 +53,7 @@ static volatile bool          s_haveCmd = false;
 static struct espnow_cmd_pkt  s_cmd;
 static volatile uint32_t      s_lastProbeMs = 0;
 static volatile uint8_t       s_wantInfo = 0;
+static volatile bool          s_haveWifiReq = false;   // Link OTA: creds request pending
 // Protocol version of the last accepted peer packet. Lets the unit notice an
 // out-of-date (or ahead-of-us) Dial and warn instead of silently ignoring it.
 static volatile uint8_t       s_peerVer = 0;
@@ -108,6 +117,13 @@ static void onRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len
                 s_lastProbeMs = uptime_ms();
             }
             break;
+        case ESPNOW_PKT_WIFI_REQ:
+            // Link OTA: reply is deferred to loop() (NVS read + send off the WiFi task).
+            if (len >= ESPNOW_WIFI_REQ_MIN_LEN) {
+                s_haveWifiReq = true;
+                s_lastProbeMs = uptime_ms();
+            }
+            break;
         default: break;
     }
 }
@@ -160,6 +176,23 @@ void EspnowLink::buildState(struct espnow_state_pkt *p) {
     p->error_code = st.errorCode;
     p->room_dc = espnow_c_to_dc(st.roomTemp);
     p->set_dc  = espnow_c_to_dc(st.targetTemp);
+#ifdef BLE_ENABLE
+    /* Remote-sensor low-battery latch: ON at <=10%, clear only at >=15% so a
+     * cell hovering at the threshold doesn't flap the home-face chip. A stale
+     * sensor (isActive()==false) clears it — a dead sensor already surfaces via
+     * the room-temp fallback; this chip means "sensor alive but running out". */
+    static bool s_battLatch = false;
+    if (BleSensor::isEnabled() && BleSensor::isActive()) {
+        int8_t b = BleSensor::battery();
+        if (b >= 0) {
+            if (b <= 10)      s_battLatch = true;
+            else if (b >= 15) s_battLatch = false;
+        }
+    } else {
+        s_battLatch = false;
+    }
+    if (s_battLatch) p->flags2 |= ESPNOW_SF2_SENSOR_BATT_LOW;
+#endif
 }
 
 void EspnowLink::buildInfo(struct espnow_info_pkt *p) {
@@ -175,6 +208,51 @@ void EspnowLink::buildInfo(struct espnow_info_pkt *p) {
     WifiManager::getSSID((char*)p->ssid, sizeof(p->ssid));
     WifiManager::getIP((char*)p->ip, sizeof(p->ip));
     strncpy((char*)p->hk_code, homekit_get_setup_code(), sizeof(p->hk_code) - 1);
+#ifdef BLE_ENABLE
+    if (BleSensor::isEnabled()) {
+        int8_t b = BleSensor::battery();
+        if (b >= 0) {
+            p->sensor_batt_pct = (uint8_t)b;
+            p->iflags |= ESPNOW_IF_SENSORBATT_VALID;
+        }
+    }
+#endif
+}
+
+void EspnowLink::buildDiag(struct espnow_diag_pkt *p) {
+    memset(p, 0, sizeof(*p));
+    p->type = ESPNOW_PKT_DIAG; p->version = ESPNOW_PROTO_VERSION;
+    const CN105State st = _ctrl->getEffectiveState();
+#ifdef FW_VERSION
+    strncpy((char*)p->fw_ver, FW_VERSION, sizeof(p->fw_ver) - 1);
+#endif
+    strncpy((char*)p->build_date, esp_app_get_description()->date, sizeof(p->build_date) - 1);
+    /* esp_timer (64-bit µs), not uptime_ms(): the 32-bit ms tick wraps at ~49.7 days */
+    p->uptime_s = (uint32_t)(esp_timer_get_time() / 1000000);
+    p->reset_reason = (uint8_t)esp_reset_reason();
+    uint8_t ch = 0; wifi_second_chan_t sc;
+    if (esp_wifi_get_channel(&ch, &sc) == ESP_OK && WifiManager::isConnected())
+        p->wifi_channel = ch;
+    p->auto_sub_mode = st.autoSubMode;
+    if (st.runtimeValid) {
+        p->dflags |= ESPNOW_DF_RUNTIME_VALID;
+        p->runtime_h = (uint32_t)st.runtimeHours;
+    }
+#ifdef BLE_ENABLE
+    if (BleSensor::isEnabled() && BleSensor::isActive()) {
+        float t = BleSensor::temperature();
+        if (!std::isnan(t)) {
+            p->dflags |= ESPNOW_DF_BLE_VALID;
+            p->ble_temp_dc = espnow_c_to_dc(t);
+            float h = BleSensor::humidity();
+            p->ble_hum_pct = std::isnan(h) ? 0xFF : (uint8_t)lroundf(h);
+            p->ble_rssi = (int8_t)BleSensor::rssi();
+            /* "in control" = the feed is on and alive, so the heat pump is
+             * running off REMOTE_TEMP keepalives (see BleSensor::loop). */
+            if (settings.get().bleFeedEnabled) p->dflags |= ESPNOW_DF_TEMP_SRC_REMOTE;
+        }
+    }
+#endif
 }
 
 void EspnowLink::startPairing() {
@@ -349,6 +427,20 @@ void EspnowLink::loop() {
         _lastStateTxMs = uptime_ms();
     }
 
+    // Link OTA: hand the bonded link our home Wi-Fi credentials so it can pull
+    // its firmware manifest. Unicast to the encrypted peer (LMK on the air).
+    if (s_haveWifiReq) {
+        s_haveWifiReq = false;
+        struct espnow_wifi_resp_pkt r; memset(&r, 0, sizeof(r));
+        r.type = ESPNOW_PKT_WIFI_RESP; r.version = ESPNOW_PROTO_VERSION;
+        if (WifiManager::loadCredentials((char*)r.ssid, sizeof(r.ssid),
+                                         (char*)r.psk, sizeof(r.psk)))
+            r.ok = 1;
+        LOG_INFO("Link requested Wi-Fi credentials (%s)", r.ok ? "sent" : "none stored");
+        esp_now_send(_peer, (const uint8_t*)&r, sizeof(r));
+        memset(&r, 0, sizeof(r));   // don't leave the PSK sitting on the stack
+    }
+
     uint32_t now = uptime_ms();
     bool live = isPeerLive();
     if (!live) { _peerWasLive = false; return; }
@@ -371,6 +463,13 @@ void EspnowLink::loop() {
         struct espnow_info_pkt info; buildInfo(&info);
         esp_now_send(_peer, (const uint8_t*)&info, sizeof(info));
         _lastInfoTxMs = now;
+    }
+
+    // DIAG rides the same pull gate as INFO (dial is on an info screen).
+    if (s_wantInfo && now - _lastDiagTxMs >= INFO_MIN_INTERVAL) {
+        struct espnow_diag_pkt d; buildDiag(&d);
+        esp_now_send(_peer, (const uint8_t*)&d, sizeof(d));
+        _lastDiagTxMs = now;
     }
 }
 
