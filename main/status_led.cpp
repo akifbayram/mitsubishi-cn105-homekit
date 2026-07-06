@@ -9,6 +9,8 @@ static const char *TAG = "led";
 #include <driver/gpio.h>
 #include <esp_rom_sys.h>
 #include <led_strip.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 
 static constexpr uint8_t MAX_BRIGHT = 30;
 
@@ -23,6 +25,7 @@ static const char* stateName(LEDState s) {
         case SLED_PAIR_LISTEN:        return "PAIR_LISTEN";
         case SLED_PAIR_OK:            return "PAIR_OK";
         case SLED_PAIR_FAIL:          return "PAIR_FAIL";
+        case SLED_UNPAIR:             return "UNPAIR";
         default:                      return "?";
     }
 }
@@ -112,6 +115,10 @@ void StatusLED::setState(LEDState state) {
             _rgbOn = true;
             setColor(MAX_BRIGHT, 0, 0);  // red on immediately, blinks in loop()
             break;
+        case SLED_UNPAIR:
+            _rgbOn = true;
+            setColor(MAX_BRIGHT, MAX_BRIGHT / 2, 0);  // orange on immediately, blinks in loop()
+            break;
         case SLED_PAIR_LISTEN:
             // animated in loop(); leave dark until first loop tick
             break;
@@ -199,7 +206,27 @@ void StatusLED::loop() {
             }
             break;
         }
+
+        case SLED_UNPAIR: {
+            if (elapsed >= 200) {
+                _lastToggle = now;
+                _rgbOn = !_rgbOn;
+                if (_rgbOn) setColor(MAX_BRIGHT, MAX_BRIGHT / 2, 0);  // orange fast blink
+                else off();
+            }
+            break;
+        }
     }
+}
+
+void StatusLED::holdBlocking(LEDState state, uint32_t ms) {
+    setState(state);
+    uint32_t until = uptime_ms() + ms;
+    while ((int32_t)(until - uptime_ms()) > 0) {
+        loop();
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+    off();
 }
 
 void StatusLED::setColor(uint8_t r, uint8_t g, uint8_t b) {

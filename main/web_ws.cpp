@@ -15,6 +15,10 @@
 #endif
 #include "espnow_link.h"
 #include "espnow_bond.h"
+#include "status_led.h"
+#if PIN_LED_DATA >= 0
+extern StatusLED statusLED;   // defined in main.cpp
+#endif
 
 static const char *TAG = "web_ws";
 
@@ -317,7 +321,11 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
         LOG_WARN("ESP-NOW remote forget requested");
         sendWsText(httpd_req_to_sockfd(req), "{\"type\":\"info\",\"msg\":\"Forgetting remote...\"}");
         espnow_bond_clear();
+#if PIN_LED_DATA >= 0
+        statusLED.holdBlocking(SLED_UNPAIR, 2000);  // orange blink before restart
+#else
         vTaskDelay(pdMS_TO_TICKS(500));
+#endif
         esp_restart();
 
     } else if (strcmp(cmd, "pairRemote") == 0) {

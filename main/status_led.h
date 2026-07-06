@@ -13,7 +13,8 @@ enum LEDState {
     SLED_OTA,                // Firmware upload — blue slow pulse (~2s)
     SLED_PAIR_LISTEN,        // Display Link pairing window open — purple slow pulse
     SLED_PAIR_OK,            // Pairing succeeded — solid green (held ~5s by caller)
-    SLED_PAIR_FAIL           // Pairing timed out — red fast blink (held ~3s by caller)
+    SLED_PAIR_FAIL,          // Pairing timed out — red fast blink (held ~3s by caller)
+    SLED_UNPAIR              // Display Link forgotten — orange fast blink (held by caller before restart)
 };
 
 #if PIN_LED_DATA >= 0
@@ -28,6 +29,10 @@ public:
     LEDState getState() const { return _state; }
     void setWifi(bool connected);
     void loop();
+    // Blocking hold: drive `state` for `ms`, animating the LED, then turn it
+    // off. For terminal indications shown right before an esp_restart() (e.g.
+    // SLED_UNPAIR), where the main-loop LED evaluation won't get another tick.
+    void holdBlocking(LEDState state, uint32_t ms);
 
 private:
     uint8_t              _pin;

@@ -211,7 +211,11 @@ void WifiRecovery::checkButton() {
                 } else if (espnowLink.isBonded()) {
                     LOG_WARN("[WiFiRecovery] Button hold — forgetting Display Link remote");
                     espnow_bond_clear();
+#if PIN_LED_DATA >= 0
+                    statusLED.holdBlocking(SLED_UNPAIR, 2000);  // orange blink before restart
+#else
                     vTaskDelay(pdMS_TO_TICKS(500));
+#endif
                     esp_restart();
                 } else {
                     LOG_INFO("[WiFiRecovery] Button hold — opening Display Link pairing");
