@@ -435,7 +435,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       </div>
       <div class="slider-row" id="sliderRow">
         <button class="temp-step" onclick="stepTemp(-1)" aria-label="Decrease temperature">&minus;</button>
-        <input type="range" id="tempSlider" min="16" max="31" step="0.5" value="22" oninput="onSliderInput()" onchange="onSliderChange()" aria-label="Target temperature">
+        <input type="range" id="tempSlider" min="16" max="30.5" step="0.5" value="22" oninput="onSliderInput()" onchange="onSliderChange()" aria-label="Target temperature">
         <button class="temp-step" onclick="stepTemp(1)" aria-label="Increase temperature">+</button>
       </div>
       <span id="sliderVal" class="hidden"></span>
@@ -445,12 +445,12 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
           <div class="dual-card heat">
             <div class="dual-card-lbl"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M13 2c.5 3-1.5 4-2.5 6S9 12 10 13c-.6-.2-1.6-1-1.8-2.5C6.8 12 6 13.4 6 15a6 6 0 0 0 12 0c0-4-3-5.5-5-13z"/></svg>Heat to</div>
             <div class="dual-card-val" id="heatThreshVal">20.0°</div>
-            <input type="range" class="slim" id="heatSlider" min="16" max="31" step="0.5" value="20" aria-label="Heating threshold temperature">
+            <input type="range" class="slim" id="heatSlider" min="16" max="30.5" step="0.5" value="20" aria-label="Heating threshold temperature">
           </div>
           <div class="dual-card cool">
             <div class="dual-card-lbl"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 2v20M4 7l16 10M20 7L4 17"/></svg>Cool to</div>
             <div class="dual-card-val" id="coolThreshVal">25.0°</div>
-            <input type="range" class="slim" id="coolSlider" min="16" max="31" step="0.5" value="25" aria-label="Cooling threshold temperature">
+            <input type="range" class="slim" id="coolSlider" min="16" max="30.5" step="0.5" value="25" aria-label="Cooling threshold temperature">
           </div>
         </div>
         <p class="range-help">Auto change-over is handled by the heat pump: it switches between heating and cooling only after the room sits about 4&deg;F (2&deg;C) past the set point for 15+ minutes, so a switch can lag.</p>
@@ -1920,9 +1920,9 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       setSliderAttrs(heatSlider,61,88,1,cToFTable(parseFloat(heatSlider.value)));
       setSliderAttrs(coolSlider,61,88,1,cToFTable(parseFloat(coolSlider.value)));
     } else {
-      setSliderAttrs(tempSlider,16,31,0.5,tempSlider.min==61?fToCTable(parseFloat(tempSlider.value)):parseFloat(tempSlider.value));
-      setSliderAttrs(heatSlider,16,31,0.5,heatSlider.min==61?fToCTable(parseFloat(heatSlider.value)):parseFloat(heatSlider.value));
-      setSliderAttrs(coolSlider,16,31,0.5,coolSlider.min==61?fToCTable(parseFloat(coolSlider.value)):parseFloat(coolSlider.value));
+      setSliderAttrs(tempSlider,16,30.5,0.5,tempSlider.min==61?fToCTable(parseFloat(tempSlider.value)):parseFloat(tempSlider.value));
+      setSliderAttrs(heatSlider,16,30.5,0.5,heatSlider.min==61?fToCTable(parseFloat(heatSlider.value)):parseFloat(heatSlider.value));
+      setSliderAttrs(coolSlider,16,30.5,0.5,coolSlider.min==61?fToCTable(parseFloat(coolSlider.value)):parseFloat(coolSlider.value));
     }
     paintTempSlider();
   }

@@ -82,7 +82,12 @@ constexpr uint8_t CN105_WVANE_SWING       = 0x0C;
 
 // ── Temperature Encoding ────────────────────────────────────────────────────
 constexpr float CN105_TEMP_MIN         = 16.0f;
-constexpr float CN105_TEMP_MAX         = 31.0f;
+// 30.5 (not 31.0) so the settable °C range matches the °F range exactly:
+// 30.5 °C == 88 °F, the top of the F-table (espnow_proto.h). Keeps the Dial,
+// web sliders and HomeKit constraints symmetric across units. The CN105 wire
+// encoding still uses a fixed 31 °C origin (cn105_protocol.cpp) — that is the
+// protocol datum, not the settable ceiling, and is intentionally left at 31.
+constexpr float CN105_TEMP_MAX         = 30.5f;
 
 // ── Timing ──────────────────────────────────────────────────────────────────
 // Follows MitsubishiCN105ESPHome reference project timing
