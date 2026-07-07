@@ -30,14 +30,6 @@ idf_component_register(
 # ── Pass firmware version from git to source code ────────────────────────────
 target_compile_definitions(${COMPONENT_TARGET} PRIVATE FW_VERSION="${PROJECT_VER}")
 
-# ── ESP-NOW remote (Dial) — brand-wide PMK (pairing-auth root). ───────────────
-# DEV-ONLY default; the real brand PMK is injected via -DESPNOW_PMK (CI secret)
-# and is never committed. Must be exactly 16 bytes.
-if(NOT DEFINED ESPNOW_PMK)
-    set(ESPNOW_PMK "DEV_PLACEHOLDER0")
-endif()
-target_compile_definitions(${COMPONENT_TARGET} PRIVATE ESPNOW_PMK=\"${ESPNOW_PMK}\")
-
 # ── Auto-select board profile based on IDF_TARGET ────────────────────────────
 # Each chip gets a default board profile. Override by setting -DBOARD_PROFILE_*
 # on the cmake command line (e.g., idf.py build -DBOARD_PROFILE_M5ATOMS3_LITE=1).

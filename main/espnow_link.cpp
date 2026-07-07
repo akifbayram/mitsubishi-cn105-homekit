@@ -28,13 +28,6 @@
 
 static const char *TAG = "espnow_link";
 
-#ifndef ESPNOW_PMK
-// DEV-ONLY 16-byte placeholder. The real brand PMK is injected at build time
-// via -DESPNOW_PMK (a CI secret) and is never committed. A build with this
-// placeholder runs but cannot pair with genuine Serin units.
-#define ESPNOW_PMK "DEV_PLACEHOLDER0"
-#endif
-
 #define ESPNOW_PAIR_WINDOW_MS 120000
 #define STATE_MIN_INTERVAL  250     // ms: floor between event-driven STATEs
 #define STATE_HEARTBEAT_MS  10000   // ms: max gap between STATEs while peer live
@@ -132,8 +125,11 @@ void EspnowLink::ensureEspnowInit() {
     if (_espnowReady) return;
     if (esp_now_init() != ESP_OK) { LOG_ERROR("esp_now_init failed"); return; }
     esp_wifi_get_mac(WIFI_IF_STA, s_ownMac);
-    if (esp_now_set_pmk((const uint8_t *)ESPNOW_PMK) != ESP_OK) {
-        LOG_ERROR("esp_now_set_pmk failed"); return;
+    _havePmk = espnow_pmk_load(_pmk);
+    if (_havePmk) {
+        if (esp_now_set_pmk(_pmk) != ESP_OK) { LOG_ERROR("esp_now_set_pmk failed"); return; }
+    } else {
+        LOG_WARN("no PMK provisioned — pairing disabled");
     }
     esp_now_register_recv_cb(onRecv);
     _espnowReady = true;
@@ -333,8 +329,8 @@ void EspnowLink::pairLoop() {
     if (haveReq) {
         uint8_t tr[40]; espnow_pair_req_transcript(&req, tr);
         uint8_t tag[16];
-        espnow_crypto_auth_tag((const uint8_t *)ESPNOW_PMK, strlen(ESPNOW_PMK), tr, sizeof(tr), tag);
-        bool ok = espnow_crypto_tag_ok(tag, req.tag) &&
+        espnow_crypto_auth_tag(_pmk, 16, tr, sizeof(tr), tag);
+        bool ok = _havePmk && espnow_crypto_tag_ok(tag, req.tag) &&
                   !(_pair == PAIR_CONFIRM && memcmp(req.src_mac, _candMac, 6) != 0);
         if (ok) {
             struct espnow_pair_resp_pkt resp; memset(&resp, 0, sizeof(resp));
@@ -342,7 +338,7 @@ void EspnowLink::pairLoop() {
             memcpy(resp.src_mac, s_ownMac, 6);
             memcpy(resp.pub, _ownPub, 32);
             uint8_t rtr[72]; espnow_pair_resp_transcript(&resp, req.pub, rtr);
-            espnow_crypto_auth_tag((const uint8_t *)ESPNOW_PMK, strlen(ESPNOW_PMK), rtr, sizeof(rtr), resp.tag);
+            espnow_crypto_auth_tag(_pmk, 16, rtr, sizeof(rtr), resp.tag);
             // Burst the RESP: the sweeping Dial parks on this channel only briefly
             // and our reply is deferred to the main loop, so a single send easily
             // misses its listen window. The spacing keeps ESP-NOW's async TX queue
@@ -514,14 +510,14 @@ static int cmd_selftest(int, char **) {
     }
     bool kdf = memcmp(lk_d, lk_u, 16) == 0;
 
-    const char *pmk = ESPNOW_PMK;
+    const uint8_t pmk[16] = {'S','E','L','F','T','E','S','T','p','m','k','0','0','0','0','0'};
     uint8_t msg[40]; for (int i = 0; i < 40; i++) msg[i] = (uint8_t)i;
     uint8_t t1[16], t2[16];
-    espnow_crypto_auth_tag((const uint8_t *)pmk, strlen(pmk), msg, sizeof(msg), t1);
-    espnow_crypto_auth_tag((const uint8_t *)pmk, strlen(pmk), msg, sizeof(msg), t2);
+    espnow_crypto_auth_tag(pmk, 16, msg, sizeof(msg), t1);
+    espnow_crypto_auth_tag(pmk, 16, msg, sizeof(msg), t2);
     bool tag = espnow_crypto_tag_ok(t1, t2);
     msg[0] ^= 1;
-    espnow_crypto_auth_tag((const uint8_t *)pmk, strlen(pmk), msg, sizeof(msg), t2);
+    espnow_crypto_auth_tag(pmk, 16, msg, sizeof(msg), t2);
     bool diff = !espnow_crypto_tag_ok(t1, t2);
 
     printf("ESPNOW-SELFTEST kdf=%d tag=%d diff=%d %s\n",

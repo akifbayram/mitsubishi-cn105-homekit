@@ -26,7 +26,7 @@ Controls Mitsubishi mini split heat pumps via the CN105 serial connector, compat
 - **Dual setpoint Auto mode** — independent heating and cooling thresholds
 - **Multi-board support** — ESP32, ESP32-C3, ESP32-C6, ESP32-S3
 - **WiFi recovery** — automatic fallback AP with web-based credential entry
-- **Display Link remote** — optional M5Dial physical dial over an encrypted ESP-NOW link
+- **Display Link remote** — optional physical dial for control and live status over an encrypted wireless link
 
 ## Quick Start
 
@@ -201,25 +201,9 @@ A **Remote Sensor** card appears in the web UI on boards with Bluetooth:
 - **Status** — live temperature, humidity, battery level, signal strength, and last update time
 - **Indicators** — green (active), orange (feed disabled), red (stale data), gray (scanning/not configured)
 
-## Display Link Remote (ESP-NOW)
+## Display Link Remote
 
-An optional M5Dial gives the headless unit a physical control surface over an **encrypted 1:1 ESP-NOW link**. The Dial mirrors live state and can change power, mode, setpoint, fan, and vanes; all HVAC logic stays on the unit. The link is idle until a Dial is bonded, so a unit with no remote behaves exactly as before.
-
-**Pairing:** Hold the unit's button to open a pairing window (LED feedback), then pair from the Dial — or provision both at a bench with `scripts/pair_dial.sh`. "Forget remote" in the web UI clears the bond.
-
-### Firmware compatibility
-
-The unit and the Dial run separate firmwares that update independently (the unit via OTA, the Dial via USB), so the two ends are routinely a version apart between updates. The ESP-NOW wire protocol is versioned to tolerate that instead of going dark:
-
-- **Compatibility floor** — each firmware declares the oldest peer protocol version it can still parse (`ESPNOW_PROTO_MIN_COMPAT`). Any peer at or above the floor is accepted; the receiver reads the fields it understands and ignores anything newer it doesn't. Only a **breaking** layout change raises the floor.
-- **Additive changes are free** — a new flag bit in a byte with room, a byte claimed from a packet's `reserved[]` tail, or a field appended to a packet bumps the protocol version but **not** the floor, so a peer one (or more) versions behind keeps working.
-- **Reserved growth room (proto v6)** — every data packet carries a small zero-filled `reserved[]` tail, so most future fields change no packet sizes at all. Length checks are pinned to the floor-era minimum sizes (`ESPNOW_*_MIN_LEN`, not `sizeof`), and decode is zero-fill + prefix-copy (`espnow_decode_pkt`), so both shorter old packets and longer future packets parse.
-- **Skew is visible, not silent** — when a bonded peer is seen on a different protocol version, both sides log a throttled warning naming which end (Dial or unit) should be updated, rather than dropping its packets without explanation.
-- **Pairing and keepalive bypass the floor** — so an out-of-date remote is still *seen* (and can be told to update) instead of vanishing entirely.
-
-This means an OTA that bumps the unit's protocol version with an additive change will not brick an already-paired Dial; a breaking change (rare) requires reflashing both, and the log warning makes the mismatch obvious.
-
-> **v5 → v6 flag day:** v6 added the `reserved[]` tails, which grew packet sizes. A v6 *receiver* still parses v5 senders (floor stays at 5), but v5 *receivers* version-gate strictly and drop v6 frames — so a v5 Dial shows NOLINK against a v6 unit until reflashed. Update the Dial together with (or before) the unit OTA. This is the last planned size-changing bump; from v6 on, growth happens inside the reserved tails.
+An optional physical dial that mirrors the unit's live state and controls power, mode, setpoint, fan, and vanes over an encrypted wireless link. All HVAC logic stays on the unit, and the link stays idle until a remote is paired, so a unit with no remote behaves exactly as before. Pair by holding the unit's button, then pairing from the dial; "Forget remote" in the web UI clears the bond.
 
 ## OTA Updates
 
