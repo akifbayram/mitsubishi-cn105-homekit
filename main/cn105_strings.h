@@ -159,21 +159,21 @@ inline uint8_t strToWideVane(const char *s) {
 
 inline const char* subModeToLogStr(uint8_t sm) {
     switch (sm) {
-        case 0x00: return "NORMAL";
-        case 0x02: return "DEFROST";
-        case 0x04: return "PREHEAT";
-        case 0x08: return "STANDBY";
-        default:   return "?";
+        case CN105_SUB_NORMAL:  return "NORMAL";
+        case CN105_SUB_DEFROST: return "DEFROST";
+        case CN105_SUB_PREHEAT: return "PREHEAT";
+        case CN105_SUB_STANDBY: return "STANDBY";
+        default:                return "?";
     }
 }
 
 inline const char* subModeToWebStr(uint8_t sm) {
     switch (sm) {
-        case 0x00: return "normal";
-        case 0x02: return "defrost";
-        case 0x04: return "preheat";
-        case 0x08: return "standby";
-        default:   return "unknown";
+        case CN105_SUB_NORMAL:  return "normal";
+        case CN105_SUB_DEFROST: return "defrost";
+        case CN105_SUB_PREHEAT: return "preheat";
+        case CN105_SUB_STANDBY: return "standby";
+        default:                return "unknown";
     }
 }
 
@@ -209,20 +209,20 @@ inline const char* stageToWebStr(uint8_t st) {
 
 inline const char* autoSubModeToLogStr(uint8_t asm_) {
     switch (asm_) {
-        case 0x00: return "OFF";
-        case 0x01: return "COOL";
-        case 0x02: return "HEAT";
-        case 0x03: return "LEADER";
-        default:   return "?";
+        case CN105_AUTOSUB_OFF:    return "OFF";
+        case CN105_AUTOSUB_COOL:   return "COOL";
+        case CN105_AUTOSUB_HEAT:   return "HEAT";
+        case CN105_AUTOSUB_LEADER: return "LEADER";
+        default:                   return "?";
     }
 }
 
 inline const char* autoSubModeToWebStr(uint8_t asm_) {
     switch (asm_) {
-        case 0x00: return "off";
-        case 0x01: return "cool";
-        case 0x02: return "heat";
-        case 0x03: return "leader";
-        default:   return "unknown";
+        case CN105_AUTOSUB_OFF:    return "off";
+        case CN105_AUTOSUB_COOL:   return "cool";
+        case CN105_AUTOSUB_HEAT:   return "heat";
+        case CN105_AUTOSUB_LEADER: return "leader";
+        default:                   return "unknown";
     }
 }

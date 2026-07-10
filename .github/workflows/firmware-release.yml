@@ -49,8 +49,8 @@ jobs:
           command: |
             # Derive profile macro from name (e.g. nanoc6 -> NANOC6, m5atoms3-lite -> M5ATOMS3_LITE)
             PROFILE=$(echo "${{ matrix.name }}" | tr '[:lower:]' '[:upper:]' | tr '-' '_')
-            # The ESP-NOW PMK is NVS-provisioned at fulfillment (not baked at
-            # build) since 68747a7 - release binaries are intentionally PMK-free.
+            # The ESP-NOW PMK is a public constant since Serin Link v2
+            # (SL2_ESPNOW_PMK); trust comes from Ed25519-signed pairing.
             idf.py set-target ${{ matrix.target }}
             idf.py -DBOARD_PROFILE_${PROFILE}=1 build
 

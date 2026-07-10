@@ -1,7 +1,6 @@
 #include "wifi_recovery.h"
 #include "improv_serial.h"
 #include "espnow_link.h"
-#include "espnow_bond.h"
 #include "dns_server.h"
 #include "settings.h"
 #include "logging.h"
@@ -17,10 +16,6 @@
 #include <freertos/task.h>       // transitive include (absent on esp32c6)
 
 static const char *TAG = "wifi_rec";
-
-#if PIN_LED_DATA >= 0
-extern StatusLED statusLED;   // defined in main.cpp — used only for the OTA gate
-#endif
 
 WifiRecovery wifiRecovery;
 
@@ -47,6 +42,14 @@ void WifiRecovery::begin(const char *apName, const char *displayName) {
 }
 
 void WifiRecovery::loop() {
+    // Button first, every call — the 2 s / 10 s hold thresholds need finer
+    // sampling than the 1 Hz WiFi check below.
+    checkButton();
+
+    uint32_t now = uptime_ms();
+    if (now - _lastWifiCheck < 1000) return;
+    _lastWifiCheck = now;
+
     bool connected = WifiManager::isConnected();
 
     // ── WiFi state transitions ──────────────────────────────────────────────
@@ -99,9 +102,6 @@ void WifiRecovery::loop() {
     }
 
     // ── DNS captive portal runs in its own task — no processNextRequest() needed
-
-    // ── Button is NOT sampled here: loop() runs at 1 Hz, too coarse for the
-    // 2 s / 10 s hold thresholds. main.cpp calls checkButton() every iteration.
 }
 
 void WifiRecovery::enableFallbackAP() {
@@ -213,13 +213,7 @@ void WifiRecovery::checkButton() {
                     espnowLink.cancelPairing();
                 } else if (espnowLink.isBonded()) {
                     LOG_WARN("[WiFiRecovery] Button hold — forgetting Link remote");
-                    espnow_bond_clear();
-#if PIN_LED_DATA >= 0
-                    statusLED.holdBlocking(SLED_UNPAIR, 2000);  // orange blink before restart
-#else
-                    vTaskDelay(pdMS_TO_TICKS(500));
-#endif
-                    esp_restart();
+                    espnow_forget_and_restart();
                 } else {
                     LOG_INFO("[WiFiRecovery] Button hold — opening Link pairing");
                     espnowLink.startPairing();

@@ -20,9 +20,9 @@ constexpr int8_t   WIFI_RESET_BUTTON_PIN = PIN_BUTTON;  // From board profile (-
 class WifiRecovery {
 public:
     void begin(const char *apName, const char *displayName);    // Initialize: store AP name, configure button GPIO
-    void loop();                       // Call from main loop at ~1 Hz: check WiFi, manage AP
-    void checkButton();                // Call every main-loop iteration: 1 Hz sampling mis-measures
-                                       // hold times by up to ±1 s (2 s vs 10 s thresholds)
+    void loop();                       // Call every main-loop iteration: samples the button each
+                                       // call (2 s / 10 s hold thresholds need ~10 ms sampling);
+                                       // WiFi/AP checks are rate-limited to 1 Hz internally
     bool isAPActive() const { return _apActive; }
     void setChangePending(bool pending); // Set/clear the NVS flag
     void activateNow();                  // Immediately enable fallback AP (no timeout)
@@ -30,6 +30,7 @@ public:
     uint32_t getWifiUptimeSeconds() const;
 
 private:
+    void checkButton();
     void enableFallbackAP();
     void disableFallbackAP();
     void refreshCachedSSID();          // Re-read SSID from WifiManager NVS into _cachedSSID
@@ -42,6 +43,7 @@ private:
     uint32_t _disconnectedSince = 0;     // uptime_ms() when WiFi was lost (0 = connected)
     uint32_t _wifiConnectedSince = 0;    // uptime_ms() when WiFi connected (0 = not connected)
     uint32_t _apShutdownAt = 0;          // uptime_ms() when AP should be disabled (0 = no pending shutdown)
+    uint32_t _lastWifiCheck = 0;         // uptime_ms() of last 1 Hz WiFi/AP check
     uint32_t _buttonPressStart = 0;      // uptime_ms() when button was first pressed (0 = not pressed)
     bool     _buttonTriggered = false;   // Prevent repeat triggers
     char     _cachedSSID[33] = "";       // Cached SSID to avoid NVS reads on every status poll

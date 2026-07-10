@@ -56,4 +56,6 @@ private:
     void off();
 };
 
+extern StatusLED statusLED;   // defined in main.cpp
+
 #endif // PIN_LED_DATA >= 0

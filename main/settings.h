@@ -31,9 +31,13 @@ public:
     void save();
     DeviceSettings& get() { return _settings; }
     const DeviceSettings& get() const { return _settings; }
+    // Bumped on every save() — lets consumers poll "did settings change?"
+    // with one integer compare instead of per-field compares each loop tick.
+    uint32_t generation() const { return _generation; }
 private:
     nvs_handle_t _handle = 0;
     DeviceSettings _settings;
+    uint32_t _generation = 0;
 };
 
 extern SettingsStore settings;

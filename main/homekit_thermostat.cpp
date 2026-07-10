@@ -86,8 +86,8 @@ static uint8_t deriveCurrentState(const CN105State &s) {
             case CN105_MODE_HEAT: return 1;
             case CN105_MODE_COOL: return 2;
             case CN105_MODE_AUTO:
-                if (s.autoSubMode == 0x02) return 1;  // AUTO_HEAT
-                if (s.autoSubMode == 0x01) return 2;  // AUTO_COOL
+                if (s.autoSubMode == CN105_AUTOSUB_HEAT) return 1;
+                if (s.autoSubMode == CN105_AUTOSUB_COOL) return 2;
                 if (s.roomTemp < s.targetTemp - 0.5f) return 1;
                 if (s.roomTemp > s.targetTemp + 0.5f) return 2;
                 return 1;

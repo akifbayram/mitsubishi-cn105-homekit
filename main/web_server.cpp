@@ -2,6 +2,7 @@
 #include "json_utils.h"
 #include "branding.h"
 #include "wifi_manager.h"
+#include "wifi_recovery.h"
 #include "homekit_setup.h"
 #include "logging.h"
 #include <cstring>
@@ -207,11 +208,11 @@ bool WebUI::applyWifiCredentials(const char *json, const char **outError) {
     // Password is optional (open networks send empty password)
     jsonGetString(json, "password", password, sizeof(password));
     LOG_INFO("Saving WiFi credentials (SSID: %s)", ssid);
-    // Mark change pending in settings (for WiFi recovery shorter timeout)
-    settings.get().wifiChangePending = true;
-    settings.save();
     // Connect via WifiManager (saves to NVS and initiates connection)
     WifiManager::connect(ssid, password);
+    // Mark change pending (shorter recovery timeout); also refreshes the
+    // cached SSID from the just-saved credentials
+    wifiRecovery.setChangePending(true);
     return true;
 }
 

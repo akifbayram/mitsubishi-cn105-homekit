@@ -82,11 +82,13 @@ void StatusLED::begin() {
 
 void StatusLED::setState(LEDState state) {
     // A requestHold() override (set from another task) wins until it expires.
+    // Exception: SLED_OTA outranks everything (matching the main-loop priority
+    // chain), so a firmware upload cancels an armed hold.
     if (_holdUntil) {
-        if ((int32_t)(_holdUntil - uptime_ms()) > 0) {
-            state = _holdState;
-        } else {
+        if (state == SLED_OTA || (int32_t)(_holdUntil - uptime_ms()) <= 0) {
             _holdUntil = 0;
+        } else {
+            state = _holdState;
         }
     }
     if (state == _state) return;

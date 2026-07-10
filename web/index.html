@@ -1632,8 +1632,10 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
         ps.textContent='Listening… '+(s.remotePairSecs||0)+'s — hold the button on the Link';
       }else if(s.remotePairResult==='timeout'){
         ps.textContent='No Link found. Put it in pairing mode and retry.';
-      }else if(s.remotePairResult==='error'){
-        ps.textContent='Pairing failed: could not save the bond. Check device logs and retry.';
+      }else if(s.remotePairResult==='full'){
+        ps.textContent='Pairing failed: this unit already has the maximum number of Links. Forget one and retry.';
+      }else if(s.remotePairResult==='pin-mismatch'){
+        ps.textContent='Pairing failed: confirmation mismatch. Retry pairing.';
       }else if(s.remoteBonded){
         ps.textContent='';
       }else{

@@ -1,26 +1,41 @@
+/*
+ * espnow_link.cpp — Serin Link v2 adapter.
+ *
+ * The protocol/state machine lives in the vendored libserinlink core
+ * (sl2_link.c, platform-free). This file provides its three contracts:
+ *   port   — esp_now_* transport, uptime clock, NVS "serinlink" kv
+ *   crypto — libsodium (Ed25519 identity/signatures, X25519, HKDF-SHA256)
+ *   hvac   — CN105Controller bridge (semantic v2 model <-> CN105 bytes)
+ * plus the v1-shaped EspnowLink facade main.cpp/web_ws/wifi_recovery use.
+ *
+ * Threading: the ESP-NOW recv callback (Wi-Fi task) only pushes raw frames
+ * into an SPSC ring; loop() (main task) drains it into the core.
+ */
 #include "espnow_link.h"
+
 #if ESPNOW_REMOTE_ENABLE
 
 #include <cstring>
+#include <cstdio>
 #include <esp_now.h>
 #include <esp_wifi.h>
 #include <esp_console.h>
-#include <esp_mac.h>
 #include <esp_app_desc.h>
 #include <esp_system.h>
-#include <esp_timer.h>
-#include <cmath>
+#include <nvs.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <sodium.h>
+
+#include "sl2_link.h"
+#include "sl2_rxq.h"
 #include "esp_utils.h"
 #include "logging.h"
-#include "espnow_proto.h"
-#include "espnow_crypto.h"
-#include "espnow_bond.h"
 #include "cn105_protocol.h"
 #include "wifi_manager.h"
 #include "homekit_setup.h"
 #include "settings.h"
+#include "status_led.h"
 #include "ble_config.h"
 #ifdef BLE_ENABLE
 #include "ble_sensor.h"
@@ -28,184 +43,263 @@
 
 static const char *TAG = "espnow_link";
 
-#define ESPNOW_PAIR_WINDOW_MS 120000
-#define STATE_MIN_INTERVAL  250     // ms: floor between event-driven STATEs
-#define STATE_HEARTBEAT_MS  10000   // ms: max gap between STATEs while peer live
-#define INFO_MIN_INTERVAL   2000    // ms: INFO cadence while the Dial asks (want_info)
-
-static const uint8_t BCAST[6] = {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF};
-
 EspnowLink espnowLink;
 
-static uint8_t s_ownMac[6];
+/* One pairing-window definition; the console strings paste the same number. */
+#define PAIR_WINDOW_S      60
+#define SL2_STR2(x)        #x
+#define SL2_STR(x)         SL2_STR2(x)
+#define PAIR_WINDOW_S_STR  SL2_STR(PAIR_WINDOW_S)
 
-// Latest decoded command, handed from the RX callback to loop() to apply on the
-// main task (callbacks run on the WiFi task — keep them short).
-static portMUX_TYPE           s_cmdMux = portMUX_INITIALIZER_UNLOCKED;
-static volatile bool          s_haveCmd = false;
-static struct espnow_cmd_pkt  s_cmd;
-static volatile uint32_t      s_lastProbeMs = 0;
-static volatile uint8_t       s_wantInfo = 0;
-static volatile uint8_t       s_wantIdent = 0;
-static volatile bool          s_haveWifiReq = false;   // Link OTA: creds request pending
-static volatile bool          s_haveScanReq = false;
-static volatile bool          s_haveWifiSet = false;
-static struct espnow_wifi_set_pkt s_wifiSet;   // guarded by s_cmdMux
-// Protocol version of the last accepted peer packet. Lets the unit notice an
-// out-of-date (or ahead-of-us) Dial and warn instead of silently ignoring it.
-static volatile uint8_t       s_peerVer = 0;
+static sl2_link_t       s_link;
+static sl2_rxq_t        s_rxq;
+static sl2_port_t       s_port;
+static sl2_crypto_t     s_crypto;
+static sl2_hvac_iface_t s_hvac;
+static CN105Controller *s_ctrl = nullptr;
+static bool             s_started = false;
+// caps-change watch: dial re-pulls CAPS when the built CAPS content changes.
+// Gated on the settings generation counter so the rebuild only runs after an
+// actual save(), not every loop tick.
+static uint32_t         s_capsGen = 0;
 
-// Pairing packets handed from the RX callback to pairLoop() (main task) so the
-// WiFi-task callback never runs crypto / esp_now_send / esp_restart (ESP-NOW
-// docs: "do not do lengthy operations in the callback").
-static volatile bool          s_havePairReq = false;
-static volatile bool          s_havePairProbe = false;
-static struct espnow_pair_req_pkt s_pendReq;
+/* Cross-task mailbox. The sl2 core is single-context by contract (sl2_link.h):
+ * only loop() — on the main task — may mutate s_link. The web (httpd) and
+ * console (REPL) tasks request mutations through these flags instead of
+ * calling into the core; loop() drains them next tick (<= one loop period,
+ * imperceptible next to the pairing window). */
+static volatile bool    s_reqPairStart     = false;
+static volatile bool    s_reqPairCancel    = false;
+static volatile bool    s_reqForgetAll     = false;
+static volatile bool    s_reqForgetRestart = false;   // forget + LED + esp_restart()
 
-static EspnowLink *s_self = nullptr;
+/* Status snapshot, refreshed by loop() on the main task. The web (httpd) and
+ * console tasks read this adapter-owned copy instead of calling into the core,
+ * so the single-context contract holds for reads as well as writes (no
+ * dependence on core internals being tear-safe across a re-vendor). */
+struct LinkStatus {
+    bool    bonded  = false;
+    bool    live    = false;
+    bool    pairing = false;
+    int     secsLeft = 0;
+    uint8_t mac0[6] = {};
+    /* Interned literal from the core (sl2_link.c only ever assigns string
+     * constants) — a single aligned pointer store is tear-free for the
+     * httpd/console reader tasks, unlike a byte-wise buffer copy. */
+    const char *result = "idle";
+    EspnowPairOutcome outcome = ESPNOW_PAIR_NONE;
+};
+static LinkStatus s_stat;
 
-static void onRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
-    if (!s_self) return;
-    if (len < 2) return;
-    const uint8_t type = data[0];
-    const uint8_t ver  = data[1];
-    // Version gate (see ESPNOW_PROTO_MIN_COMPAT). Accept anything at or above the
-    // compat floor — a newer peer's additively-grown packet parses fine because
-    // we read only the prefix we know and the `len >=` checks below tolerate the
-    // extra tail. PROBE and PAIR bypass the floor so an out-of-date peer is still
-    // *seen* (version recorded, warned in loop()) rather than vanishing, which is
-    // what lets a stale Dial be told to update instead of just going dark.
-    const bool negotiation = (type == ESPNOW_PKT_PROBE ||
-                              type == ESPNOW_PKT_PAIR_REQ ||
-                              type == ESPNOW_PKT_PAIR_RESP);
-    if (!negotiation && ver < ESPNOW_PROTO_MIN_COMPAT) return;
+/* ── port: transport / clock / kv ─────────────────────────────────────── */
 
-    // Pairing path: PAIR_REQ on broadcast, and the confirming PROBE.
-    if (s_self->pairingActive()) {
-        s_self->onPairRecv(info->src_addr, data, len);
-        // pairing packets are fully handled in onPairRecv; the bonded path below
-        // stays inert until a bond is persisted (_bonded is false during PAIR_CONFIRM)
+static void on_recv(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
+    sl2_rxq_push(&s_rxq, info->src_addr, info->des_addr, data, len);
+}
+
+static bool p_send(void *, const uint8_t mac[6], const void *buf, size_t len) {
+    return esp_now_send(mac, (const uint8_t *)buf, len) == ESP_OK;
+}
+
+static bool p_peer_add(void *, const uint8_t mac[6], const uint8_t lmk[16], bool encrypt) {
+    esp_now_peer_info_t pi = {};
+    memcpy(pi.peer_addr, mac, 6);
+    pi.ifidx = WIFI_IF_STA;
+    pi.channel = 0;                       // follow the STA channel
+    pi.encrypt = encrypt;
+    if (encrypt && lmk) memcpy(pi.lmk, lmk, 16);
+    esp_err_t err = esp_now_add_peer(&pi);
+    if (err == ESP_ERR_ESPNOW_EXIST) err = esp_now_mod_peer(&pi);
+    if (err != ESP_OK) LOG_ERROR("sl2 peer_add rc=0x%x", (unsigned)err);
+    return err == ESP_OK;
+}
+
+static void p_peer_del(void *, const uint8_t mac[6]) { esp_now_del_peer(mac); }
+
+static bool p_own_mac(void *, uint8_t out[6]) {
+    return esp_wifi_get_mac(WIFI_IF_STA, out) == ESP_OK;
+}
+
+static uint8_t current_channel(void) {
+    uint8_t ch = 0;
+    wifi_second_chan_t sc;
+    return esp_wifi_get_channel(&ch, &sc) == ESP_OK ? ch : 0;
+}
+
+static uint8_t p_channel(void *) { return current_channel(); }
+
+static uint32_t p_now_ms(void *) { return uptime_ms(); }
+
+static const char *SL2_NVS_NS = "serinlink";
+
+static bool p_kv_get(void *, const char *key, void *buf, size_t *len) {
+    nvs_handle_t h;
+    if (nvs_open(SL2_NVS_NS, NVS_READONLY, &h) != ESP_OK) return false;
+    esp_err_t err = nvs_get_blob(h, key, buf, len);
+    nvs_close(h);
+    return err == ESP_OK;
+}
+
+static bool p_kv_set(void *, const char *key, const void *buf, size_t len) {
+    nvs_handle_t h;
+    if (nvs_open(SL2_NVS_NS, NVS_READWRITE, &h) != ESP_OK) return false;
+    bool ok = nvs_set_blob(h, key, buf, len) == ESP_OK && nvs_commit(h) == ESP_OK;
+    nvs_close(h);
+    return ok;
+}
+
+static void p_log(void *, int level, const char *msg) {
+    switch (level) {
+        case 0:  LOG_ERROR("%s", msg); break;
+        case 1:  LOG_WARN("%s", msg);  break;
+        case 2:  LOG_INFO("%s", msg);  break;
+        default: LOG_DEBUG("%s", msg); break;
     }
-    if (!s_self->isBonded()) return;
-    uint8_t peer[6]; s_self->getPeerMac(peer);
-    if (memcmp(info->src_addr, peer, 6) != 0) return;            // allow-list
-    if (memcmp(info->des_addr, s_ownMac, 6) != 0) return;        // unicast only
-    // Record the bonded peer's protocol version for the skew warning in loop().
-    // An old bonded Dial whose STATE/CMD fail the floor still gets here via its
-    // PROBE (which bypasses the floor), so a real breaking skew is still seen.
-    s_peerVer = ver;
-    switch (data[0]) {
-        case ESPNOW_PKT_PROBE:
-            s_lastProbeMs = uptime_ms();
-            // MIN_LEN, not sizeof: a MIN_COMPAT-era probe is shorter than the
-            // current struct (v6 added a reserved tail) and must still count.
-            if (len >= ESPNOW_PROBE_MIN_LEN) s_wantInfo = data[2];
-            s_wantIdent = (len >= 4) ? data[3] : 0;   // v11; v<=10 peers send 0
-            break;
-        case ESPNOW_PKT_CMD:
-            // MIN_LEN + tolerant decode: a MIN_COMPAT-era Dial sends a shorter
-            // CMD (missing tail decodes as zeros); a newer Dial may send a
-            // longer one (unknown tail ignored).
-            if (len >= ESPNOW_CMD_MIN_LEN) {
-                struct espnow_cmd_pkt c;
-                espnow_decode_pkt(&c, sizeof(c), data, len);
-                portENTER_CRITICAL(&s_cmdMux);
-                memcpy((void*)&s_cmd, &c, sizeof(s_cmd)); s_haveCmd = true;
-                portEXIT_CRITICAL(&s_cmdMux);
-                s_lastProbeMs = uptime_ms();
-            }
-            break;
-        case ESPNOW_PKT_WIFI_REQ:
-            // Link OTA: reply is deferred to loop() (NVS read + send off the WiFi task).
-            if (len >= ESPNOW_WIFI_REQ_MIN_LEN) {
-                s_haveWifiReq = true;
-                s_lastProbeMs = uptime_ms();
-            }
-            break;
-        case ESPNOW_PKT_WIFI_SCAN_REQ:
-            // Dial-driven provisioning: scan is deferred to loop() (blocking scan
-            // must not run on the WiFi task).
-            if (len >= ESPNOW_WIFI_SCAN_REQ_MIN_LEN) {
-                s_haveScanReq = true;
-                s_lastProbeMs = uptime_ms();
-            }
-            break;
-        case ESPNOW_PKT_WIFI_SET:
-            if (len >= ESPNOW_WIFI_SET_MIN_LEN) {
-                struct espnow_wifi_set_pkt w;
-                espnow_decode_pkt(&w, sizeof(w), data, len);
-                portENTER_CRITICAL(&s_cmdMux);
-                memcpy((void*)&s_wifiSet, &w, sizeof(s_wifiSet)); s_haveWifiSet = true;
-                portEXIT_CRITICAL(&s_cmdMux);
-                memset(&w, 0, sizeof(w));   // no PSK copy left on this stack
-                s_lastProbeMs = uptime_ms();
-            }
-            break;
+}
+
+/* ── crypto: libsodium ────────────────────────────────────────────────── */
+
+static int c_rand(void *, uint8_t *buf, size_t len) {
+    randombytes_buf(buf, len);
+    return 0;
+}
+static int c_xkp(void *, uint8_t priv[32], uint8_t pub[32]) {
+    randombytes_buf(priv, 32);
+    return crypto_scalarmult_curve25519_base(pub, priv);
+}
+static int c_xsh(void *, const uint8_t priv[32], const uint8_t peer[32], uint8_t out[32]) {
+    return crypto_scalarmult_curve25519(out, priv, peer);
+}
+static int c_ekp(void *, uint8_t priv[64], uint8_t pub[32]) {
+    return crypto_sign_ed25519_keypair(pub, priv);
+}
+static int c_sign(void *, const uint8_t priv[64], const uint8_t *msg, size_t msg_len,
+                  uint8_t sig[64]) {
+    return crypto_sign_ed25519_detached(sig, nullptr, msg, msg_len, priv);
+}
+static int c_verify(void *, const uint8_t pub[32], const uint8_t *msg, size_t msg_len,
+                    const uint8_t sig[64]) {
+    return crypto_sign_ed25519_verify_detached(sig, msg, msg_len, pub);
+}
+
+/* ── hvac: CN105 <-> semantic v2 mapping ──────────────────────────────── */
+
+static uint8_t mode_to_sl2(bool power, uint8_t cn) {
+    if (!power) return SL2_MODE_OFF;
+    switch (cn) {
+        case CN105_MODE_HEAT: return SL2_MODE_HEAT;
+        case CN105_MODE_DRY:  return SL2_MODE_DRY;
+        case CN105_MODE_COOL: return SL2_MODE_COOL;
+        case CN105_MODE_FAN:  return SL2_MODE_FAN_ONLY;
+        case CN105_MODE_AUTO: return SL2_MODE_AUTO;
+        default:              return SL2_MODE_AUTO;
+    }
+}
+
+static uint8_t mode_from_sl2(uint8_t m) {
+    switch (m) {
+        case SL2_MODE_HEAT:     return CN105_MODE_HEAT;
+        case SL2_MODE_DRY:      return CN105_MODE_DRY;
+        case SL2_MODE_COOL:     return CN105_MODE_COOL;
+        case SL2_MODE_FAN_ONLY: return CN105_MODE_FAN;
+        default:                return CN105_MODE_AUTO;
+    }
+}
+
+/* fan detents: step i of 5 <-> canonical percent round(i*100/5) */
+static uint8_t fan_to_pct(uint8_t cn) {
+    switch (cn) {
+        case CN105_FAN_QUIET: return 20;
+        case CN105_FAN_1:     return 40;
+        case CN105_FAN_2:     return 60;
+        case CN105_FAN_3:     return 80;
+        case CN105_FAN_4:     return 100;
+        default:              return SL2_FAN_AUTO;
+    }
+}
+
+static uint8_t fan_from_pct(uint8_t pct) {
+    if (pct == SL2_FAN_AUTO) return CN105_FAN_AUTO;
+    int step = ((int)pct * 5 + 50) / 100;
+    if (step < 1) step = 1;
+    if (step > 5) step = 5;
+    static const uint8_t tab[5] = { CN105_FAN_QUIET, CN105_FAN_1, CN105_FAN_2,
+                                    CN105_FAN_3, CN105_FAN_4 };
+    return tab[step - 1];
+}
+
+static uint8_t vanev_to_sl2(uint8_t cn) {
+    if (cn == CN105_VANE_SWING) return SL2_VANE_SWING;
+    if (cn >= CN105_VANE_1 && cn <= CN105_VANE_5) return cn;   // 1..5 match
+    return SL2_VANE_AUTO;
+}
+static uint8_t vanev_from_sl2(uint8_t v) {
+    if (v == SL2_VANE_SWING) return CN105_VANE_SWING;
+    if (v >= 1 && v <= 5) return v;
+    return CN105_VANE_AUTO;
+}
+/* horizontal axis: positions 1..5 match CN105, SPLIT (0x08) is advertised as
+ * one extra sl2 position, swing = 0x0C. CN105 wide vane has no AUTO —
+ * incoming 0 falls back to CENTER. */
+static constexpr uint8_t SL2_WVANE_POS_SPLIT = 6;   // also the n_pos in CAPS
+static uint8_t vaneh_to_sl2(uint8_t cn) {
+    if (cn == CN105_WVANE_SWING) return SL2_VANE_SWING;
+    if (cn == CN105_WVANE_SPLIT) return SL2_WVANE_POS_SPLIT;
+    if (cn >= CN105_WVANE_LEFT_LEFT && cn <= CN105_WVANE_RIGHT_RIGHT) return cn;
+    return CN105_WVANE_CENTER;   // center default (positions 1..5 map 1:1)
+}
+static uint8_t vaneh_from_sl2(uint8_t v) {
+    if (v == SL2_VANE_SWING) return CN105_WVANE_SWING;
+    if (v == SL2_WVANE_POS_SPLIT) return CN105_WVANE_SPLIT;
+    if (v >= 1 && v <= 5) return v;
+    return CN105_WVANE_CENTER;
+}
+
+static uint8_t action_of(const CN105State &st) {
+    switch (st.subMode) {           // vendor sub-states outrank the operating flag
+        case CN105_SUB_DEFROST: return SL2_ACT_DEFROST;
+        case CN105_SUB_PREHEAT: return SL2_ACT_PREHEAT;
+        case CN105_SUB_STANDBY: return SL2_ACT_STANDBY;
         default: break;
     }
-}
-
-void EspnowLink::ensureEspnowInit() {
-    if (_espnowReady) return;
-    if (esp_now_init() != ESP_OK) { LOG_ERROR("esp_now_init failed"); return; }
-    esp_wifi_get_mac(WIFI_IF_STA, s_ownMac);
-    _havePmk = espnow_pmk_load(_pmk);
-    if (_havePmk) {
-        if (esp_now_set_pmk(_pmk) != ESP_OK) { LOG_ERROR("esp_now_set_pmk failed"); return; }
-    } else {
-        LOG_WARN("no PMK provisioned — pairing disabled (console: espnow-pmk <32-hex>)");
+    if (!st.power || !st.operating) return SL2_ACT_IDLE;
+    switch (st.mode) {
+        case CN105_MODE_HEAT: return SL2_ACT_HEATING;
+        case CN105_MODE_COOL: return SL2_ACT_COOLING;
+        case CN105_MODE_DRY:  return SL2_ACT_DRYING;
+        case CN105_MODE_FAN:  return SL2_ACT_FAN;
+        case CN105_MODE_AUTO:
+            if (st.autoSubMode == CN105_AUTOSUB_COOL) return SL2_ACT_COOLING;
+            if (st.autoSubMode == CN105_AUTOSUB_HEAT) return SL2_ACT_HEATING;
+            return SL2_ACT_IDLE;
+        default: return SL2_ACT_IDLE;
     }
-    esp_now_register_recv_cb(onRecv);
-    _espnowReady = true;
 }
 
-void EspnowLink::begin(CN105Controller *ctrl) {
-    _ctrl = ctrl;
-    s_self = this;
-    uint8_t lmk[16];
-    if (!espnow_bond_load(_peer, lmk)) {
-        LOG_INFO("ESP-NOW remote: no bond, link idle");
-        return;
-    }
-    ensureEspnowInit();
-    if (!_espnowReady) return;
-    esp_now_peer_info_t pi = {};
-    memcpy(pi.peer_addr, _peer, 6);
-    pi.ifidx = WIFI_IF_STA; pi.channel = 0; pi.encrypt = true;
-    memcpy(pi.lmk, lmk, 16);
-    if (esp_now_add_peer(&pi) != ESP_OK) { LOG_ERROR("esp_now_add_peer failed"); return; }
-    _bonded = true;
-    if (!_havePmk) {
-        LOG_WARN("bonded but no PMK in NVS — the encrypted link will NOT work; "
-                 "provision with 'espnow-pmk <32-hex>' and reboot");
-    }
-    LOG_INFO("ESP-NOW remote bonded to %02X:%02X:%02X:%02X:%02X:%02X",
-             _peer[0],_peer[1],_peer[2],_peer[3],_peer[4],_peer[5]);
-}
-
-void EspnowLink::getPeerMac(uint8_t out[6]) const { memcpy(out, _peer, 6); }
-bool EspnowLink::isPeerLive() const {
-    return _bonded && s_lastProbeMs != 0 && (uptime_ms() - s_lastProbeMs) < 6000;
-}
-
-void EspnowLink::buildState(struct espnow_state_pkt *p) {
-    memset(p, 0, sizeof(*p));
-    const CN105State st = _ctrl->getEffectiveState();
-    p->type = ESPNOW_PKT_STATE; p->version = ESPNOW_PROTO_VERSION;
-    p->flags = espnow_make_state_flags(
-        st.power, _ctrl->isConnected(), st.operating, WifiManager::isConnected(),
-        homekit_get_controller_count() > 0, settings.get().useFahrenheit,
-        settings.get().vaneConfig);
-    p->mode = st.mode; p->fan = st.fanSpeed; p->vane = st.vane; p->wide_vane = st.wideVane;
-    p->error_code = st.errorCode;
-    p->room_dc = espnow_c_to_dc(st.roomTemp);
-    p->set_dc  = espnow_c_to_dc(st.targetTemp);
-    if (WifiManager::hasCredentials()) p->flags2 |= ESPNOW_SF2_WIFI_PROVISIONED;
+static bool h_get_state(void *, sl2_hvac_state_t *out) {
+    const CN105State st = s_ctrl->getEffectiveState();
+    memset(out, 0, sizeof *out);
+    out->hvac_link        = s_ctrl->isConnected();
+    out->wifi             = WifiManager::isConnected();
+    out->wifi_provisioned = WifiManager::hasCredentials();
+    out->use_f            = settings.get().useFahrenheit;
+    out->mode   = mode_to_sl2(st.power, st.mode);
+    out->action = action_of(st);
+    out->fan    = fan_to_pct(st.fanSpeed);
+    uint8_t vc = settings.get().vaneConfig;
+    out->vane_v = (vc >= 1) ? vanev_to_sl2(st.vane) : 0;
+    out->vane_h = (vc >= 2) ? vaneh_to_sl2(st.wideVane) : 0;
+    out->preset = SL2_PRESET_NONE;
+    out->fault  = (st.errorCode == 0x80) ? 0 : st.errorCode;
+    out->room_dc = sl2_c_to_dc(st.roomTemp);
+    out->set_dc  = sl2_c_to_dc(st.targetTemp);
+    out->set_low_dc  = SL2_DC_NA;
+    out->set_high_dc = SL2_DC_NA;
+    out->room_hum_pct = SL2_HUM_NA;
+    out->hum_set_pct  = SL2_HUM_NA;
 #ifdef BLE_ENABLE
     /* Remote-sensor low-battery latch: ON at <=10%, clear only at >=15% so a
-     * cell hovering at the threshold doesn't flap the home-face chip. A stale
-     * sensor (isActive()==false) clears it — a dead sensor already surfaces via
-     * the room-temp fallback; this chip means "sensor alive but running out". */
+     * cell hovering at the threshold doesn't flap the home-face chip. */
     static bool s_battLatch = false;
     if (BleSensor::isEnabled() && BleSensor::isActive()) {
         int8_t b = BleSensor::battery();
@@ -216,477 +310,344 @@ void EspnowLink::buildState(struct espnow_state_pkt *p) {
     } else {
         s_battLatch = false;
     }
-    if (s_battLatch) p->flags2 |= ESPNOW_SF2_SENSOR_BATT_LOW;
+    out->sensor_batt_low = s_battLatch;
 #endif
+    return true;
 }
 
-void EspnowLink::buildInfo(struct espnow_info_pkt *p) {
-    memset(p, 0, sizeof(*p));
-    const CN105State st = _ctrl->getEffectiveState();
-    p->type = ESPNOW_PKT_INFO; p->version = ESPNOW_PROTO_VERSION;
-    p->iflags = espnow_make_info_flags(st.outsideTempValid);
-    p->compressor_hz = st.compressorHz;
-    p->sub_mode = st.subMode; p->stage = st.stage;
-    p->outside_dc = espnow_c_to_dc(st.outsideTemp);
-    p->hk_paired = (uint8_t)homekit_get_controller_count();
-    p->wifi_rssi = WifiManager::getRSSI();
-    WifiManager::getSSID((char*)p->ssid, sizeof(p->ssid));
-    WifiManager::getIP((char*)p->ip, sizeof(p->ip));
-    strncpy((char*)p->hk_code, homekit_get_setup_code(), sizeof(p->hk_code) - 1);
-    const char *payload = homekit_get_setup_payload();
-    if (payload) strncpy((char*)p->hk_payload, payload, sizeof(p->hk_payload) - 1);
-#ifdef BLE_ENABLE
-    if (BleSensor::isEnabled()) {
-        int8_t b = BleSensor::battery();
-        if (b >= 0) {
-            p->sensor_batt_pct = (uint8_t)b;
-            p->iflags |= ESPNOW_IF_SENSORBATT_VALID;
+static bool h_apply(void *, uint16_t mask, const struct sl2_cmd_pkt *cmd) {
+    if (mask & SL2_CM_MODE) {
+        if (cmd->mode == SL2_MODE_OFF) {
+            s_ctrl->setPower(false);
+        } else {
+            s_ctrl->setPower(true);
+            s_ctrl->setMode(mode_from_sl2(cmd->mode));
         }
     }
-#endif
+    if (mask & SL2_CM_TEMP)  s_ctrl->setTargetTemp(sl2_dc_to_c(cmd->set_dc));
+    if (mask & SL2_CM_FAN)   s_ctrl->setFanSpeed(fan_from_pct(cmd->fan));
+    if (mask & SL2_CM_VANEV) s_ctrl->setVane(vanev_from_sl2(cmd->vane_v));
+    if (mask & SL2_CM_VANEH) s_ctrl->setWideVane(vaneh_from_sl2(cmd->vane_h));
+    if (mask & SL2_CM_UNITS) {
+        settings.get().useFahrenheit = (cmd->use_f != 0);
+        settings.save();
+        LOG_INFO("Dial set display units: %s", cmd->use_f ? "F" : "C");
+    }
+    /* TEMP_BAND / PRESET / HUM: not declared in this controller's CAPS. */
+    return true;
 }
 
-void EspnowLink::buildDiag(struct espnow_diag_pkt *p) {
-    memset(p, 0, sizeof(*p));
-    p->type = ESPNOW_PKT_DIAG; p->version = ESPNOW_PROTO_VERSION;
-    const CN105State st = _ctrl->getEffectiveState();
-#ifdef FW_VERSION
-    /* bounded memcpy, not strncpy: FW_VERSION can be >= sizeof(fw_ver), which
-       trips -Werror=stringop-truncation; memset above leaves it null-terminated */
-    memcpy(p->fw_ver, FW_VERSION, strnlen(FW_VERSION, sizeof(p->fw_ver) - 1));
+static bool h_get_caps(void *, struct sl2_caps_pkt *out) {
+    out->caps_flags = 0;
+    out->modes = (uint16_t)((1u << SL2_MODE_OFF) | (1u << SL2_MODE_HEAT) |
+                            (1u << SL2_MODE_COOL) | (1u << SL2_MODE_DRY) |
+                            (1u << SL2_MODE_FAN_ONLY) | (1u << SL2_MODE_AUTO));
+    out->presets = 0;
+    out->fan_steps = 5;
+    out->fan_flags = SL2_FAN_HAS_AUTO;
+    uint8_t vc = settings.get().vaneConfig;
+    out->vane_v = (vc >= 1) ? SL2_VANECAP(5, true, true) : 0;
+    out->vane_h = (vc >= 2) ? SL2_VANECAP(SL2_WVANE_POS_SPLIT, false, true) : 0;
+    out->set_min_dc = sl2_c_to_dc(CN105_TEMP_MIN);
+    out->set_max_dc = sl2_c_to_dc(CN105_TEMP_MAX);
+    out->set_step_dc = 5;                   // 0.5 °C, the CN105 enhanced-mode step
+    out->ftab_id = 1;                       // Mitsubishi 61-88F table
+    out->band_min_gap_dc = 0;
+    out->hum_step_pct = 0;
+    uint16_t feat = SL2_FEAT_WIFI_INFO | SL2_FEAT_HOMEKIT | SL2_FEAT_OUTSIDE_T |
+                    SL2_FEAT_COMPRESSOR | SL2_FEAT_FW_INFO | SL2_FEAT_RUNTIME |
+                    SL2_FEAT_LINK_OTA_CREDS;
+#ifdef BLE_ENABLE
+    if (BleSensor::isEnabled()) feat |= SL2_FEAT_SENSOR_BATT;
 #endif
-    /* bounded memcpy, not strncpy: date[16] > build_date[12] trips -Werror=stringop-truncation */
-    const char *date = esp_app_get_description()->date;
-    memcpy(p->build_date, date, strnlen(date, sizeof(p->build_date) - 1));
-    /* esp_timer (64-bit µs), not uptime_ms(): the 32-bit ms tick wraps at ~49.7 days */
-    p->uptime_s = (uint32_t)(esp_timer_get_time() / 1000000);
-    p->reset_reason = (uint8_t)esp_reset_reason();
-    uint8_t ch = 0; wifi_second_chan_t sc;
-    if (esp_wifi_get_channel(&ch, &sc) == ESP_OK && WifiManager::isConnected())
-        p->wifi_channel = ch;
-    p->auto_sub_mode = st.autoSubMode;
-    if (st.runtimeValid) {
-        p->dflags |= ESPNOW_DF_RUNTIME_VALID;
-        p->runtime_h = (uint32_t)st.runtimeHours;
+    out->features = feat;
+    snprintf(out->name, sizeof out->name, "%s", settings.get().deviceName);
+    return true;
+}
+
+/* NUL-joined string pair for variable TLVs; returns bytes or 0 if too big. */
+static uint8_t tlv_strings(uint8_t *dst, size_t cap, const char *a, const char *b) {
+    size_t la = strlen(a) + 1, lb = strlen(b) + 1;
+    if (la + lb > cap || la + lb > 250) return 0;
+    memcpy(dst, a, la);
+    memcpy(dst + la, b, lb);
+    return (uint8_t)(la + lb);
+}
+
+static size_t h_fill_info(void *, uint8_t *buf, size_t cap) {
+    size_t off = 0;
+    const CN105State st = s_ctrl->getEffectiveState();
+    uint8_t tmp[128];
+
+    {   /* WIFI_INFO: i8 rssi, u8 channel, ssid\0 ip\0 */
+        char ssid[33] = "", ip[16] = "";
+        WifiManager::getSSID(ssid, sizeof ssid);
+        WifiManager::getIP(ip, sizeof ip);
+        tmp[0] = (uint8_t)WifiManager::getRSSI();
+        tmp[1] = current_channel();
+        uint8_t n = tlv_strings(tmp + 2, sizeof tmp - 2, ssid, ip);
+        if (n) sl2_tlv_put(buf, cap, &off, SL2_TLV_WIFI_INFO, tmp, (uint8_t)(2 + n));
+    }
+    {   /* HOMEKIT: u8 paired, code\0 payload\0 */
+        const char *code = homekit_get_setup_code();
+        const char *payload = homekit_get_setup_payload();
+        tmp[0] = (uint8_t)homekit_get_controller_count();
+        uint8_t n = tlv_strings(tmp + 1, sizeof tmp - 1,
+                                code ? code : "", payload ? payload : "");
+        if (n) sl2_tlv_put(buf, cap, &off, SL2_TLV_HOMEKIT, tmp, (uint8_t)(1 + n));
+    }
+    if (st.outsideTempValid) {
+        int16_t dc = sl2_c_to_dc(st.outsideTemp);
+        sl2_tlv_put(buf, cap, &off, SL2_TLV_OUTSIDE_T, &dc, 2);
+    }
+    {   /* COMPRESSOR: hz, stage, vendor sub_mode, vendor auto_sub */
+        uint8_t c[4] = { st.compressorHz, st.stage, st.subMode, st.autoSubMode };
+        sl2_tlv_put(buf, cap, &off, SL2_TLV_COMPRESSOR, c, 4);
     }
 #ifdef BLE_ENABLE
     if (BleSensor::isEnabled() && BleSensor::isActive()) {
-        float t = BleSensor::temperature();
-        if (!std::isnan(t)) {
-            p->dflags |= ESPNOW_DF_BLE_VALID;
-            p->ble_temp_dc = espnow_c_to_dc(t);
-            float h = BleSensor::humidity();
-            p->ble_hum_pct = std::isnan(h) ? 0xFF : (uint8_t)lroundf(h);
-            p->ble_rssi = (int8_t)BleSensor::rssi();
-            /* "in control" = the feed is on and alive, so the heat pump is
-             * running off REMOTE_TEMP keepalives (see BleSensor::loop). */
-            if (settings.get().bleFeedEnabled) p->dflags |= ESPNOW_DF_TEMP_SRC_REMOTE;
+        int8_t b = BleSensor::battery();
+        if (b >= 0) {
+            uint8_t pct = (uint8_t)b;
+            sl2_tlv_put(buf, cap, &off, SL2_TLV_SENSOR_BATT, &pct, 1);
         }
     }
 #endif
-}
-
-void EspnowLink::startPairing() {
-    ensureEspnowInit();
-    if (!_espnowReady) { _pairResult = "timeout"; return; }
-    if (!esp_now_is_peer_exist(BCAST)) {
-        esp_now_peer_info_t bp = {};
-        memcpy(bp.peer_addr, BCAST, 6);
-        bp.ifidx = WIFI_IF_STA; bp.channel = 0; bp.encrypt = false;
-        esp_now_add_peer(&bp);
+    {   /* FW_INFO: version\0 build_date\0 */
+        const esp_app_desc_t *app = esp_app_get_description();
+        uint8_t n = tlv_strings(tmp, sizeof tmp, app->version, app->date);
+        if (n) sl2_tlv_put(buf, cap, &off, SL2_TLV_FW_INFO, tmp, n);
     }
-    if (espnow_crypto_keypair(_ownPriv, _ownPub) != 0) { _pairResult = "timeout"; return; }
-    _pair = PAIR_LISTEN;
-    _pairStartMs = uptime_ms();
-    _pairResult = "listening";
-    LOG_INFO("ESP-NOW pairing window opened (%d s)", ESPNOW_PAIR_WINDOW_MS / 1000);
+    if (st.runtimeValid) {
+        uint32_t h = (uint32_t)st.runtimeHours;
+        uint8_t b[4];
+        memcpy(b, &h, 4);
+        sl2_tlv_put(buf, cap, &off, SL2_TLV_RUNTIME, b, 4);
+    }
+    {   /* SYS: u32 uptime_s, u8 reset_reason */
+        uint32_t up = uptime_ms() / 1000u;
+        memcpy(tmp, &up, 4);
+        tmp[4] = (uint8_t)esp_reset_reason();
+        sl2_tlv_put(buf, cap, &off, SL2_TLV_SYS, tmp, 5);
+    }
+    return off;
 }
 
-void EspnowLink::cancelPairing() {
-    if (_pair == PAIR_OFF) return;
-    _pair = PAIR_OFF;
-    if (esp_now_is_peer_exist(BCAST)) esp_now_del_peer(BCAST);
-    if (!_bonded && esp_now_is_peer_exist(_candMac)) esp_now_del_peer(_candMac);
-    if (strcmp(_pairResult, "paired") != 0 && strcmp(_pairResult, "timeout") != 0 &&
-        strcmp(_pairResult, "error") != 0)
-        _pairResult = "idle";
+static bool h_wifi_creds(void *, char ssid[33], char psk[65]) {
+    return WifiManager::loadCredentials(ssid, 33, psk, 65);
 }
 
-bool EspnowLink::pairingActive() const { return _pair != PAIR_OFF; }
-int  EspnowLink::pairingSecondsLeft() const {
-    if (_pair == PAIR_OFF) return 0;
-    uint32_t el = uptime_ms() - _pairStartMs;
-    return el >= ESPNOW_PAIR_WINDOW_MS ? 0 : (int)((ESPNOW_PAIR_WINDOW_MS - el) / 1000);
-}
-const char *EspnowLink::pairResult() const { return _pairResult; }
+/* ── caps fingerprint ─────────────────────────────────────────────────── */
 
-void EspnowLink::onPairRecv(const uint8_t src[6], const uint8_t *data, int len) {
-    // Capture only. All heavy work (verify, derive, send, restart) happens in
-    // pairLoop() on the main task — this runs on the WiFi task and must stay short.
-    if (data[0] == ESPNOW_PKT_PAIR_REQ &&
-        len == (int)sizeof(struct espnow_pair_req_pkt) &&
-        (_pair == PAIR_LISTEN || _pair == PAIR_CONFIRM)) {
-        portENTER_CRITICAL(&s_cmdMux);
-        memcpy((void *)&s_pendReq, data, sizeof(s_pendReq));
-        s_havePairReq = true;
-        portEXIT_CRITICAL(&s_cmdMux);
+/* Bonded dials cache CAPS by caps_seq, which the core persists — but the
+ * CONTENT can change under a stable seq (settings edits, a firmware update
+ * declaring new features). Fingerprint the built packet instead of
+ * enumerating its inputs here, so every future caps-affecting field is
+ * covered automatically (same scheme as the core repo's ESPHome adapter). */
+static const char *SL2_KV_CAPS_FP = "sl2_cfp";   /* adapter-owned, u32 */
+
+static uint32_t caps_fingerprint(void) {
+    struct sl2_caps_pkt cp;
+    memset(&cp, 0, sizeof cp);
+    h_get_caps(nullptr, &cp);
+    return fnv1a32(&cp, sizeof cp);
+}
+
+/* Main task only (mutates s_link). NVS is read once (first call) and mirrored
+ * in RAM after that, so the common "settings saved, CAPS unchanged" case is a
+ * pure integer compare. */
+static void caps_announce_if_changed(void) {
+    static uint32_t s_lastFp  = 0;
+    static bool     s_fpValid = false;
+    if (!s_fpValid) {
+        size_t len = sizeof s_lastFp;
+        s_fpValid = p_kv_get(nullptr, SL2_KV_CAPS_FP, &s_lastFp, &len) &&
+                    len == sizeof s_lastFp;
+    }
+    uint32_t fp = caps_fingerprint();
+    if (s_fpValid && fp == s_lastFp) return;
+    LOG_INFO("CAPS content changed (fp %08lx -> %08lx) — announcing",
+             (unsigned long)(s_fpValid ? s_lastFp : 0), (unsigned long)fp);
+    sl2_link_caps_changed(&s_link);
+    p_kv_set(nullptr, SL2_KV_CAPS_FP, &fp, sizeof fp);
+    s_lastFp = fp;
+    s_fpValid = true;
+}
+
+/* ── EspnowLink facade ────────────────────────────────────────────────── */
+
+static EspnowPairOutcome outcome_of(const char *r) {
+    if (strcmp(r, "paired") == 0) return ESPNOW_PAIR_OK;
+    if (strcmp(r, "timeout") == 0 || strcmp(r, "full") == 0 ||
+        strcmp(r, "pin-mismatch") == 0) return ESPNOW_PAIR_FAIL;
+    return ESPNOW_PAIR_NONE;   /* idle/listening/confirming/cancelled */
+}
+
+/* Main task only. */
+static void snapshot_status(void) {
+    s_stat.bonded   = sl2_link_dial_count(&s_link) > 0;
+    s_stat.live     = sl2_link_any_live(&s_link);
+    s_stat.pairing  = sl2_link_pairing(&s_link);
+    s_stat.secsLeft = sl2_link_pair_seconds_left(&s_link);
+    if (!sl2_link_dial_mac(&s_link, 0, s_stat.mac0)) memset(s_stat.mac0, 0, 6);
+    const char *r = sl2_link_pair_result(&s_link);
+    if (r != s_stat.result) {              /* interned — pointer compare works */
+        s_stat.outcome = outcome_of(r);
+        s_stat.result  = r;
+    }
+}
+
+void EspnowLink::begin(CN105Controller *ctrl) {
+    s_ctrl = ctrl;
+    if (sodium_init() < 0) { LOG_ERROR("sodium_init failed"); return; }
+    sl2_rxq_init(&s_rxq);
+
+    if (esp_now_init() != ESP_OK) { LOG_ERROR("esp_now_init failed"); return; }
+    if (esp_now_set_pmk((const uint8_t *)SL2_ESPNOW_PMK) != ESP_OK ||
+        esp_now_register_recv_cb(on_recv) != ESP_OK) {
+        LOG_ERROR("esp_now pmk/recv_cb setup failed");
+        esp_now_deinit();
         return;
     }
-    if (_pair == PAIR_CONFIRM && data[0] == ESPNOW_PKT_PROBE &&
-        memcmp(src, _candMac, 6) == 0) {
-        s_havePairProbe = true;
-    }
-}
 
-void EspnowLink::pairLoop() {
-    if (_restartAtMs) {
-        if ((int32_t)(uptime_ms() - _restartAtMs) >= 0) esp_restart();
-        return;
-    }
-    if (_pair == PAIR_OFF) return;
+    s_port = sl2_port_t{};
+    s_port.send = p_send;         s_port.peer_add = p_peer_add;
+    s_port.peer_del = p_peer_del; s_port.own_mac = p_own_mac;
+    s_port.get_channel = p_channel;
+    s_port.now_ms = p_now_ms;     s_port.kv_get = p_kv_get;
+    s_port.kv_set = p_kv_set;     s_port.log = p_log;
 
-    if (uptime_ms() - _pairStartMs >= ESPNOW_PAIR_WINDOW_MS) {
-        LOG_WARN("ESP-NOW pairing window timed out");
-        _pairResult = "timeout";
-        cancelPairing();
-        return;
-    }
+    s_crypto = sl2_crypto_t{};
+    s_crypto.rand_bytes = c_rand;
+    s_crypto.x25519_keypair = c_xkp;   s_crypto.x25519_shared = c_xsh;
+    s_crypto.ed25519_keypair = c_ekp;
+    s_crypto.ed25519_sign = c_sign;    s_crypto.ed25519_verify = c_verify;
 
-    // Process a captured PAIR_REQ: verify, (re)send RESP, and on the first valid
-    // REQ derive the LMK + install the encrypted peer. Re-replying on every REQ
-    // lets the channel-sweeping dial catch a RESP even if it missed earlier ones.
-    bool haveReq = false;
-    struct espnow_pair_req_pkt req;
-    portENTER_CRITICAL(&s_cmdMux);
-    if (s_havePairReq) { memcpy(&req, (const void *)&s_pendReq, sizeof(req)); s_havePairReq = false; haveReq = true; }
-    portEXIT_CRITICAL(&s_cmdMux);
-    if (haveReq) {
-        uint8_t tr[40]; espnow_pair_req_transcript(&req, tr);
-        uint8_t tag[16];
-        espnow_crypto_auth_tag(_pmk, 16, tr, sizeof(tr), tag);
-        bool ok = _havePmk && espnow_crypto_tag_ok(tag, req.tag) &&
-                  !(_pair == PAIR_CONFIRM && memcmp(req.src_mac, _candMac, 6) != 0);
-        if (ok) {
-            struct espnow_pair_resp_pkt resp; memset(&resp, 0, sizeof(resp));
-            resp.type = ESPNOW_PKT_PAIR_RESP; resp.version = ESPNOW_PROTO_VERSION;
-            memcpy(resp.src_mac, s_ownMac, 6);
-            memcpy(resp.pub, _ownPub, 32);
-            uint8_t rtr[72]; espnow_pair_resp_transcript(&resp, req.pub, rtr);
-            espnow_crypto_auth_tag(_pmk, 16, rtr, sizeof(rtr), resp.tag);
-            // Burst the RESP: the sweeping Dial parks on this channel only briefly
-            // and our reply is deferred to the main loop, so a single send easily
-            // misses its listen window. The spacing keeps ESP-NOW's async TX queue
-            // from overflowing (ESP_ERR_ESPNOW_NO_MEM).
-            for (int i = 0; i < 3; i++) {
-                esp_now_send(BCAST, (const uint8_t *)&resp, sizeof(resp));
-                vTaskDelay(pdMS_TO_TICKS(10));  // 1 tick @100Hz; pdMS_TO_TICKS(<10)=0 = no spacing
-            }
-            if (_pair == PAIR_LISTEN &&
-                espnow_crypto_derive_lmk(_ownPriv, req.pub, req.pub, _ownPub, _candLmk) == 0) {
-                memcpy(_candMac, req.src_mac, 6);
-                esp_now_peer_info_t pi = {};
-                memcpy(pi.peer_addr, _candMac, 6);
-                pi.ifidx = WIFI_IF_STA; pi.channel = 0; pi.encrypt = true;
-                memcpy(pi.lmk, _candLmk, 16);
-                esp_err_t pe = esp_now_add_peer(&pi);
-                if (pe == ESP_ERR_ESPNOW_EXIST) pe = esp_now_mod_peer(&pi);
-                if (pe == ESP_OK) {
-                    _pair = PAIR_CONFIRM;
-                    LOG_INFO("ESP-NOW pairing: candidate %02X:%02X:%02X:%02X:%02X:%02X, awaiting confirm",
-                             _candMac[0],_candMac[1],_candMac[2],_candMac[3],_candMac[4],_candMac[5]);
-                } else {
-                    LOG_ERROR("ESP-NOW pairing: peer install failed (0x%x)", pe);
-                }
-            }
-        }
-    }
+    s_hvac = sl2_hvac_iface_t{};
+    s_hvac.get_state = h_get_state;
+    s_hvac.apply = h_apply;
+    s_hvac.get_caps = h_get_caps;
+    s_hvac.fill_info_tlvs = h_fill_info;
+    s_hvac.wifi_creds = h_wifi_creds;
 
-    // Process a captured confirming PROBE: persist, echo STATE a few times so the
-    // sweeping dial catches one, then restart into begin().
-    if (s_havePairProbe && _pair == PAIR_CONFIRM) {
-        s_havePairProbe = false;
-        if (!espnow_bond_save(_candMac, _candLmk)) {
-            // Unbonded after reboot while the dial saved its half — report
-            // failure instead of a false "paired" (red LED, no restart).
-            _pairResult = "error";
-            cancelPairing();
-            return;
-        }
-        _pairResult = "paired";
-        LOG_INFO("ESP-NOW pairing confirmed; saving bond, restart in 5s (green LED)");
-        struct espnow_state_pkt p; buildState(&p);
-        for (int i = 0; i < 8; i++) {
-            esp_now_send(_candMac, (const uint8_t *)&p, sizeof(p));
-            vTaskDelay(pdMS_TO_TICKS(50));
-        }
-        _restartAtMs = uptime_ms() + 5000;  // let main.cpp show SLED_PAIR_OK for 5s
+    sl2_link_init(&s_link, &s_port, &s_crypto, &s_hvac);
+    if (!sl2_link_start(&s_link)) { LOG_ERROR("sl2_link_start failed"); return; }
+    s_started = true;
+
+    s_capsGen = settings.generation();
+    caps_announce_if_changed();
+    snapshot_status();
+
+    int n = sl2_link_dial_count(&s_link);
+    if (n > 0) {
+        uint8_t m[6];
+        sl2_link_dial_mac(&s_link, 0, m);
+        LOG_INFO("Serin Link v2: %d dial(s) bonded, first %02X:%02X:%02X:%02X:%02X:%02X",
+                 n, m[0], m[1], m[2], m[3], m[4], m[5]);
+    } else {
+        LOG_INFO("Serin Link v2: no dial bonded, link idle");
     }
 }
 
 void EspnowLink::loop() {
-    pairLoop();
-    if (!_bonded) return;
+    if (!s_started) return;
 
-    // Surface a version-skewed peer instead of silently tolerating it. The gate
-    // still accepts the peer (>= MIN_COMPAT, or PROBE/PAIR bypass), so this is a
-    // heads-up that the Dial firmware and unit firmware are on different proto
-    // versions and one side should be updated. Throttled to once a minute.
-    if (s_peerVer != 0 && s_peerVer != ESPNOW_PROTO_VERSION) {
-        uint32_t nowV = uptime_ms();
-        if (_lastVerWarnMs == 0 || nowV - _lastVerWarnMs >= 60000) {
-            LOG_WARN("ESP-NOW peer on proto v%u, unit on v%u (compat floor v%u) — update the %s",
-                     s_peerVer, ESPNOW_PROTO_VERSION, ESPNOW_PROTO_MIN_COMPAT,
-                     s_peerVer < ESPNOW_PROTO_VERSION ? "Dial" : "unit");
-            _lastVerWarnMs = nowV;
-        }
+    /* Drain the cross-task mailbox first: the sl2 core is single-context by
+     * contract (sl2_link.h), so mutations requested by the web (httpd) and
+     * console (REPL) tasks execute here, in the link's owning task. If both
+     * a start and a cancel land within one tick, start runs first and the
+     * cancel wins — the same net result as the user's last click. */
+    if (s_reqForgetAll)  { s_reqForgetAll = false;  sl2_link_forget_all(&s_link); }
+    if (s_reqPairStart)  { s_reqPairStart = false;  sl2_link_pair_start(&s_link, PAIR_WINDOW_S * 1000); }
+    if (s_reqPairCancel) { s_reqPairCancel = false; sl2_link_pair_cancel(&s_link); }
+    if (s_reqForgetRestart) {
+        s_reqForgetRestart = false;
+        sl2_link_forget_all(&s_link);
+#if PIN_LED_DATA >= 0
+        /* Main task owns the strip: animate the blink inline. The blocking
+         * hold also gives an httpd requester's reply time to flush. */
+        statusLED.holdBlocking(SLED_UNPAIR, 2000);
+#else
+        vTaskDelay(pdMS_TO_TICKS(500));
+#endif
+        esp_restart();
     }
 
-    // Apply any decoded command on the main task (inherits anti-flicker logic).
-    struct espnow_cmd_pkt c;
-    bool haveCmd;
-    portENTER_CRITICAL(&s_cmdMux);
-    haveCmd = s_haveCmd;
-    if (haveCmd) { c = s_cmd; s_haveCmd = false; }
-    portEXIT_CRITICAL(&s_cmdMux);
-    if (haveCmd) {
-        if (c.mask & ESPNOW_CM_POWER)    _ctrl->setPower(c.power != 0);
-        if (c.mask & ESPNOW_CM_MODE)     _ctrl->setMode(c.mode);
-        if (c.mask & ESPNOW_CM_FAN)      _ctrl->setFanSpeed(c.fan);
-        if (c.mask & ESPNOW_CM_TEMP)     _ctrl->setTargetTemp(espnow_dc_to_c(c.set_dc));
-        if (c.mask & ESPNOW_CM_VANE)     _ctrl->setVane(c.vane);
-        if (c.mask & ESPNOW_CM_WIDEVANE) _ctrl->setWideVane(c.wide_vane);
-        if (c.mask & ESPNOW_CM_UNITS) {
-            settings.get().useFahrenheit = (c.use_f != 0);
-            settings.save();
-            LOG_INFO("Dial set display units: %s", c.use_f ? "F" : "C");
-        }
-        buildState(&_lastState);
-        esp_now_send(_peer, (const uint8_t*)&_lastState, sizeof(_lastState));
-        _lastStateTxMs = uptime_ms();
-    }
+    /* rx drain stays per-tick so the SPSC ring can't back up; inbound CMDs
+     * and pairing packets are fully handled inside sl2_link_on_recv(). */
+    sl2_rxq_frame_t f;
+    while (sl2_rxq_pop(&s_rxq, &f))
+        sl2_link_on_recv(&s_link, f.src, f.dst, f.data, f.len);
 
-    // Link OTA: hand the bonded link our home Wi-Fi credentials so it can pull
-    // its firmware manifest. Unicast to the encrypted peer (LMK on the air).
-    if (s_haveWifiReq) {
-        s_haveWifiReq = false;
-        struct espnow_wifi_resp_pkt r; memset(&r, 0, sizeof(r));
-        r.type = ESPNOW_PKT_WIFI_RESP; r.version = ESPNOW_PROTO_VERSION;
-        if (WifiManager::loadCredentials((char*)r.ssid, sizeof(r.ssid),
-                                         (char*)r.psk, sizeof(r.psk)))
-            r.ok = 1;
-        LOG_INFO("Link requested Wi-Fi credentials (%s)", r.ok ? "sent" : "none stored");
-        esp_now_send(_peer, (const uint8_t*)&r, sizeof(r));
-        memset(&r, 0, sizeof(r));   // don't leave the PSK sitting on the stack
-    }
-
-    // Dial-driven provisioning: serve a network scan. scanNetworks() blocks a
-    // few seconds on the main task — acceptable: MAC-layer probe ACKs (the
-    // dial's liveness signal) are hardware-level, STATE heartbeat is 10 s, and
-    // the web UI's /wifi-scan already runs the same blocking scan. Results are
-    // cached 20 s so a dial page-loss re-request re-sends instantly.
-    if (s_haveScanReq) {
-        s_haveScanReq = false;
-        uint32_t nowScan = uptime_ms();
-        if (_scanCount < 0 || nowScan - _scanAtMs > 20000) {
-            _scanCount = WifiManager::scanNetworks(_scanCache, WIFI_SCAN_CACHE);
-            _scanAtMs = uptime_ms();
-            LOG_INFO("Dial requested Wi-Fi scan: %d networks", _scanCount);
-        }
-        int n = _scanCount < 0 ? 0 : _scanCount;
-        int pages = (n + ESPNOW_WIFI_SCAN_MAX_ITEMS - 1) / ESPNOW_WIFI_SCAN_MAX_ITEMS;
-        if (pages == 0) pages = 1;   // one empty page resolves the dial's spinner
-        for (int pg = 0; pg < pages; pg++) {
-            struct espnow_wifi_scan_resp_pkt r; memset(&r, 0, sizeof(r));
-            r.type = ESPNOW_PKT_WIFI_SCAN_RESP; r.version = ESPNOW_PROTO_VERSION;
-            r.page = (uint8_t)pg; r.n_pages = (uint8_t)pages;
-            int base = pg * ESPNOW_WIFI_SCAN_MAX_ITEMS;
-            int cnt = n - base;
-            if (cnt > ESPNOW_WIFI_SCAN_MAX_ITEMS) cnt = ESPNOW_WIFI_SCAN_MAX_ITEMS;
-            if (cnt < 0) cnt = 0;
-            r.n_items = (uint8_t)cnt;
-            for (int i = 0; i < cnt; i++) {
-                strncpy((char*)r.items[i].ssid, _scanCache[base + i].ssid,
-                        sizeof(r.items[i].ssid) - 1);
-                r.items[i].rssi   = _scanCache[base + i].rssi;
-                r.items[i].secure = _scanCache[base + i].secure ? 1 : 0;
-            }
-            esp_now_send(_peer, (const uint8_t*)&r,
-                         ESPNOW_WIFI_SCAN_RESP_HDR_LEN +
-                         cnt * (int)sizeof(struct espnow_wifi_scan_item));
-            vTaskDelay(pdMS_TO_TICKS(10));   // spacing: don't overflow the TX queue
-        }
-    }
-
-    // Dial-driven provisioning: apply pushed credentials. Mirrors
-    // applyWifiCredentials() (web_server.cpp) minus the JSON layer.
-    {
-        bool haveSet = false;
-        struct espnow_wifi_set_pkt w;
-        portENTER_CRITICAL(&s_cmdMux);
-        if (s_haveWifiSet) {
-            memcpy(&w, (const void*)&s_wifiSet, sizeof(w));
-            memset((void*)&s_wifiSet, 0, sizeof(s_wifiSet));   // no PSK in the static
-            s_haveWifiSet = false; haveSet = true;
-        }
-        portEXIT_CRITICAL(&s_cmdMux);
-        if (haveSet) {
-            w.ssid[sizeof(w.ssid) - 1] = 0;
-            w.psk[sizeof(w.psk) - 1] = 0;
-            LOG_INFO("Dial provisioned Wi-Fi (SSID: %s)", (const char*)w.ssid);
-            settings.get().wifiChangePending = true;   // shorter recovery window
-            settings.save();
-            WifiManager::clearDisconnectReason();
-            WifiManager::connect((const char*)w.ssid, (const char*)w.psk);
-            memset(&w, 0, sizeof(w));
-            _wifiJoinStartMs   = uptime_ms();
-            _wifiStatusUntilMs = _wifiJoinStartMs + 60000;   // 1 Hz status stream window
-            _lastWifiStatusTxMs = 0;
-            _wifiJoinResult = 0;
-        }
-    }
-
-    // Status stream: 1 Hz for 60 s after a WIFI_SET. The join usually moves
-    // the radio to the home AP's channel; the dial re-sweeps and catches the
-    // stream on the new channel. Failures latch so a late-arriving dial still
-    // hears the verdict.
-    if (_wifiStatusUntilMs != 0) {
-        uint32_t nowSt = uptime_ms();
-        if ((int32_t)(nowSt - _wifiStatusUntilMs) >= 0) {
-            _wifiStatusUntilMs = 0;
-        } else if (nowSt - _lastWifiStatusTxMs >= 1000) {
-            uint8_t st;
-            if (WifiManager::isConnected()) {
-                st = _wifiJoinResult = ESPNOW_WIFI_ST_CONNECTED;
-            } else if (_wifiJoinResult >= ESPNOW_WIFI_ST_AUTH_FAIL) {
-                st = _wifiJoinResult;                        // latched failure
-            } else {
-                uint8_t reason = WifiManager::lastDisconnectReason();
-                if (reason == WIFI_REASON_NO_AP_FOUND)
-                    st = _wifiJoinResult = ESPNOW_WIFI_ST_AP_NOT_FOUND;
-                else if (reason == WIFI_REASON_AUTH_EXPIRE ||
-                         reason == WIFI_REASON_AUTH_FAIL ||
-                         reason == WIFI_REASON_MIC_FAILURE ||
-                         reason == WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT ||
-                         reason == WIFI_REASON_HANDSHAKE_TIMEOUT)
-                    st = _wifiJoinResult = ESPNOW_WIFI_ST_AUTH_FAIL;
-                else if (nowSt - _wifiJoinStartMs > 30000)
-                    st = _wifiJoinResult = ESPNOW_WIFI_ST_TIMEOUT;
-                else
-                    st = ESPNOW_WIFI_ST_CONNECTING;
-            }
-            struct espnow_wifi_status_pkt sp; memset(&sp, 0, sizeof(sp));
-            sp.type = ESPNOW_PKT_WIFI_STATUS; sp.version = ESPNOW_PROTO_VERSION;
-            sp.status = st;
-            sp.rssi = WifiManager::getRSSI();
-            WifiManager::getIP((char*)sp.ip, sizeof(sp.ip));
-            esp_now_send(_peer, (const uint8_t*)&sp, sizeof(sp));
-            _lastWifiStatusTxMs = nowSt;
-        }
-    }
-
+    /* Periodic core work at ~20 Hz, not every ~10 ms tick: sl2_link_loop()
+     * rebuilds the full STATE (hvac read + memcmp) each call while a dial is
+     * live, to feed a TX path floored at SL2_STATE_MIN_INTERVAL_MS (250 ms) —
+     * running it at the tick rate is ~10x wasted builds. Pair timeouts and
+     * the status snapshot tolerate 50 ms granularity. */
+    static uint32_t s_lastCore = 0;
     uint32_t now = uptime_ms();
-    bool live = isPeerLive();
-    if (!live) { _peerWasLive = false; return; }
+    if (now - s_lastCore < 50) return;
+    s_lastCore = now;
 
-    // Build current slim STATE; send if (a) the Dial just appeared (initial sync),
-    // (b) a field changed and we're past the min-interval, or (c) the heartbeat is due.
-    struct espnow_state_pkt p; buildState(&p);
-    bool firstSinceLive = !_peerWasLive;
-    _peerWasLive = true;
-    bool changed = memcmp(&p, &_lastState, sizeof(p)) != 0;
-    if (firstSinceLive ||
-        (changed && now - _lastStateTxMs >= STATE_MIN_INTERVAL) ||
-        (now - _lastStateTxMs >= STATE_HEARTBEAT_MS)) {
-        esp_now_send(_peer, (const uint8_t*)&p, sizeof(p));
-        _lastState = p; _lastStateTxMs = now;
+    sl2_link_loop(&s_link);
+
+    /* Settings edits (web UI) that alter CAPS content bump caps_seq so dials
+     * re-pull. The rebuild only runs after a settings save, not every tick. */
+    if (s_capsGen != settings.generation()) {
+        s_capsGen = settings.generation();
+        caps_announce_if_changed();
     }
 
-    // INFO is pull-only: emit while the Dial reports a cold screen, rate-limited.
-    if (s_wantInfo && now - _lastInfoTxMs >= INFO_MIN_INTERVAL) {
-        struct espnow_info_pkt info; buildInfo(&info);
-        esp_now_send(_peer, (const uint8_t*)&info, sizeof(info));
-        _lastInfoTxMs = now;
-    }
-
-    // DIAG rides the same pull gate as INFO (dial is on an info screen).
-    if (s_wantInfo && now - _lastDiagTxMs >= INFO_MIN_INTERVAL) {
-        struct espnow_diag_pkt d; buildDiag(&d);
-        esp_now_send(_peer, (const uint8_t*)&d, sizeof(d));
-        _lastDiagTxMs = now;
-    }
-
-    // IDENT is pull-only (v11): the dial asks while it lacks this unit's name
-    // (zone picker). Same cadence gate as INFO.
-    if (s_wantIdent && now - _lastIdentTxMs >= INFO_MIN_INTERVAL) {
-        struct espnow_ident_pkt id; memset(&id, 0, sizeof(id));
-        id.type = ESPNOW_PKT_IDENT; id.version = ESPNOW_PROTO_VERSION;
-        strncpy((char *)id.name, settings.get().deviceName, sizeof(id.name) - 1);
-        esp_now_send(_peer, (const uint8_t*)&id, sizeof(id));
-        _lastIdentTxMs = now;
-    }
+    snapshot_status();
 }
+
+bool EspnowLink::isBonded() const { return s_stat.bonded; }
+bool EspnowLink::isPeerLive() const { return s_stat.live; }
+void EspnowLink::getPeerMac(uint8_t out[6]) const { memcpy(out, s_stat.mac0, 6); }
+void EspnowLink::startPairing() { if (s_started) s_reqPairStart = true; }
+void EspnowLink::cancelPairing() { if (s_started) s_reqPairCancel = true; }
+bool EspnowLink::pairingActive() const { return s_stat.pairing; }
+int  EspnowLink::pairingSecondsLeft() const { return s_stat.secsLeft; }
+const char *EspnowLink::pairResult() const { return s_stat.result; }
+EspnowPairOutcome EspnowLink::pairOutcome() const { return s_stat.outcome; }
+
+void espnow_forget_and_restart(void) {
+    if (!s_started) esp_restart();   /* link never came up — nothing to forget */
+    s_reqForgetRestart = true;       /* loop() runs forget + LED + esp_restart */
+}
+
+/* ── console ──────────────────────────────────────────────────────────── */
 
 static int cmd_mac(int, char **) {
     uint8_t m[6];
     esp_wifi_get_mac(WIFI_IF_STA, m);
     printf("ESPNOW-MAC %02X:%02X:%02X:%02X:%02X:%02X\n",
-           m[0],m[1],m[2],m[3],m[4],m[5]);
+           m[0], m[1], m[2], m[3], m[4], m[5]);
     return 0;
 }
 
-static int cmd_pair(int argc, char **argv) {
-    if (argc != 3) { printf("usage: espnow-pair <AA:BB:CC:DD:EE:FF> <32-hex-lmk>\n"); return 1; }
-    uint8_t mac[6], lmk[16];
-    if (!espnow_parse_mac(argv[1], mac))   { printf("ERR bad mac\n");  return 1; }
-    if (!espnow_parse_hex16(argv[2], lmk)) { printf("ERR bad lmk\n");  return 1; }
-    if (!espnow_bond_save(mac, lmk)) { printf("ERR bond save failed\n"); return 1; }
-    printf("ESPNOW-PAIR OK; restarting\n");
-    vTaskDelay(pdMS_TO_TICKS(300));
-    esp_restart();
-    return 0;
-}
-
-static int cmd_pmk(int argc, char **argv) {
-    if (argc != 2) { printf("usage: espnow-pmk <32-hex-pmk>\n"); return 1; }
-    uint8_t pmk[16];
-    if (!espnow_parse_hex16(argv[1], pmk)) { printf("ERR bad pmk\n"); return 1; }
-    if (!espnow_pmk_save(pmk)) { printf("ERR pmk save failed\n"); return 1; }
-    printf("ESPNOW-PMK OK (takes effect on next restart)\n");
-    return 0;
-}
-
-static int cmd_selftest(int, char **) {
-    uint8_t da[32], dA[32], ub[32], uB[32];
-    int kr1 = espnow_crypto_keypair(da, dA);
-    int kr2 = (kr1 == 0) ? espnow_crypto_keypair(ub, uB) : 0;
-    if (kr1 != 0 || kr2 != 0) {
-        int e = kr1 ? kr1 : kr2;
-        printf("ESPNOW-SELFTEST FAIL keygen rc=%d (-0x%04X)\n", e, (unsigned)(-e));
+static int cmd_pair(int argc, char **) {
+    if (argc != 1) {
+        printf("usage: espnow-pair            (opens a " PAIR_WINDOW_S_STR " s pairing window)\n");
         return 1;
     }
-    uint8_t lk_d[16], lk_u[16];
-    int dr1 = espnow_crypto_derive_lmk(da, uB, dA, uB, lk_d);   /* dial role */
-    int dr2 = espnow_crypto_derive_lmk(ub, dA, dA, uB, lk_u);   /* unit role */
-    if (dr1 != 0 || dr2 != 0) {
-        int e = dr1 ? dr1 : dr2;
-        printf("ESPNOW-SELFTEST FAIL derive rc=%d (-0x%04X)\n", e, (unsigned)(-e));
-        return 1;
-    }
-    bool kdf = memcmp(lk_d, lk_u, 16) == 0;
+    espnowLink.startPairing();
+    printf("ESPNOW-PAIR window open (" PAIR_WINDOW_S_STR " s); check: espnow-status\n");
+    return 0;
+}
 
-    const uint8_t pmk[16] = {'S','E','L','F','T','E','S','T','p','m','k','0','0','0','0','0'};
-    uint8_t msg[40]; for (int i = 0; i < 40; i++) msg[i] = (uint8_t)i;
-    uint8_t t1[16], t2[16];
-    espnow_crypto_auth_tag(pmk, 16, msg, sizeof(msg), t1);
-    espnow_crypto_auth_tag(pmk, 16, msg, sizeof(msg), t2);
-    bool tag = espnow_crypto_tag_ok(t1, t2);
-    msg[0] ^= 1;
-    espnow_crypto_auth_tag(pmk, 16, msg, sizeof(msg), t2);
-    bool diff = !espnow_crypto_tag_ok(t1, t2);
+static int cmd_forget(int, char **) {
+    if (s_started) s_reqForgetAll = true;   /* executed by loop() on the main task */
+    printf("ESPNOW-FORGET OK (all dials)\n");
+    return 0;
+}
 
-    printf("ESPNOW-SELFTEST kdf=%d tag=%d diff=%d %s\n",
-           kdf, tag, diff, (kdf && tag && diff) ? "PASS" : "FAIL");
-    return (kdf && tag && diff) ? 0 : 1;
+static int cmd_status(int, char **) {
+    printf("ESPNOW-STATUS bonded=%d live=%d pairing=%d left=%ds result=%s\n",
+           (int)espnowLink.isBonded(), (int)espnowLink.isPeerLive(),
+           (int)espnowLink.pairingActive(), espnowLink.pairingSecondsLeft(),
+           espnowLink.pairResult());
+    return 0;
 }
 
 static bool s_console_started = false;
@@ -705,45 +666,33 @@ void espnow_register_console(void) {
     esp_console_dev_uart_config_t dc = ESP_CONSOLE_DEV_UART_CONFIG_DEFAULT();
     if (esp_console_new_repl_uart(&dc, &rc, &repl) != ESP_OK) return;
 #endif
-    esp_console_cmd_t mac_cmd = {};
-    mac_cmd.command = "espnow-mac";
-    mac_cmd.help    = "Print STA MAC for ESP-NOW pairing";
-    mac_cmd.func    = &cmd_mac;
-    esp_console_cmd_register(&mac_cmd);
-
-    esp_console_cmd_t pair_cmd = {};
-    pair_cmd.command = "espnow-pair";
-    pair_cmd.help    = "Bond a Dial: espnow-pair <mac> <lmk_hex>";
-    pair_cmd.func    = &cmd_pair;
-    esp_console_cmd_register(&pair_cmd);
-
-    esp_console_cmd_t pmk_cmd = {};
-    pmk_cmd.command = "espnow-pmk";
-    pmk_cmd.help    = "Provision the ESP-NOW PMK: espnow-pmk <32-hex-pmk>";
-    pmk_cmd.func    = &cmd_pmk;
-    esp_console_cmd_register(&pmk_cmd);
-
-    esp_console_cmd_t selftest_cmd = {};
-    selftest_cmd.command = "espnow-selftest";
-    selftest_cmd.help    = "Self-test pairing crypto (ECDH agreement + auth tag)";
-    selftest_cmd.func    = &cmd_selftest;
-    esp_console_cmd_register(&selftest_cmd);
+    static const esp_console_cmd_t cmds[] = {
+        { .command = "espnow-mac",    .help = "Print STA MAC",              .func = &cmd_mac },
+        { .command = "espnow-pair",   .help = "Open a " PAIR_WINDOW_S_STR " s dial-pairing window",
+          .func = &cmd_pair },
+        { .command = "espnow-forget", .help = "Forget all bonded dials",    .func = &cmd_forget },
+        { .command = "espnow-status", .help = "Show Serin Link status",     .func = &cmd_status },
+    };
+    for (const auto &c : cmds) esp_console_cmd_register(&c);
     esp_console_start_repl(repl);
     s_console_started = true;
 }
 
 #else  // ESPNOW_REMOTE_ENABLE == 0
+#include <esp_system.h>
 EspnowLink espnowLink;
 void EspnowLink::begin(CN105Controller *) {}
 void EspnowLink::loop() {}
+bool EspnowLink::isBonded() const { return false; }
 bool EspnowLink::isPeerLive() const { return false; }
-void EspnowLink::getPeerMac(uint8_t out[6]) const { for (int i=0;i<6;i++) out[i]=0; }
+void EspnowLink::getPeerMac(uint8_t out[6]) const { for (int i = 0; i < 6; i++) out[i] = 0; }
 void EspnowLink::startPairing() {}
 void EspnowLink::cancelPairing() {}
 bool EspnowLink::pairingActive() const { return false; }
 int  EspnowLink::pairingSecondsLeft() const { return 0; }
 const char *EspnowLink::pairResult() const { return "idle"; }
-void EspnowLink::onPairRecv(const uint8_t *, const uint8_t *, int) {}
+EspnowPairOutcome EspnowLink::pairOutcome() const { return ESPNOW_PAIR_NONE; }
 void espnow_register_console(void) {}
 bool espnow_console_started(void) { return false; }
+void espnow_forget_and_restart(void) { esp_restart(); }
 #endif

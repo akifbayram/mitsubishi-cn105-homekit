@@ -14,11 +14,6 @@
 #include "ble_sensor.h"
 #endif
 #include "espnow_link.h"
-#include "espnow_bond.h"
-#include "status_led.h"
-#if PIN_LED_DATA >= 0
-extern StatusLED statusLED;   // defined in main.cpp
-#endif
 
 static const char *TAG = "web_ws";
 
@@ -320,17 +315,7 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
     } else if (strcmp(cmd, "forgetRemote") == 0) {
         LOG_WARN("ESP-NOW remote forget requested");
         sendWsText(httpd_req_to_sockfd(req), "{\"type\":\"info\",\"msg\":\"Forgetting remote...\"}");
-        espnow_bond_clear();
-#if PIN_LED_DATA >= 0
-        // This runs on the httpd task: don't drive the strip from here
-        // (holdBlocking races the main loop's LED evaluation). Ask the main
-        // task to show the orange blink, wait it out, then restart.
-        statusLED.requestHold(SLED_UNPAIR, 2000);
-        vTaskDelay(pdMS_TO_TICKS(2000));
-#else
-        vTaskDelay(pdMS_TO_TICKS(500));
-#endif
-        esp_restart();
+        espnow_forget_and_restart();
 
     } else if (strcmp(cmd, "pairRemote") == 0) {
         LOG_INFO("ESP-NOW pairing window requested");
@@ -422,8 +407,10 @@ void WebUI::pushState() {
 
     unsigned long wifiUptimeSec = wifiRecovery.getWifiUptimeSeconds();
 
+    /* Cached copy (refreshed on credential change/reconnect) — getSSID() is an
+     * esp_wifi_get_config() struct copy, too heavy for a 1 Hz push. */
     char ssid[33] = "";
-    WifiManager::getSSID(ssid, sizeof(ssid));
+    wifiRecovery.getCachedSSID(ssid, sizeof(ssid));
     char escSsid[65];
     jsonEscape(ssid, escSsid, sizeof(escSsid));
 

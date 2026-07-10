@@ -71,11 +71,11 @@ static bool homekitStarted    = false;
 static bool espnowConsoleInit = false;   // ESP-NOW REPL one-shot attempted
 static bool firmwareValidated = false;
 static bool lastAPState       = false;
-static bool lastWifiState     = true;   // force initial setWifi() call
 static uint32_t webUIStartTime = 0;
-static char     lastPairResult[16] = "idle";
-static uint32_t pairLedHoldUntil   = 0;      // uptime_ms() deadline, 0 = none
-static LEDState pairLedHoldState    = SLED_OFF;
+#if PIN_LED_DATA >= 0
+static bool lastWifiState     = true;   // force initial setWifi() call
+static const char *lastPairResult = nullptr;   // interned literal from EspnowLink
+#endif
 
 // ════════════════════════════════════════════════════════════════════════════
 // app_main — initialization + main loop
@@ -227,7 +227,6 @@ extern "C" void app_main(void)
     LOG_INFO("Entering main loop");
     esp_task_wdt_add(NULL);
 
-    uint32_t lastWifiCheck = 0;
     uint32_t lastWebLoop   = 0;
     uint32_t lastHeapLog   = 0;
     uint32_t lastAliveLog  = 0;
@@ -281,15 +280,9 @@ extern "C" void app_main(void)
         // ── ESP-NOW remote — every iter (~10 ms) ────────────────────────
         espnowLink.loop();
 
-        // ── Button — every iter (~10 ms): the 2 s / 10 s hold thresholds
-        // need finer sampling than the 1 Hz recovery check below
-        wifiRecovery.checkButton();
-
-        // ── WiFi recovery — 1 Hz ────────────────────────────────────────
-        if (now - lastWifiCheck >= 1000) {
-            wifiRecovery.loop();
-            lastWifiCheck = now;
-        }
+        // ── WiFi recovery + button — every iter (~10 ms); WiFi checks are
+        // rate-limited to 1 Hz inside loop()
+        wifiRecovery.loop();
 
         // ── Main-loop alive — 15s ────────────────────────────────────
         if (now - lastAliveLog >= 15000) {
@@ -351,34 +344,24 @@ extern "C" void app_main(void)
             }
         }
 
-        // Detect a terminal pairing result (edge) and start a timed LED hold.
+        // Detect a terminal pairing result (edge) and hold the LED on it.
+        // requestHold() substitutes the state in setState() until it expires;
+        // SLED_OTA still outranks an armed hold (see StatusLED::setState).
         {
             const char *pr = espnowLink.pairResult();
-            uint32_t nowMs = uptime_ms();
-            if (strcmp(pr, lastPairResult) != 0) {
-                if (strcmp(pr, "paired") == 0) {
-                    pairLedHoldState = SLED_PAIR_OK;
-                    pairLedHoldUntil = nowMs + 5000;
-                } else if (strcmp(pr, "timeout") == 0 || strcmp(pr, "error") == 0) {
-                    pairLedHoldState = SLED_PAIR_FAIL;
-                    pairLedHoldUntil = nowMs + 3000;
+            if (pr != lastPairResult) {   // interned — pointer compare works
+                lastPairResult = pr;
+                switch (espnowLink.pairOutcome()) {
+                    case ESPNOW_PAIR_OK:   statusLED.requestHold(SLED_PAIR_OK, 5000);  break;
+                    case ESPNOW_PAIR_FAIL: statusLED.requestHold(SLED_PAIR_FAIL, 3000); break;
+                    default: break;
                 }
-                strncpy(lastPairResult, pr, sizeof(lastPairResult) - 1);
-                lastPairResult[sizeof(lastPairResult) - 1] = '\0';
             }
         }
-        bool pairHold = pairLedHoldUntil &&
-                        (int32_t)(pairLedHoldUntil - uptime_ms()) > 0;
-        // Zero the deadline once expired: a stale non-zero value re-arms the
-        // hold when uptime wraps (~24.8 days), locking the LED into the pairing
-        // pattern (SLED_PAIR_FAIL is identical to the AC-error blink).
-        if (pairLedHoldUntil && !pairHold) pairLedHoldUntil = 0;
 
         // RGB LED priority: OTA > pairing OK/FAIL hold > pairing listening > status
         if (statusLED.getState() != SLED_OTA) {
-            if (pairHold) {
-                statusLED.setState(pairLedHoldState);
-            } else if (espnowLink.pairingActive()) {
+            if (espnowLink.pairingActive()) {
                 statusLED.setState(SLED_PAIR_LISTEN);
             } else if (webUIStarted) {
                 const CN105State &st = cn105.getState();

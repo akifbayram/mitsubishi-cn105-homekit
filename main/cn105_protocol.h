@@ -80,10 +80,22 @@ constexpr uint8_t CN105_WVANE_RIGHT_RIGHT = 0x05;
 constexpr uint8_t CN105_WVANE_SPLIT       = 0x08;
 constexpr uint8_t CN105_WVANE_SWING       = 0x0C;
 
+// ── Sub Mode Values (from 0x09 data[3]) ─────────────────────────────────
+constexpr uint8_t CN105_SUB_NORMAL      = 0x00;
+constexpr uint8_t CN105_SUB_DEFROST     = 0x02;
+constexpr uint8_t CN105_SUB_PREHEAT     = 0x04;
+constexpr uint8_t CN105_SUB_STANDBY     = 0x08;
+
+// ── Auto Sub Mode Values (from 0x09 data[5]; meaningful in AUTO mode) ────
+constexpr uint8_t CN105_AUTOSUB_OFF     = 0x00;
+constexpr uint8_t CN105_AUTOSUB_COOL    = 0x01;
+constexpr uint8_t CN105_AUTOSUB_HEAT    = 0x02;
+constexpr uint8_t CN105_AUTOSUB_LEADER  = 0x03;
+
 // ── Temperature Encoding ────────────────────────────────────────────────────
 constexpr float CN105_TEMP_MIN         = 16.0f;
 // 30.5 (not 31.0) so the settable °C range matches the °F range exactly:
-// 30.5 °C == 88 °F, the top of the F-table (espnow_proto.h). Keeps the Dial,
+// 30.5 °C == 88 °F, the top of the F-table (sl2_proto.h). Keeps the Dial,
 // web sliders and HomeKit constraints symmetric across units. The CN105 wire
 // encoding still uses a fixed 31 °C origin (cn105_protocol.cpp) — that is the
 // protocol datum, not the settable ceiling, and is intentionally left at 31.
@@ -122,9 +134,9 @@ struct CN105State {
     uint8_t  compressorHz = 0;
     float    outsideTemp  = 0.0f;   // outside air temperature (from 0x03 data[5])
     bool     outsideTempValid = false; // false if unit doesn't report OAT
-    uint8_t  subMode     = 0;         // 0x00=NORMAL, 0x02=DEFROST, 0x04=PREHEAT, 0x08=STANDBY
+    uint8_t  subMode     = 0;         // CN105_SUB_* (NORMAL/DEFROST/PREHEAT/STANDBY)
     uint8_t  stage       = 0;         // 0x00=IDLE..0x06=DIFFUSE (actual indoor fan activity)
-    uint8_t  autoSubMode = 0;         // 0x00=OFF, 0x01=COOL, 0x02=HEAT, 0x03=LEADER (Auto only)
+    uint8_t  autoSubMode = 0;         // CN105_AUTOSUB_* (OFF/COOL/HEAT/LEADER, Auto only)
     uint8_t  errorCode  = 0x80;       // 0x80 = normal, other = error (from 0x04)
     bool     hasError   = false;
     float    runtimeHours = 0.0f;     // accumulated runtime from 0x03 data[11:13]

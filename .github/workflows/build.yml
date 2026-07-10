@@ -12,6 +12,19 @@ on:
     branches: [main]
 
 jobs:
+  host-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Run host tests
+        run: |
+          for t in test/*/run.sh; do
+            echo "=== $t ==="
+            bash "$t"
+          done
+
   build:
     runs-on: ubuntu-latest
     strategy:
@@ -22,6 +35,7 @@ jobs:
             name: nanoc6
           - target: esp32s3
             name: m5atoms3-lite
+            profile_flag: -DBOARD_PROFILE_M5ATOMS3_LITE=1
           - target: esp32
             name: esp32-devkit
           - target: esp32c3
@@ -40,7 +54,7 @@ jobs:
           target: ${{ matrix.target }}
           command: |
             idf.py set-target ${{ matrix.target }}
-            idf.py build
+            idf.py ${{ matrix.profile_flag }} build
             idf.py size
 
       - name: Report binary size

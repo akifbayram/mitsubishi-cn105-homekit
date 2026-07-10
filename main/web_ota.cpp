@@ -6,10 +6,6 @@
 
 static const char *TAG = "web_ota";
 
-#if PIN_LED_DATA >= 0
-extern StatusLED statusLED;
-#endif
-
 // ══════════════════════════════════════════════════════════════════════════════
 // OTA firmware upload: POST /upload  (raw binary body, not multipart)
 // ══════════════════════════════════════════════════════════════════════════════

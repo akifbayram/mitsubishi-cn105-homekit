@@ -4,6 +4,7 @@
 #include "settings.h"
 #include "logging.h"
 #include "branding.h"
+#include "esp_utils.h"
 #include <cstring>
 #include <cstdio>
 
@@ -245,12 +246,7 @@ void homekit_generate_setup_code(void)
     // Deterministic per device; unique because MACs are unique.
     uint8_t mac[6];
     esp_read_mac(mac, ESP_MAC_WIFI_STA);
-    uint32_t hash = 2166136261UL;
-    for (int i = 0; i < 6; i++) {
-        hash ^= (uint32_t)mac[i];
-        hash = (uint32_t)(hash * 16777619UL);
-    }
-    uint32_t raw = hash % 100000000UL;
+    uint32_t raw = fnv1a32(mac, sizeof(mac)) % 100000000UL;
 
     // Skip HAP-forbidden codes (all same digit × 8, 12345678, 87654321)
     char digits[9];
