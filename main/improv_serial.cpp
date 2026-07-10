@@ -11,7 +11,31 @@
 #include <string.h>
 #include <fcntl.h>
 
+#include "sdkconfig.h"
+#if defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG)
+#include <driver/usb_serial_jtag_vfs.h>
+#elif defined(CONFIG_ESP_CONSOLE_UART)
+#include <driver/uart_vfs.h>
+#endif
+
 static const char *TAG = "improv";
+
+// Improv Serial is a binary, newline-framed protocol. The console's default
+// line-ending translation (RX CR->LF, TX LF->CRLF) mangles frame bytes equal to
+// 0x0D/0x0A, and the browser SDK re-syncs its byte parser on '\n'. While Improv
+// owns the console we switch to raw LF passthrough; on stop we restore the
+// console defaults so the ESP-NOW REPL's Enter handling keeps working.
+static void improv_set_console_raw(bool raw) {
+#if defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG)
+    usb_serial_jtag_vfs_set_rx_line_endings(raw ? ESP_LINE_ENDINGS_LF : ESP_LINE_ENDINGS_CR);
+    usb_serial_jtag_vfs_set_tx_line_endings(raw ? ESP_LINE_ENDINGS_LF : ESP_LINE_ENDINGS_CRLF);
+#elif defined(CONFIG_ESP_CONSOLE_UART)
+    uart_vfs_dev_port_set_rx_line_endings(CONFIG_ESP_CONSOLE_UART_NUM,
+                                          raw ? ESP_LINE_ENDINGS_LF : ESP_LINE_ENDINGS_CR);
+    uart_vfs_dev_port_set_tx_line_endings(CONFIG_ESP_CONSOLE_UART_NUM,
+                                          raw ? ESP_LINE_ENDINGS_LF : ESP_LINE_ENDINGS_CRLF);
+#endif
+}
 
 // ── Protocol constants ────────────────────────────────────────────────────────
 static constexpr uint8_t PKT_CURRENT_STATE = 0x01;
@@ -53,6 +77,11 @@ static uint8_t    s_csum_acc   = 0;
 // ── Frame encoder ─────────────────────────────────────────────────────────────
 static void write_frame(uint8_t type, const uint8_t* data, uint8_t len) {
     uint8_t checksum = 0x01 + type + len;
+    // Leading '\n': guarantees the IMPROV header starts a fresh line so the
+    // browser SDK — which re-syncs its byte parser on '\n' and discards non-IMPROV
+    // runs up to the next newline — can lock onto the frame even while other tasks
+    // are logging to the same console mid-stream.
+    fputc('\n', stdout);
     fwrite("IMPROV", 1, 6, stdout);
     fputc(0x01, stdout);
     fputc(type, stdout);
@@ -62,6 +91,8 @@ static void write_frame(uint8_t type, const uint8_t* data, uint8_t len) {
         checksum += data[i];
     }
     fputc(checksum & 0xFF, stdout);
+    // Trailing '\n' terminates the frame (Improv Serial transport convention).
+    fputc('\n', stdout);
     fflush(stdout);
 }
 
@@ -248,6 +279,7 @@ void improv_serial_start(const char* deviceName) {
     if (s_task_handle) return;
     strncpy(s_device_name, deviceName, sizeof(s_device_name) - 1);
     s_device_name[sizeof(s_device_name) - 1] = '\0';
+    improv_set_console_raw(true);   // binary-clean console for the framed protocol
     xTaskCreate(improv_task, "improv", 4096, nullptr, tskIDLE_PRIORITY + 1, &s_task_handle);
     LOG_INFO("[Improv] Task created");
 }
@@ -259,4 +291,5 @@ void improv_serial_stop() {
     // so the task has finished sending its last response well before this fires.
     vTaskDelay(pdMS_TO_TICKS(100));
     // s_task_handle is cleared by the task itself before vTaskDelete
+    improv_set_console_raw(false);  // restore CR/CRLF for the REPL / serial monitor
 }

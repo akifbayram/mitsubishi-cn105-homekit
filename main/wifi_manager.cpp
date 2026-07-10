@@ -31,6 +31,10 @@ static esp_netif_t*         s_apNetif        = nullptr;
 static char s_apName[32]     = {};
 static char s_apPassword[64] = {};
 
+// Credentials cache and disconnect reason tracking
+static int8_t          s_haveCreds = -1;   // -1 unknown, 0 no, 1 yes (see hasCredentials)
+static volatile uint8_t s_lastDiscReason = 0;
+
 // ── Event handler ───────────────────────────────────────────────────────────
 static void wifi_event_handler(void* arg, esp_event_base_t event_base,
                                int32_t event_id, void* event_data)
@@ -42,6 +46,8 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
                 break;
 
             case WIFI_EVENT_STA_DISCONNECTED: {
+                auto* disc = static_cast<wifi_event_sta_disconnected_t*>(event_data);
+                s_lastDiscReason = disc->reason;
                 s_connected = false;
                 if (s_wifiEventGroup) {
                     xEventGroupClearBits(s_wifiEventGroup, CONNECTED_BIT);
@@ -295,6 +301,7 @@ void WifiManager::saveCredentials(const char* ssid, const char* password)
     nvs_commit(handle);
     nvs_close(handle);
 
+    s_haveCreds = 1;
     LOG_INFO("Credentials saved (SSID: %s)", ssid);
 }
 
@@ -311,6 +318,7 @@ void WifiManager::eraseCredentials()
     nvs_commit(handle);
     nvs_close(handle);
 
+    s_haveCreds = 0;
     LOG_WARN("Credentials erased");
 }
 
@@ -401,3 +409,16 @@ int WifiManager::scanNetworks(ScannedNetwork* results, int maxResults)
     if (!wasConnected) resumeStaConnection();
     return count;
 }
+
+bool WifiManager::hasCredentials()
+{
+    if (s_haveCreds < 0) {
+        char ssid[33], pass[65];
+        s_haveCreds = loadCredentials(ssid, sizeof(ssid), pass, sizeof(pass)) ? 1 : 0;
+        memset(pass, 0, sizeof(pass));
+    }
+    return s_haveCreds == 1;
+}
+
+uint8_t WifiManager::lastDisconnectReason() { return s_lastDiscReason; }
+void    WifiManager::clearDisconnectReason() { s_lastDiscReason = 0; }

@@ -5,7 +5,7 @@
 
 static void test_sizes(void) {
     assert(sizeof(struct espnow_state_pkt) == 14);  /* v6: +reserved[2] */
-    assert(sizeof(struct espnow_info_pkt)  == 77);  /* v6: +reserved[2] */
+    assert(sizeof(struct espnow_info_pkt)  == 101); /* v10: +hk_payload[24] */
     assert(sizeof(struct espnow_cmd_pkt)   == 12);  /* v6: +reserved[1] */
     assert(sizeof(struct espnow_probe_pkt) == 4);   /* v6: +reserved[1] */
     /* The compat floor must never exceed the current version. */
@@ -114,7 +114,7 @@ static void test_state_flags(void) {
  * decide whether the change is additive (leave MIN_COMPAT) or breaking (raise
  * it). Update the constant below only after doing both. */
 static void test_cmd_units_field(void) {
-    assert(ESPNOW_PROTO_VERSION == 9);
+    assert(ESPNOW_PROTO_VERSION == 11);   /* v11: multi-zone IDENT */
     struct espnow_cmd_pkt c;
     memset(&c, 0, sizeof(c));
     c.type = ESPNOW_PKT_CMD; c.version = ESPNOW_PROTO_VERSION;
@@ -331,7 +331,7 @@ static void test_info_sensor_batt(void) {
 static void test_diag_pkt(void) {
     /* v9: new pull-only unit->dial diagnostics packet. New at v9, so its
      * MIN_LEN == its sizeof (no shorter-era senders exist). */
-    assert(ESPNOW_PROTO_VERSION == 9);
+    assert(ESPNOW_PROTO_VERSION == 11);   /* v11: multi-zone IDENT */
     assert(ESPNOW_PROTO_MIN_COMPAT == 5);          /* additive: floor unchanged */
     assert(ESPNOW_PKT_DIAG == 9);
     assert(sizeof(struct espnow_diag_pkt) == 56);
@@ -357,6 +357,125 @@ static void test_diag_pkt(void) {
     assert(memcmp(&p, &q, sizeof p) == 0);
 }
 
+/* v10: dial-driven Wi-Fi provisioning packet set. All four travel ONLY
+ * unicast between bonded peers (LMK-encrypted). New packet types = VERSION
+ * bump only; the floor stays at 5. */
+static void test_wifi_provisioning_pkts(void) {
+    assert(ESPNOW_PROTO_VERSION == 11);   /* v11: multi-zone IDENT */
+    assert(ESPNOW_PROTO_MIN_COMPAT == 5);           /* additive: floor must not move */
+    assert(ESPNOW_PKT_WIFI_SCAN_REQ == 10 && ESPNOW_PKT_WIFI_SCAN_RESP == 11);
+    assert(ESPNOW_PKT_WIFI_SET == 12 && ESPNOW_PKT_WIFI_STATUS == 13);
+    assert(sizeof(struct espnow_wifi_scan_req_pkt) == 4);
+    assert(sizeof(struct espnow_wifi_scan_item) == 35);
+    assert(sizeof(struct espnow_wifi_scan_resp_pkt) == 6 + 6 * 35);  /* header + 6 items, <250 */
+    assert(sizeof(struct espnow_wifi_set_pkt) == 102);
+    assert(sizeof(struct espnow_wifi_status_pkt) == 22);
+    assert(ESPNOW_WIFI_SCAN_REQ_MIN_LEN == 4 && ESPNOW_WIFI_SCAN_RESP_HDR_LEN == 6);
+    assert(ESPNOW_WIFI_SET_MIN_LEN == 102 && ESPNOW_WIFI_STATUS_MIN_LEN == 22);
+    assert(ESPNOW_WIFI_SCAN_MAX_ITEMS == 6);
+
+    /* SCAN_RESP pages are wire-truncated: header + n_items*35 bytes. A partial
+     * page decodes; items beyond the wire frame are zero-filled. */
+    struct espnow_wifi_scan_resp_pkt r; memset(&r, 0, sizeof r);
+    r.type = ESPNOW_PKT_WIFI_SCAN_RESP; r.version = ESPNOW_PROTO_VERSION;
+    r.page = 0; r.n_pages = 1; r.n_items = 2;
+    strcpy((char*)r.items[0].ssid, "homenet"); r.items[0].rssi = -48; r.items[0].secure = 1;
+    strcpy((char*)r.items[1].ssid, "guest");   r.items[1].rssi = -71; r.items[1].secure = 0;
+    int wire_len = ESPNOW_WIFI_SCAN_RESP_HDR_LEN + 2 * (int)sizeof(struct espnow_wifi_scan_item);
+    struct espnow_wifi_scan_resp_pkt got; memset(&got, 0xEE, sizeof got);
+    espnow_decode_pkt(&got, sizeof got, &r, wire_len);
+    assert(got.page == 0 && got.n_pages == 1 && got.n_items == 2);
+    assert(strcmp((char*)got.items[0].ssid, "homenet") == 0);
+    assert(got.items[0].rssi == -48 && got.items[0].secure == 1);
+    assert(strcmp((char*)got.items[1].ssid, "guest") == 0);
+    assert(got.items[2].ssid[0] == 0);              /* beyond the wire: zero-filled */
+
+    /* WIFI_SET carries ssid+psk exactly like the proven WIFI_RESP shapes. */
+    struct espnow_wifi_set_pkt w; memset(&w, 0, sizeof w);
+    w.type = ESPNOW_PKT_WIFI_SET; w.version = ESPNOW_PROTO_VERSION;
+    strcpy((char*)w.ssid, "homenet"); strcpy((char*)w.psk, "hunter2!pass");
+    struct espnow_wifi_set_pkt wg;
+    espnow_decode_pkt(&wg, sizeof wg, &w, (int)sizeof w);
+    assert(strcmp((char*)wg.ssid, "homenet") == 0);
+    assert(strcmp((char*)wg.psk, "hunter2!pass") == 0);
+
+    /* WIFI_STATUS roundtrip. */
+    struct espnow_wifi_status_pkt s; memset(&s, 0, sizeof s);
+    s.type = ESPNOW_PKT_WIFI_STATUS; s.version = ESPNOW_PROTO_VERSION;
+    s.status = ESPNOW_WIFI_ST_CONNECTED; s.rssi = -55;
+    strcpy((char*)s.ip, "10.0.0.23");
+    struct espnow_wifi_status_pkt sg;
+    espnow_decode_pkt(&sg, sizeof sg, &s, (int)sizeof s);
+    assert(sg.status == ESPNOW_WIFI_ST_CONNECTED && sg.rssi == -55);
+    assert(strcmp((char*)sg.ip, "10.0.0.23") == 0);
+}
+
+/* v10: STATE flags2 gains WIFI_PROVISIONED (spare bit — sizeof unchanged).
+ * A MIN_COMPAT-era 12-byte STATE decodes with flags2 == 0, and the DIAL must
+ * additionally version-gate (peer >= 10) before trusting the bit — a v9 unit
+ * with creds also sends flags2 bit1 == 0. */
+static void test_state_flags2_wifi_provisioned(void) {
+    assert(ESPNOW_SF2_WIFI_PROVISIONED == (1u << 1));
+    struct espnow_state_pkt p; memset(&p, 0, sizeof p);
+    p.type = ESPNOW_PKT_STATE; p.version = ESPNOW_PROTO_VERSION;
+    p.flags2 = ESPNOW_SF2_WIFI_PROVISIONED;
+    struct espnow_state_pkt q;
+    espnow_decode_pkt(&q, sizeof q, &p, (int)sizeof p);
+    assert(q.flags2 & ESPNOW_SF2_WIFI_PROVISIONED);
+    /* v5-shaped 12-byte frame: flags2 zero-filled. */
+    uint8_t wire[ESPNOW_STATE_MIN_LEN];
+    memcpy(wire, &p, sizeof wire);
+    struct espnow_state_pkt got; memset(&got, 0xEE, sizeof got);
+    espnow_decode_pkt(&got, sizeof got, wire, (int)sizeof wire);
+    assert(got.flags2 == 0);
+}
+
+/* v10: INFO appends hk_payload[24] (the X-HM:// HomeKit setup URI) after
+ * reserved[] — sizeof grows 77 -> 101, MIN_LEN stays 75. A v9-era 77-byte
+ * INFO decodes with hk_payload empty (dial falls back to code-only). */
+static void test_info_hk_payload(void) {
+    assert(sizeof(struct espnow_info_pkt) == 101);
+    assert(ESPNOW_INFO_MIN_LEN == 75);
+    struct espnow_info_pkt p; memset(&p, 0, sizeof p);
+    p.type = ESPNOW_PKT_INFO; p.version = ESPNOW_PROTO_VERSION;
+    strcpy((char*)p.hk_payload, "X-HM://00KFPZQT3MCAC");
+    struct espnow_info_pkt q;
+    espnow_decode_pkt(&q, sizeof q, &p, (int)sizeof p);
+    assert(strcmp((char*)q.hk_payload, "X-HM://00KFPZQT3MCAC") == 0);
+    /* v9-era 77-byte frame: hk_payload zero-filled. */
+    uint8_t wire[77]; memset(wire, 0, sizeof wire);
+    wire[0] = ESPNOW_PKT_INFO; wire[1] = 9;
+    struct espnow_info_pkt got; memset(&got, 0xEE, sizeof got);
+    espnow_decode_pkt(&got, sizeof got, wire, (int)sizeof wire);
+    assert(got.hk_payload[0] == 0);
+}
+
+static void test_ident_pkt(void) {
+    /* v11: PROBE claims reserved[0] as want_ident — sizeof unchanged */
+    assert(sizeof(struct espnow_probe_pkt) == 4);
+    struct espnow_probe_pkt pr = { ESPNOW_PKT_PROBE, ESPNOW_PROTO_VERSION, 1, 1 };
+    assert(((const uint8_t *)&pr)[3] == 1);          /* want_ident is byte 3 */
+    /* a v<=10 peer's short (3 B) probe decodes want_ident = 0 */
+    uint8_t old[3] = { ESPNOW_PKT_PROBE, 10, 1 };
+    struct espnow_probe_pkt d;
+    espnow_decode_pkt(&d, sizeof d, old, sizeof old);
+    assert(d.want_info == 1 && d.want_ident == 0);
+
+    /* IDENT: new packet type, unit -> dial, pull-gated by want_ident */
+    assert(ESPNOW_PKT_IDENT == 14);
+    assert(sizeof(struct espnow_ident_pkt) == 36);
+    assert(ESPNOW_IDENT_MIN_LEN == 36);
+    struct espnow_ident_pkt p; memset(&p, 0, sizeof p);
+    p.type = ESPNOW_PKT_IDENT; p.version = ESPNOW_PROTO_VERSION;
+    strcpy((char *)p.name, "Living Room");
+    struct espnow_ident_pkt q;
+    espnow_decode_pkt(&q, sizeof q, &p, sizeof p);
+    assert(q.type == ESPNOW_PKT_IDENT && !strcmp((char *)q.name, "Living Room"));
+
+    /* additive: the compat floor must not move */
+    assert(ESPNOW_PROTO_MIN_COMPAT == 5);
+}
+
 int main(void) {
     test_sizes();
     test_temp_celsius_roundtrip();
@@ -376,6 +495,10 @@ int main(void) {
     test_pair_packets();
     test_wifi_pkts();
     test_diag_pkt();
+    test_wifi_provisioning_pkts();
+    test_state_flags2_wifi_provisioned();
+    test_info_hk_payload();
+    test_ident_pkt();
     printf("ALL TESTS PASSED\n");
     return 0;
 }

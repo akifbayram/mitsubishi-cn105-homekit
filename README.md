@@ -26,7 +26,7 @@ Controls Mitsubishi mini split heat pumps via the CN105 serial connector, compat
 - **Dual setpoint Auto mode** — independent heating and cooling thresholds
 - **Multi-board support** — ESP32, ESP32-C3, ESP32-C6, ESP32-S3
 - **WiFi recovery** — automatic fallback AP with web-based credential entry
-- **Display Link remote** — optional physical dial for control and live status over an encrypted wireless link
+- **Link** — (coming soon) optional physical dial with a display for control and live status over an encrypted wireless link
 
 ## Quick Start
 
@@ -175,7 +175,7 @@ On the NanoC6, a separate blue LED tracks WiFi (on = disconnected, off = connect
 
 Wall-mounted units measure temperature at ceiling height near the return air intake, which usually reads warmer than the living space. A BLE sensor placed lower in the room gives the heat pump a better reading to work with.
 
-The firmware listens for BLE advertisements from a configured sensor. No Bluetooth pairing needed, just power on the sensor. Temperature is forwarded to the heat pump every 20 seconds. If no BLE data arrives before the stale timeout (default 10 minutes, adjustable from 30 seconds to 10 minutes via the Remote Sensor card), the heat pump reverts to its internal thermistor.
+The firmware listens for BLE advertisements from a configured sensor. No Bluetooth pairing needed, just power on the sensor. Temperature is forwarded to the heat pump every 20 seconds. If no BLE data arrives before the stale timeout (default 10 minutes, adjustable from 30 seconds to 1 hour via the Remote Sensor card), the heat pump reverts to its internal thermistor.
 
 The sensor also shows up in Apple Home as its own accessory (separate from the climate tile) reporting temperature, humidity, and battery level. Home shows a low-battery warning when the cell drops to 20% or below.
 
@@ -201,7 +201,7 @@ A **Remote Sensor** card appears in the web UI on boards with Bluetooth:
 - **Status** — live temperature, humidity, battery level, signal strength, and last update time
 - **Indicators** — green (active), orange (feed disabled), red (stale data), gray (scanning/not configured)
 
-## Display Link Remote
+## Link Remote
 
 An optional physical dial that mirrors the unit's live state and controls power, mode, setpoint, fan, and vanes over an encrypted wireless link. All HVAC logic stays on the unit, and the link stays idle until a remote is paired, so a unit with no remote behaves exactly as before. Pair by holding the unit's button, then pairing from the dial; "Forget remote" in the web UI clears the bond.
 

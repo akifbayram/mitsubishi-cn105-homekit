@@ -18,7 +18,7 @@
 extern "C" {
 #endif
 
-#define ESPNOW_PROTO_VERSION 9
+#define ESPNOW_PROTO_VERSION 11
 
 /* Oldest peer protocol version this firmware still parses. Bump ONLY on a
  * breaking layout change (a field's type/offset moves, or a struct shrinks).
@@ -54,7 +54,17 @@ extern "C" {
  * Additive per rule 2 (reserved byte) — sizeof unchanged, floor stays 5.
  * v9: DIAG packet (unit -> dial device-info page) — new packet type only,
  * pull-gated by PROBE.want_info like INFO; old peers ignore unknown types, so
- * the floor is unchanged. */
+ * the floor is unchanged.
+ * v10: dial-driven Wi-Fi provisioning + HomeKit QR. Four new packet types
+ * (WIFI_SCAN_REQ/WIFI_SCAN_RESP/WIFI_SET/WIFI_STATUS — old peers ignore
+ * unknown types); STATE flags2 gains SF2_WIFI_PROVISIONED (spare bit, rule 1);
+ * INFO appends hk_payload[24] after reserved[] (rule 3 — sizeof grows
+ * 77 -> 101, INFO_MIN_LEN stays 75). Floor unchanged.
+ * v11: multi-zone dial. PROBE claims reserved[0] as want_ident (rule 2 —
+ * sizeof unchanged; this byte was earmarked for a capability/identity claim).
+ * New IDENT packet (unit -> dial, unicast/LMK-encrypted, pull-gated by
+ * PROBE.want_ident) carries the unit's user-set deviceName for the dial's
+ * zone picker. Additive; floor unchanged. */
 #define ESPNOW_PROTO_MIN_COMPAT 5
 
 /* Floor-era (v5) wire sizes — the receive path's length checks are pinned to
@@ -71,6 +81,17 @@ extern "C" {
 /* v9 packet: new at v9, so its MIN_LEN == its v9 sizeof. */
 #define ESPNOW_DIAG_MIN_LEN 56
 
+/* v10 packets: new at v10, so their MIN_LEN == their v10 wire minimum.
+ * SCAN_RESP is wire-truncated per page (header + n_items*35), so its check
+ * is a header gate + a computed per-item length check in the receiver. */
+#define ESPNOW_WIFI_SCAN_REQ_MIN_LEN  4
+#define ESPNOW_WIFI_SCAN_RESP_HDR_LEN 6
+#define ESPNOW_WIFI_SET_MIN_LEN       102
+#define ESPNOW_WIFI_STATUS_MIN_LEN    22
+
+/* v11 packet: new at v11, so its MIN_LEN == its v11 sizeof. */
+#define ESPNOW_IDENT_MIN_LEN 36
+
 enum espnow_pkt_type {
     ESPNOW_PKT_STATE = 1,
     ESPNOW_PKT_CMD   = 2,
@@ -81,6 +102,11 @@ enum espnow_pkt_type {
     ESPNOW_PKT_WIFI_REQ  = 7,   /* link -> unit: request home Wi-Fi creds (bonded/encrypted, Link OTA) */
     ESPNOW_PKT_WIFI_RESP = 8,   /* unit -> link: creds reply (bonded/encrypted; ok=0 -> none stored) */
     ESPNOW_PKT_DIAG  = 9,       /* unit -> dial, pull-only (PROBE want_info): device-info page */
+    ESPNOW_PKT_WIFI_SCAN_REQ  = 10, /* dial -> unit: scan for networks (bonded/encrypted) */
+    ESPNOW_PKT_WIFI_SCAN_RESP = 11, /* unit -> dial: paged scan results (bonded/encrypted) */
+    ESPNOW_PKT_WIFI_SET       = 12, /* dial -> unit: join this ssid/psk (bonded/encrypted) */
+    ESPNOW_PKT_WIFI_STATUS    = 13, /* unit -> dial: join progress/result (bonded/encrypted) */
+    ESPNOW_PKT_IDENT          = 14, /* unit -> dial: deviceName (bonded/encrypted, pull-gated by PROBE.want_ident) */
 };
 
 /* STATE flag bits — home-dial status only */
@@ -100,7 +126,10 @@ static inline uint8_t espnow_state_vanecfg(uint8_t flags) { return (flags >> 6) 
 
 /* STATE flags2 bits (claims reserved[0]; `flags` bits 0-7 are all assigned) */
 enum {
-    ESPNOW_SF2_SENSOR_BATT_LOW = 1u << 0,  /* remote sensor battery critical (unit-thresholded) */
+    ESPNOW_SF2_SENSOR_BATT_LOW  = 1u << 0,  /* remote sensor battery critical (unit-thresholded) */
+    ESPNOW_SF2_WIFI_PROVISIONED = 1u << 1,  /* v10: unit has stored Wi-Fi creds in NVS. Receivers
+                                             * MUST also gate on peer version >= 10 — a v9 unit
+                                             * with creds sends this bit as 0 (zero-fill). */
 };
 
 /* INFO flag bits — validity travels with the data in espnow_info_pkt */
@@ -163,6 +192,9 @@ struct __attribute__((packed)) espnow_info_pkt {
      * has 6 spare bits — prefer those for new validity flags. */
     uint8_t  sensor_batt_pct; /* v8: remote sensor battery 0-100 (valid per IF_SENSORBATT_VALID; was reserved[0]) */
     uint8_t  reserved[1];   /* v6 */
+    /* v10 (rule 3 append): HomeKit X-HM:// setup URI for the dial's QR
+     * ("X-HM://XXXXXXXXXYYYY\0", ~21 chars). Empty = unknown/older unit. */
+    uint8_t  hk_payload[24];
 };
 
 struct __attribute__((packed)) espnow_cmd_pkt {
@@ -185,9 +217,8 @@ struct __attribute__((packed)) espnow_probe_pkt {
     uint8_t type;           /* ESPNOW_PKT_PROBE */
     uint8_t version;        /* ESPNOW_PROTO_VERSION */
     uint8_t want_info;      /* 1 while dial is on SYSTEM/HOMEKIT/WIFI screen */
-    /* Senders zero-fill, receivers ignore. First claim is expected to be a
-     * device-class/capability byte if a second accessory type ever ships. */
-    uint8_t reserved[1];    /* v6 */
+    uint8_t want_ident;     /* v11: 1 -> unit replies IDENT (was reserved[0];
+                             * v<=10 senders zero-fill, so it decodes as 0) */
 };
 
 /* ── DIAG (v9): unit diagnostics for the dial's About/device-info page ──────
@@ -210,6 +241,17 @@ struct __attribute__((packed)) espnow_diag_pkt {
     uint8_t  reserved[2];     /* senders zero-fill, receivers ignore */
 };
 
+/* ── IDENT (v11): the unit's user-set name for the dial's zone picker ──────
+ * Unicast between bonded peers (LMK-encrypted), pull-gated by
+ * PROBE.want_ident and throttled like INFO. The dial persists it in the
+ * bond table; an empty name means the unit has none set. */
+struct __attribute__((packed)) espnow_ident_pkt {
+    uint8_t type;           /* ESPNOW_PKT_IDENT */
+    uint8_t version;        /* ESPNOW_PROTO_VERSION */
+    uint8_t name[32];       /* deviceName, null-terminated */
+    uint8_t reserved[2];    /* senders zero-fill, receivers ignore */
+};
+
 /* ── Link OTA credential relay (v7) ─────────────────────────────────────────
  * Both packets travel ONLY unicast between bonded peers, so the ESP-NOW LMK
  * encrypts them on the air. The link keeps the credentials in RAM for the
@@ -226,6 +268,62 @@ struct __attribute__((packed)) espnow_wifi_resp_pkt {
     uint8_t ok;             /* 1 = ssid/psk valid; 0 = unit has no stored creds */
     uint8_t ssid[33];       /* null-terminated */
     uint8_t psk[65];        /* null-terminated (WPA passphrase max 64) */
+    uint8_t reserved[2];    /* senders zero-fill, receivers ignore */
+};
+
+/* ── Dial-driven Wi-Fi provisioning (v10) ───────────────────────────────────
+ * All four packets travel ONLY unicast between bonded peers (LMK-encrypted).
+ * The unit scans/joins — its antenna is the one that matters — and the dial
+ * is pure UI. After a WIFI_SET the unit pushes WIFI_STATUS ~1 Hz for 60 s so
+ * the dial hears the outcome even across the join's channel change (the
+ * dial's sweep re-locks onto the new channel within a few seconds). */
+struct __attribute__((packed)) espnow_wifi_scan_req_pkt {
+    uint8_t type;           /* ESPNOW_PKT_WIFI_SCAN_REQ */
+    uint8_t version;        /* ESPNOW_PROTO_VERSION */
+    uint8_t reserved[2];    /* senders zero-fill, receivers ignore */
+};
+
+#define ESPNOW_WIFI_SCAN_MAX_ITEMS 6   /* per page: 6 + 6*35 = 216 B < 250 B */
+struct __attribute__((packed)) espnow_wifi_scan_item {
+    uint8_t ssid[33];       /* null-terminated */
+    int8_t  rssi;
+    uint8_t secure;         /* 1 = any auth mode, 0 = open */
+};
+
+struct __attribute__((packed)) espnow_wifi_scan_resp_pkt {
+    uint8_t type;           /* ESPNOW_PKT_WIFI_SCAN_RESP */
+    uint8_t version;        /* ESPNOW_PROTO_VERSION */
+    uint8_t page;           /* 0-based */
+    uint8_t n_pages;        /* total pages in this scan (>= 1; 1 with n_items 0 = none found) */
+    uint8_t n_items;        /* items valid in THIS page */
+    uint8_t reserved[1];    /* senders zero-fill, receivers ignore */
+    struct espnow_wifi_scan_item items[ESPNOW_WIFI_SCAN_MAX_ITEMS];
+    /* Wire frames are truncated to HDR_LEN + n_items*35; receivers gate on
+     * len >= HDR_LEN, then on len >= HDR_LEN + n_items*35. */
+};
+
+struct __attribute__((packed)) espnow_wifi_set_pkt {
+    uint8_t type;           /* ESPNOW_PKT_WIFI_SET */
+    uint8_t version;        /* ESPNOW_PROTO_VERSION */
+    uint8_t ssid[33];       /* null-terminated */
+    uint8_t psk[65];        /* null-terminated (empty = open network) */
+    uint8_t reserved[2];    /* senders zero-fill, receivers ignore */
+};
+
+enum espnow_wifi_status {
+    ESPNOW_WIFI_ST_CONNECTING   = 1,
+    ESPNOW_WIFI_ST_CONNECTED    = 2,
+    ESPNOW_WIFI_ST_AUTH_FAIL    = 3,   /* wrong password (auth-class disconnect) */
+    ESPNOW_WIFI_ST_AP_NOT_FOUND = 4,
+    ESPNOW_WIFI_ST_TIMEOUT      = 5,   /* no success within the unit's 30 s window */
+};
+
+struct __attribute__((packed)) espnow_wifi_status_pkt {
+    uint8_t type;           /* ESPNOW_PKT_WIFI_STATUS */
+    uint8_t version;        /* ESPNOW_PROTO_VERSION */
+    uint8_t status;         /* enum espnow_wifi_status */
+    int8_t  rssi;           /* unit STA RSSI (valid when CONNECTED) */
+    uint8_t ip[16];         /* "255.255.255.255\0" (valid when CONNECTED) */
     uint8_t reserved[2];    /* senders zero-fill, receivers ignore */
 };
 
@@ -248,14 +346,21 @@ struct __attribute__((packed)) espnow_pair_resp_pkt {
 /* sizeof guards — both copies of this header must agree */
 #define ESPNOW_STATIC_ASSERT(c, m) typedef char espnow_sa_##m[(c) ? 1 : -1]
 ESPNOW_STATIC_ASSERT(sizeof(struct espnow_state_pkt) == 14, state_size);
-ESPNOW_STATIC_ASSERT(sizeof(struct espnow_info_pkt)  == 77, info_size);
+ESPNOW_STATIC_ASSERT(sizeof(struct espnow_info_pkt)  == 101, info_size);   /* v10: +hk_payload[24] */
 ESPNOW_STATIC_ASSERT(sizeof(struct espnow_cmd_pkt)   == 12, cmd_size);
 ESPNOW_STATIC_ASSERT(sizeof(struct espnow_probe_pkt) == 4,  probe_size);
 ESPNOW_STATIC_ASSERT(sizeof(struct espnow_wifi_req_pkt)  == 4,   wifi_req_size);
 ESPNOW_STATIC_ASSERT(sizeof(struct espnow_wifi_resp_pkt) == 103, wifi_resp_size);
+ESPNOW_STATIC_ASSERT(sizeof(struct espnow_wifi_scan_req_pkt) == 4, wifi_scan_req_size);
+ESPNOW_STATIC_ASSERT(sizeof(struct espnow_wifi_scan_item) == 35, wifi_scan_item_size);
+ESPNOW_STATIC_ASSERT(sizeof(struct espnow_wifi_scan_resp_pkt) == 216, wifi_scan_resp_size);
+ESPNOW_STATIC_ASSERT(sizeof(struct espnow_wifi_set_pkt) == 102, wifi_set_size);
+ESPNOW_STATIC_ASSERT(sizeof(struct espnow_wifi_status_pkt) == 22, wifi_status_size);
 ESPNOW_STATIC_ASSERT(sizeof(struct espnow_pair_req_pkt)  == 56, pair_req_size);
 ESPNOW_STATIC_ASSERT(sizeof(struct espnow_pair_resp_pkt) == 56, pair_resp_size);
 ESPNOW_STATIC_ASSERT(sizeof(struct espnow_diag_pkt) == 56, diag_size);
+ESPNOW_STATIC_ASSERT(sizeof(struct espnow_ident_pkt) == 36, ident_size);
+ESPNOW_STATIC_ASSERT(ESPNOW_IDENT_MIN_LEN <= (int)sizeof(struct espnow_ident_pkt), ident_minlen);
 /* MIN_LEN never exceeds the current wire size. */
 ESPNOW_STATIC_ASSERT(ESPNOW_STATE_MIN_LEN <= (int)sizeof(struct espnow_state_pkt), state_minlen);
 ESPNOW_STATIC_ASSERT(ESPNOW_INFO_MIN_LEN  <= (int)sizeof(struct espnow_info_pkt),  info_minlen);
@@ -263,6 +368,9 @@ ESPNOW_STATIC_ASSERT(ESPNOW_CMD_MIN_LEN   <= (int)sizeof(struct espnow_cmd_pkt),
 ESPNOW_STATIC_ASSERT(ESPNOW_PROBE_MIN_LEN <= (int)sizeof(struct espnow_probe_pkt), probe_minlen);
 ESPNOW_STATIC_ASSERT(ESPNOW_WIFI_REQ_MIN_LEN  <= (int)sizeof(struct espnow_wifi_req_pkt),  wifi_req_minlen);
 ESPNOW_STATIC_ASSERT(ESPNOW_WIFI_RESP_MIN_LEN <= (int)sizeof(struct espnow_wifi_resp_pkt), wifi_resp_minlen);
+ESPNOW_STATIC_ASSERT(ESPNOW_WIFI_SCAN_REQ_MIN_LEN <= (int)sizeof(struct espnow_wifi_scan_req_pkt), wifi_scan_req_minlen);
+ESPNOW_STATIC_ASSERT(ESPNOW_WIFI_SET_MIN_LEN <= (int)sizeof(struct espnow_wifi_set_pkt), wifi_set_minlen);
+ESPNOW_STATIC_ASSERT(ESPNOW_WIFI_STATUS_MIN_LEN <= (int)sizeof(struct espnow_wifi_status_pkt), wifi_status_minlen);
 ESPNOW_STATIC_ASSERT(ESPNOW_DIAG_MIN_LEN <= (int)sizeof(struct espnow_diag_pkt), diag_minlen);
 
 /* ── pure helpers ─────────────────────────────────────────────────────── */

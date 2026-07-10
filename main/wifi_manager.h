@@ -46,6 +46,18 @@ namespace WifiManager {
     /// Erase WiFi credentials from NVS namespace "wifi-creds".
     void eraseCredentials();
 
+    /// True if NVS "wifi-creds" holds credentials. Cached (updated by
+    /// saveCredentials/eraseCredentials; first call reads NVS once) so the
+    /// 1 Hz ESP-NOW STATE builder can call it without an NVS read per tick.
+    bool hasCredentials();
+
+    /// Last WIFI_EVENT_STA_DISCONNECTED reason code (wifi_err_reason_t),
+    /// 0 = none since the last clearDisconnectReason(). Lets the ESP-NOW
+    /// provisioning path distinguish wrong-password (auth-class reasons)
+    /// from AP-not-found during a join attempt.
+    uint8_t lastDisconnectReason();
+    void clearDisconnectReason();
+
     /// WiFi network found during scan
     struct ScannedNetwork {
         char ssid[33];

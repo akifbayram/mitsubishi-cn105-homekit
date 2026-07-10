@@ -2,6 +2,7 @@
 #include "ble_config.h"   // brings nothing harmful; keeps include order consistent
 #include <cstdint>
 #include "espnow_proto.h"
+#include "wifi_manager.h"
 
 #ifndef ESPNOW_REMOTE_ENABLE
 #define ESPNOW_REMOTE_ENABLE 1
@@ -36,6 +37,16 @@ private:
     uint32_t _lastStateTxMs = 0;
     uint32_t _lastInfoTxMs = 0;
     uint32_t _lastDiagTxMs = 0;
+    uint32_t _lastIdentTxMs = 0;
+    // Dial-driven Wi-Fi provisioning (proto v10)
+    static constexpr int WIFI_SCAN_CACHE = 15;      // matches WifiManager's top-15 scan
+    WifiManager::ScannedNetwork _scanCache[15];
+    int      _scanCount = -1;                       // -1 = never scanned
+    uint32_t _scanAtMs = 0;
+    uint32_t _wifiJoinStartMs = 0;
+    uint32_t _wifiStatusUntilMs = 0;                // 0 = no status stream active
+    uint32_t _lastWifiStatusTxMs = 0;
+    uint8_t  _wifiJoinResult = 0;                   // 0 pending, else latched espnow_wifi_status
     uint32_t _lastVerWarnMs = 0;   // throttle for the proto-version-skew warning
     uint8_t  _pmk[16] = {0};
     bool     _havePmk = false;

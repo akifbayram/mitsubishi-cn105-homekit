@@ -114,9 +114,28 @@ endif()
 if(NOT DEFINED BRAND_MODEL)
     set(BRAND_MODEL "CN105")
 endif()
+if(NOT DEFINED BRAND_MANUFACTURER)
+    set(BRAND_MANUFACTURER "Mitsubishi Electric")
+endif()
+if(NOT DEFINED BRAND_QR_ID)
+    set(BRAND_QR_ID "MCAC")
+endif()
 if(NOT DEFINED BRAND_THEME_COLOR)
     set(BRAND_THEME_COLOR "#1a73e8")
 endif()
+
+# Wire the brand strings into the C/C++ compiler too — not just the HTML codegen
+# below. Without this, branding.h's #ifndef fallbacks compile in (e.g. BRAND_NAME
+# → "Mini Split") and any -DBRAND_* passed to the build is silently ignored by the
+# firmware. THEME_COLOR is omitted on purpose: it contains '#', which CMake refuses
+# to pass as a preprocessor definition, and it is only consumed by the HTML codegen.
+target_compile_definitions(${COMPONENT_TARGET} PRIVATE
+    BRAND_NAME="${BRAND_NAME}"
+    BRAND_AP_PREFIX="${BRAND_AP_PREFIX}"
+    BRAND_AP_PASSWORD="${BRAND_AP_PASSWORD}"
+    BRAND_MANUFACTURER="${BRAND_MANUFACTURER}"
+    BRAND_MODEL="${BRAND_MODEL}"
+    BRAND_QR_ID="${BRAND_QR_ID}")
 
 # ── Gzip + template substitute HTML files ────────────────────────────────────
 add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/web_ui.html.gz

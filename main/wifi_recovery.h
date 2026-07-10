@@ -13,7 +13,7 @@ constexpr uint32_t WIFI_AP_LINGER_MS = 6000;  // 6 seconds (recovery page polls 
 
 // Button long-press duration for WiFi reset
 constexpr uint32_t WIFI_RESET_BUTTON_HOLD_MS = 10000;  // 10 seconds
-// Button medium-press (release before 10s) opens Display Link pairing
+// Button medium-press (release before 10s) opens Link pairing
 constexpr uint32_t PAIR_BUTTON_HOLD_MS       = 2000;   // 2 seconds
 constexpr int8_t   WIFI_RESET_BUTTON_PIN = PIN_BUTTON;  // From board profile (-1 = no button)
 

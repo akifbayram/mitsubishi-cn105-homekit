@@ -11,10 +11,10 @@ enum LEDState {
     SLED_WIFI_DISCONNECTED,  // WiFi lost — blue steady (WIFI_ON_RGB boards only)
     SLED_ERROR_CODE,         // AC error code (non-0x80) — red fast blink (200ms)
     SLED_OTA,                // Firmware upload — blue slow pulse (~2s)
-    SLED_PAIR_LISTEN,        // Display Link pairing window open — purple slow pulse
+    SLED_PAIR_LISTEN,        // Link pairing window open — purple slow pulse
     SLED_PAIR_OK,            // Pairing succeeded — solid green (held ~5s by caller)
     SLED_PAIR_FAIL,          // Pairing timed out — red fast blink (held ~3s by caller)
-    SLED_UNPAIR              // Display Link forgotten — orange fast blink (held by caller before restart)
+    SLED_UNPAIR              // Link forgotten — orange fast blink (held by caller before restart)
 };
 
 #if PIN_LED_DATA >= 0

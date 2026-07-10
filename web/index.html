@@ -617,12 +617,12 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   </div>
 
   <!-- ===== DISPLAY LINK ===== -->
-  <h2 class="group-label">Display Link<span class="section-summary"><span class="status-dot idle" id="remoteDot"></span><span class="summary-text" id="remoteSummary">—</span></span></h2>
+  <h2 class="group-label">Link<span class="section-summary"><span class="status-dot idle" id="remoteDot"></span><span class="summary-text" id="remoteSummary">—</span></span></h2>
   <div class="card" id="remoteCard">
     <div style="display:flex;align-items:center;gap:12px">
       <span class="icon-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="12" cy="12" r="8"/><path d="M12 8v4" stroke-linecap="round"/></svg></span>
       <div class="stack-tight" style="flex:1;min-width:0">
-        <div class="t">Display Link</div>
+        <div class="t">Link</div>
         <div class="b"><span id="remoteStatus">—</span><span id="remoteMacWrap" style="display:none"> · <span id="remoteMac" class="mono">—</span></span></div>
       </div>
     </div>
@@ -1628,9 +1628,9 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       $('forgetRemoteBtn').style.display=s.remoteBonded?'':'none';
       var ps=$('pairStatus');
       if(pairing){
-        ps.textContent='Listening… '+(s.remotePairSecs||0)+'s — hold the button on the Display Link';
+        ps.textContent='Listening… '+(s.remotePairSecs||0)+'s — hold the button on the Link';
       }else if(s.remotePairResult==='timeout'){
-        ps.textContent='No Display Link found. Put it in pairing mode and retry.';
+        ps.textContent='No Link found. Put it in pairing mode and retry.';
       }else if(s.remoteBonded){
         ps.textContent='';
       }else{
@@ -2248,7 +2248,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   };
 
   document.getElementById('forgetRemoteBtn').addEventListener('click',function(){
-    if(confirm('Forget the paired Display Link? The device will restart.')){
+    if(confirm('Forget the paired Link? The device will restart.')){
       send({cmd:'forgetRemote'});
     }
   });

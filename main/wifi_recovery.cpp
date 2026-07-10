@@ -206,10 +206,10 @@ void WifiRecovery::checkButton() {
                 if (otaBusy) {
                     LOG_INFO("[WiFiRecovery] Button pairing ignored (OTA in progress)");
                 } else if (espnowLink.pairingActive()) {
-                    LOG_INFO("[WiFiRecovery] Button: cancelling Display Link pairing");
+                    LOG_INFO("[WiFiRecovery] Button: cancelling Link pairing");
                     espnowLink.cancelPairing();
                 } else if (espnowLink.isBonded()) {
-                    LOG_WARN("[WiFiRecovery] Button hold — forgetting Display Link remote");
+                    LOG_WARN("[WiFiRecovery] Button hold — forgetting Link remote");
                     espnow_bond_clear();
 #if PIN_LED_DATA >= 0
                     statusLED.holdBlocking(SLED_UNPAIR, 2000);  // orange blink before restart
@@ -218,7 +218,7 @@ void WifiRecovery::checkButton() {
 #endif
                     esp_restart();
                 } else {
-                    LOG_INFO("[WiFiRecovery] Button hold — opening Display Link pairing");
+                    LOG_INFO("[WiFiRecovery] Button hold — opening Link pairing");
                     espnowLink.startPairing();
                 }
 #endif

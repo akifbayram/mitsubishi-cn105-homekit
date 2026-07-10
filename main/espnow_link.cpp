@@ -46,7 +46,11 @@ static volatile bool          s_haveCmd = false;
 static struct espnow_cmd_pkt  s_cmd;
 static volatile uint32_t      s_lastProbeMs = 0;
 static volatile uint8_t       s_wantInfo = 0;
+static volatile uint8_t       s_wantIdent = 0;
 static volatile bool          s_haveWifiReq = false;   // Link OTA: creds request pending
+static volatile bool          s_haveScanReq = false;
+static volatile bool          s_haveWifiSet = false;
+static struct espnow_wifi_set_pkt s_wifiSet;   // guarded by s_cmdMux
 // Protocol version of the last accepted peer packet. Lets the unit notice an
 // out-of-date (or ahead-of-us) Dial and warn instead of silently ignoring it.
 static volatile uint8_t       s_peerVer = 0;
@@ -96,6 +100,7 @@ static void onRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len
             // MIN_LEN, not sizeof: a MIN_COMPAT-era probe is shorter than the
             // current struct (v6 added a reserved tail) and must still count.
             if (len >= ESPNOW_PROBE_MIN_LEN) s_wantInfo = data[2];
+            s_wantIdent = (len >= 4) ? data[3] : 0;   // v11; v<=10 peers send 0
             break;
         case ESPNOW_PKT_CMD:
             // MIN_LEN + tolerant decode: a MIN_COMPAT-era Dial sends a shorter
@@ -117,6 +122,25 @@ static void onRecv(const esp_now_recv_info_t *info, const uint8_t *data, int len
                 s_lastProbeMs = uptime_ms();
             }
             break;
+        case ESPNOW_PKT_WIFI_SCAN_REQ:
+            // Dial-driven provisioning: scan is deferred to loop() (blocking scan
+            // must not run on the WiFi task).
+            if (len >= ESPNOW_WIFI_SCAN_REQ_MIN_LEN) {
+                s_haveScanReq = true;
+                s_lastProbeMs = uptime_ms();
+            }
+            break;
+        case ESPNOW_PKT_WIFI_SET:
+            if (len >= ESPNOW_WIFI_SET_MIN_LEN) {
+                struct espnow_wifi_set_pkt w;
+                espnow_decode_pkt(&w, sizeof(w), data, len);
+                portENTER_CRITICAL(&s_cmdMux);
+                memcpy((void*)&s_wifiSet, &w, sizeof(s_wifiSet)); s_haveWifiSet = true;
+                portEXIT_CRITICAL(&s_cmdMux);
+                memset(&w, 0, sizeof(w));   // no PSK copy left on this stack
+                s_lastProbeMs = uptime_ms();
+            }
+            break;
         default: break;
     }
 }
@@ -129,7 +153,7 @@ void EspnowLink::ensureEspnowInit() {
     if (_havePmk) {
         if (esp_now_set_pmk(_pmk) != ESP_OK) { LOG_ERROR("esp_now_set_pmk failed"); return; }
     } else {
-        LOG_WARN("no PMK provisioned — pairing disabled");
+        LOG_WARN("no PMK provisioned — pairing disabled (console: espnow-pmk <32-hex>)");
     }
     esp_now_register_recv_cb(onRecv);
     _espnowReady = true;
@@ -151,6 +175,10 @@ void EspnowLink::begin(CN105Controller *ctrl) {
     memcpy(pi.lmk, lmk, 16);
     if (esp_now_add_peer(&pi) != ESP_OK) { LOG_ERROR("esp_now_add_peer failed"); return; }
     _bonded = true;
+    if (!_havePmk) {
+        LOG_WARN("bonded but no PMK in NVS — the encrypted link will NOT work; "
+                 "provision with 'espnow-pmk <32-hex>' and reboot");
+    }
     LOG_INFO("ESP-NOW remote bonded to %02X:%02X:%02X:%02X:%02X:%02X",
              _peer[0],_peer[1],_peer[2],_peer[3],_peer[4],_peer[5]);
 }
@@ -172,6 +200,7 @@ void EspnowLink::buildState(struct espnow_state_pkt *p) {
     p->error_code = st.errorCode;
     p->room_dc = espnow_c_to_dc(st.roomTemp);
     p->set_dc  = espnow_c_to_dc(st.targetTemp);
+    if (WifiManager::hasCredentials()) p->flags2 |= ESPNOW_SF2_WIFI_PROVISIONED;
 #ifdef BLE_ENABLE
     /* Remote-sensor low-battery latch: ON at <=10%, clear only at >=15% so a
      * cell hovering at the threshold doesn't flap the home-face chip. A stale
@@ -204,6 +233,8 @@ void EspnowLink::buildInfo(struct espnow_info_pkt *p) {
     WifiManager::getSSID((char*)p->ssid, sizeof(p->ssid));
     WifiManager::getIP((char*)p->ip, sizeof(p->ip));
     strncpy((char*)p->hk_code, homekit_get_setup_code(), sizeof(p->hk_code) - 1);
+    const char *payload = homekit_get_setup_payload();
+    if (payload) strncpy((char*)p->hk_payload, payload, sizeof(p->hk_payload) - 1);
 #ifdef BLE_ENABLE
     if (BleSensor::isEnabled()) {
         int8_t b = BleSensor::battery();
@@ -220,7 +251,9 @@ void EspnowLink::buildDiag(struct espnow_diag_pkt *p) {
     p->type = ESPNOW_PKT_DIAG; p->version = ESPNOW_PROTO_VERSION;
     const CN105State st = _ctrl->getEffectiveState();
 #ifdef FW_VERSION
-    strncpy((char*)p->fw_ver, FW_VERSION, sizeof(p->fw_ver) - 1);
+    /* bounded memcpy, not strncpy: FW_VERSION can be >= sizeof(fw_ver), which
+       trips -Werror=stringop-truncation; memset above leaves it null-terminated */
+    memcpy(p->fw_ver, FW_VERSION, strnlen(FW_VERSION, sizeof(p->fw_ver) - 1));
 #endif
     /* bounded memcpy, not strncpy: date[16] > build_date[12] trips -Werror=stringop-truncation */
     const char *date = esp_app_get_description()->date;
@@ -274,7 +307,8 @@ void EspnowLink::cancelPairing() {
     _pair = PAIR_OFF;
     if (esp_now_is_peer_exist(BCAST)) esp_now_del_peer(BCAST);
     if (!_bonded && esp_now_is_peer_exist(_candMac)) esp_now_del_peer(_candMac);
-    if (strcmp(_pairResult, "paired") != 0 && strcmp(_pairResult, "timeout") != 0)
+    if (strcmp(_pairResult, "paired") != 0 && strcmp(_pairResult, "timeout") != 0 &&
+        strcmp(_pairResult, "error") != 0)
         _pairResult = "idle";
 }
 
@@ -371,7 +405,13 @@ void EspnowLink::pairLoop() {
     // sweeping dial catches one, then restart into begin().
     if (s_havePairProbe && _pair == PAIR_CONFIRM) {
         s_havePairProbe = false;
-        espnow_bond_save(_candMac, _candLmk);
+        if (!espnow_bond_save(_candMac, _candLmk)) {
+            // Unbonded after reboot while the dial saved its half — report
+            // failure instead of a false "paired" (red LED, no restart).
+            _pairResult = "error";
+            cancelPairing();
+            return;
+        }
         _pairResult = "paired";
         LOG_INFO("ESP-NOW pairing confirmed; saving bond, restart in 5s (green LED)");
         struct espnow_state_pkt p; buildState(&p);
@@ -439,6 +479,111 @@ void EspnowLink::loop() {
         memset(&r, 0, sizeof(r));   // don't leave the PSK sitting on the stack
     }
 
+    // Dial-driven provisioning: serve a network scan. scanNetworks() blocks a
+    // few seconds on the main task — acceptable: MAC-layer probe ACKs (the
+    // dial's liveness signal) are hardware-level, STATE heartbeat is 10 s, and
+    // the web UI's /wifi-scan already runs the same blocking scan. Results are
+    // cached 20 s so a dial page-loss re-request re-sends instantly.
+    if (s_haveScanReq) {
+        s_haveScanReq = false;
+        uint32_t nowScan = uptime_ms();
+        if (_scanCount < 0 || nowScan - _scanAtMs > 20000) {
+            _scanCount = WifiManager::scanNetworks(_scanCache, WIFI_SCAN_CACHE);
+            _scanAtMs = uptime_ms();
+            LOG_INFO("Dial requested Wi-Fi scan: %d networks", _scanCount);
+        }
+        int n = _scanCount < 0 ? 0 : _scanCount;
+        int pages = (n + ESPNOW_WIFI_SCAN_MAX_ITEMS - 1) / ESPNOW_WIFI_SCAN_MAX_ITEMS;
+        if (pages == 0) pages = 1;   // one empty page resolves the dial's spinner
+        for (int pg = 0; pg < pages; pg++) {
+            struct espnow_wifi_scan_resp_pkt r; memset(&r, 0, sizeof(r));
+            r.type = ESPNOW_PKT_WIFI_SCAN_RESP; r.version = ESPNOW_PROTO_VERSION;
+            r.page = (uint8_t)pg; r.n_pages = (uint8_t)pages;
+            int base = pg * ESPNOW_WIFI_SCAN_MAX_ITEMS;
+            int cnt = n - base;
+            if (cnt > ESPNOW_WIFI_SCAN_MAX_ITEMS) cnt = ESPNOW_WIFI_SCAN_MAX_ITEMS;
+            if (cnt < 0) cnt = 0;
+            r.n_items = (uint8_t)cnt;
+            for (int i = 0; i < cnt; i++) {
+                strncpy((char*)r.items[i].ssid, _scanCache[base + i].ssid,
+                        sizeof(r.items[i].ssid) - 1);
+                r.items[i].rssi   = _scanCache[base + i].rssi;
+                r.items[i].secure = _scanCache[base + i].secure ? 1 : 0;
+            }
+            esp_now_send(_peer, (const uint8_t*)&r,
+                         ESPNOW_WIFI_SCAN_RESP_HDR_LEN +
+                         cnt * (int)sizeof(struct espnow_wifi_scan_item));
+            vTaskDelay(pdMS_TO_TICKS(10));   // spacing: don't overflow the TX queue
+        }
+    }
+
+    // Dial-driven provisioning: apply pushed credentials. Mirrors
+    // applyWifiCredentials() (web_server.cpp) minus the JSON layer.
+    {
+        bool haveSet = false;
+        struct espnow_wifi_set_pkt w;
+        portENTER_CRITICAL(&s_cmdMux);
+        if (s_haveWifiSet) {
+            memcpy(&w, (const void*)&s_wifiSet, sizeof(w));
+            memset((void*)&s_wifiSet, 0, sizeof(s_wifiSet));   // no PSK in the static
+            s_haveWifiSet = false; haveSet = true;
+        }
+        portEXIT_CRITICAL(&s_cmdMux);
+        if (haveSet) {
+            w.ssid[sizeof(w.ssid) - 1] = 0;
+            w.psk[sizeof(w.psk) - 1] = 0;
+            LOG_INFO("Dial provisioned Wi-Fi (SSID: %s)", (const char*)w.ssid);
+            settings.get().wifiChangePending = true;   // shorter recovery window
+            settings.save();
+            WifiManager::clearDisconnectReason();
+            WifiManager::connect((const char*)w.ssid, (const char*)w.psk);
+            memset(&w, 0, sizeof(w));
+            _wifiJoinStartMs   = uptime_ms();
+            _wifiStatusUntilMs = _wifiJoinStartMs + 60000;   // 1 Hz status stream window
+            _lastWifiStatusTxMs = 0;
+            _wifiJoinResult = 0;
+        }
+    }
+
+    // Status stream: 1 Hz for 60 s after a WIFI_SET. The join usually moves
+    // the radio to the home AP's channel; the dial re-sweeps and catches the
+    // stream on the new channel. Failures latch so a late-arriving dial still
+    // hears the verdict.
+    if (_wifiStatusUntilMs != 0) {
+        uint32_t nowSt = uptime_ms();
+        if ((int32_t)(nowSt - _wifiStatusUntilMs) >= 0) {
+            _wifiStatusUntilMs = 0;
+        } else if (nowSt - _lastWifiStatusTxMs >= 1000) {
+            uint8_t st;
+            if (WifiManager::isConnected()) {
+                st = _wifiJoinResult = ESPNOW_WIFI_ST_CONNECTED;
+            } else if (_wifiJoinResult >= ESPNOW_WIFI_ST_AUTH_FAIL) {
+                st = _wifiJoinResult;                        // latched failure
+            } else {
+                uint8_t reason = WifiManager::lastDisconnectReason();
+                if (reason == WIFI_REASON_NO_AP_FOUND)
+                    st = _wifiJoinResult = ESPNOW_WIFI_ST_AP_NOT_FOUND;
+                else if (reason == WIFI_REASON_AUTH_EXPIRE ||
+                         reason == WIFI_REASON_AUTH_FAIL ||
+                         reason == WIFI_REASON_MIC_FAILURE ||
+                         reason == WIFI_REASON_4WAY_HANDSHAKE_TIMEOUT ||
+                         reason == WIFI_REASON_HANDSHAKE_TIMEOUT)
+                    st = _wifiJoinResult = ESPNOW_WIFI_ST_AUTH_FAIL;
+                else if (nowSt - _wifiJoinStartMs > 30000)
+                    st = _wifiJoinResult = ESPNOW_WIFI_ST_TIMEOUT;
+                else
+                    st = ESPNOW_WIFI_ST_CONNECTING;
+            }
+            struct espnow_wifi_status_pkt sp; memset(&sp, 0, sizeof(sp));
+            sp.type = ESPNOW_PKT_WIFI_STATUS; sp.version = ESPNOW_PROTO_VERSION;
+            sp.status = st;
+            sp.rssi = WifiManager::getRSSI();
+            WifiManager::getIP((char*)sp.ip, sizeof(sp.ip));
+            esp_now_send(_peer, (const uint8_t*)&sp, sizeof(sp));
+            _lastWifiStatusTxMs = nowSt;
+        }
+    }
+
     uint32_t now = uptime_ms();
     bool live = isPeerLive();
     if (!live) { _peerWasLive = false; return; }
@@ -469,6 +614,16 @@ void EspnowLink::loop() {
         esp_now_send(_peer, (const uint8_t*)&d, sizeof(d));
         _lastDiagTxMs = now;
     }
+
+    // IDENT is pull-only (v11): the dial asks while it lacks this unit's name
+    // (zone picker). Same cadence gate as INFO.
+    if (s_wantIdent && now - _lastIdentTxMs >= INFO_MIN_INTERVAL) {
+        struct espnow_ident_pkt id; memset(&id, 0, sizeof(id));
+        id.type = ESPNOW_PKT_IDENT; id.version = ESPNOW_PROTO_VERSION;
+        strncpy((char *)id.name, settings.get().deviceName, sizeof(id.name) - 1);
+        esp_now_send(_peer, (const uint8_t*)&id, sizeof(id));
+        _lastIdentTxMs = now;
+    }
 }
 
 static int cmd_mac(int, char **) {
@@ -484,10 +639,19 @@ static int cmd_pair(int argc, char **argv) {
     uint8_t mac[6], lmk[16];
     if (!espnow_parse_mac(argv[1], mac))   { printf("ERR bad mac\n");  return 1; }
     if (!espnow_parse_hex16(argv[2], lmk)) { printf("ERR bad lmk\n");  return 1; }
-    espnow_bond_save(mac, lmk);
+    if (!espnow_bond_save(mac, lmk)) { printf("ERR bond save failed\n"); return 1; }
     printf("ESPNOW-PAIR OK; restarting\n");
     vTaskDelay(pdMS_TO_TICKS(300));
     esp_restart();
+    return 0;
+}
+
+static int cmd_pmk(int argc, char **argv) {
+    if (argc != 2) { printf("usage: espnow-pmk <32-hex-pmk>\n"); return 1; }
+    uint8_t pmk[16];
+    if (!espnow_parse_hex16(argv[1], pmk)) { printf("ERR bad pmk\n"); return 1; }
+    if (!espnow_pmk_save(pmk)) { printf("ERR pmk save failed\n"); return 1; }
+    printf("ESPNOW-PMK OK (takes effect on next restart)\n");
     return 0;
 }
 
@@ -552,6 +716,12 @@ void espnow_register_console(void) {
     pair_cmd.help    = "Bond a Dial: espnow-pair <mac> <lmk_hex>";
     pair_cmd.func    = &cmd_pair;
     esp_console_cmd_register(&pair_cmd);
+
+    esp_console_cmd_t pmk_cmd = {};
+    pmk_cmd.command = "espnow-pmk";
+    pmk_cmd.help    = "Provision the ESP-NOW PMK: espnow-pmk <32-hex-pmk>";
+    pmk_cmd.func    = &cmd_pmk;
+    esp_console_cmd_register(&pmk_cmd);
 
     esp_console_cmd_t selftest_cmd = {};
     selftest_cmd.command = "espnow-selftest";
