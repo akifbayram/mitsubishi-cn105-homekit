@@ -100,8 +100,8 @@ void WifiRecovery::loop() {
 
     // ── DNS captive portal runs in its own task — no processNextRequest() needed
 
-    // ── Button check ────────────────────────────────────────────────────────
-    checkButton();
+    // ── Button is NOT sampled here: loop() runs at 1 Hz, too coarse for the
+    // 2 s / 10 s hold thresholds. main.cpp calls checkButton() every iteration.
 }
 
 void WifiRecovery::enableFallbackAP() {
@@ -197,7 +197,10 @@ void WifiRecovery::checkButton() {
     } else if (!pressed) {
         if (_buttonPressStart != 0 && !_buttonTriggered) {
             uint32_t held = uptime_ms() - _buttonPressStart;
-            if (held >= PAIR_BUTTON_HOLD_MS) {  // 10s path already set _buttonTriggered + restarted
+            // Upper bound: a hold that reached 10 s is WiFi-erase territory even
+            // if the while-pressed check was missed — never fall into the
+            // (destructive when bonded) pairing/unbond path on release.
+            if (held >= PAIR_BUTTON_HOLD_MS && held < WIFI_RESET_BUTTON_HOLD_MS) {
 #if ESPNOW_REMOTE_ENABLE
                 bool otaBusy = false;
 #if PIN_LED_DATA >= 0

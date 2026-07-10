@@ -322,7 +322,11 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
         sendWsText(httpd_req_to_sockfd(req), "{\"type\":\"info\",\"msg\":\"Forgetting remote...\"}");
         espnow_bond_clear();
 #if PIN_LED_DATA >= 0
-        statusLED.holdBlocking(SLED_UNPAIR, 2000);  // orange blink before restart
+        // This runs on the httpd task: don't drive the strip from here
+        // (holdBlocking races the main loop's LED evaluation). Ask the main
+        // task to show the orange blink, wait it out, then restart.
+        statusLED.requestHold(SLED_UNPAIR, 2000);
+        vTaskDelay(pdMS_TO_TICKS(2000));
 #else
         vTaskDelay(pdMS_TO_TICKS(500));
 #endif
@@ -418,7 +422,12 @@ void WebUI::pushState() {
 
     unsigned long wifiUptimeSec = wifiRecovery.getWifiUptimeSeconds();
 
-    char buf[1300];
+    char ssid[33] = "";
+    WifiManager::getSSID(ssid, sizeof(ssid));
+    char escSsid[65];
+    jsonEscape(ssid, escSsid, sizeof(escSsid));
+
+    char buf[1400];
     int n = snprintf(buf, sizeof(buf),
         "{\"type\":\"state\""
         ",\"power\":%s"
@@ -437,7 +446,8 @@ void WebUI::pushState() {
         ",\"subMode\":\"%s\""
         ",\"stage\":\"%s\""
         ",\"autoSubMode\":\"%s\""
-        ",\"deviceName\":\"%s\"",
+        ",\"deviceName\":\"%s\""
+        ",\"ssid\":\"%s\"",
         st.power ? "true" : "false",
         modeToWebStr(st.mode),
         st.targetTemp,
@@ -454,7 +464,8 @@ void WebUI::pushState() {
         subModeToWebStr(st.subMode),
         stageToWebStr(st.stage),
         autoSubModeToWebStr(st.autoSubMode),
-        escName
+        escName,
+        escSsid
     );
 
     if (st.outsideTempValid) {

@@ -546,8 +546,9 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   </div>
 
   <!-- ===== REMOTE SENSOR (BLE) ===== -->
-  <h2 class="group-label" id="bleGroupLabel">Remote Sensor<span class="section-summary"><span class="status-dot idle" id="bleDot"></span><span class="summary-text" id="bleStatusLabel"></span></span></h2>
-  <div class="card" id="bleCard">
+  <!-- Hidden until a state push carries bleEnabled: BLE_DISABLE builds never send it -->
+  <h2 class="group-label" id="bleGroupLabel" style="display:none">Remote Sensor<span class="section-summary"><span class="status-dot idle" id="bleDot"></span><span class="summary-text" id="bleStatusLabel"></span></span></h2>
+  <div class="card" id="bleCard" style="display:none">
     <div id="bleBody">
       <div id="bleBanner" class="ble-banner info hidden" style="margin-bottom:12px"></div>
       <div class="status-grid cols3" id="bleStatusGrid">
@@ -1631,6 +1632,8 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
         ps.textContent='Listening… '+(s.remotePairSecs||0)+'s — hold the button on the Link';
       }else if(s.remotePairResult==='timeout'){
         ps.textContent='No Link found. Put it in pairing mode and retry.';
+      }else if(s.remotePairResult==='error'){
+        ps.textContent='Pairing failed: could not save the bond. Check device logs and retry.';
       }else if(s.remoteBonded){
         ps.textContent='';
       }else{

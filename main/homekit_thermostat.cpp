@@ -3,6 +3,7 @@
 #include "logging.h"
 #include "esp_utils.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 
@@ -352,10 +353,15 @@ void homekit_sync_thermostat(CN105Controller &cn105)
 
     // Target temperature
     if (s_targetTemp) {
+        // The heat pump can report a setpoint outside the char constraints
+        // (e.g. 31.0 set from the IR remote; char max is 30.5), and
+        // hap_char_update_val rejects out-of-range values outright, freezing
+        // the Home-app display — clamp before syncing.
+        float target = std::clamp(s.targetTemp, CN105_TEMP_MIN, CN105_TEMP_MAX);
         const hap_val_t *cur = hap_char_get_val(s_targetTemp);
-        if (forceSync || !cur || fabsf(cur->f - s.targetTemp) > 0.1f) {
-            LOG_DEBUG("[HK:Thermo] sync targetTemp: %.1f C", s.targetTemp);
-            hap_val_t v = { .f = s.targetTemp };
+        if (forceSync || !cur || fabsf(cur->f - target) > 0.1f) {
+            LOG_DEBUG("[HK:Thermo] sync targetTemp: %.1f C", target);
+            hap_val_t v = { .f = target };
             hap_char_update_val(s_targetTemp, &v);
         }
     }

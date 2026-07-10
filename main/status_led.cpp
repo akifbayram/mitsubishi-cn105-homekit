@@ -81,6 +81,14 @@ void StatusLED::begin() {
 }
 
 void StatusLED::setState(LEDState state) {
+    // A requestHold() override (set from another task) wins until it expires.
+    if (_holdUntil) {
+        if ((int32_t)(_holdUntil - uptime_ms()) > 0) {
+            state = _holdState;
+        } else {
+            _holdUntil = 0;
+        }
+    }
     if (state == _state) return;
     LOG_INFO("%s -> %s", stateName(_state), stateName(state));
     _state = state;
@@ -217,6 +225,13 @@ void StatusLED::loop() {
             break;
         }
     }
+}
+
+void StatusLED::requestHold(LEDState state, uint32_t ms) {
+    // Two plain 32-bit stores — state first so a concurrent setState() that
+    // sees the armed deadline always reads the intended hold state.
+    _holdState = state;
+    _holdUntil = uptime_ms() + ms;
 }
 
 void StatusLED::holdBlocking(LEDState state, uint32_t ms) {

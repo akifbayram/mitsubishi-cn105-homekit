@@ -1,4 +1,7 @@
 #include "settings.h"
+#include "cn105_protocol.h"
+
+#include <algorithm>
 
 static const char *TAG = "settings";
 
@@ -40,7 +43,10 @@ void SettingsStore::begin() {
         float val = 20.0f;
         size_t len = sizeof(val);
         if (nvs_get_blob(_handle, "heatThresh", &val, &len) == ESP_OK && len == sizeof(float)) {
-            _settings.heatingThreshold = val;
+            // Clamp: firmware <= 0.2.4 allowed 31.0, above today's HAP char max
+            // (30.5) — an out-of-range value makes hap_char_update_val reject
+            // every threshold sync.
+            _settings.heatingThreshold = std::clamp(val, CN105_TEMP_MIN, CN105_TEMP_MAX);
         }
     }
 
@@ -49,7 +55,7 @@ void SettingsStore::begin() {
         float val = 25.0f;
         size_t len = sizeof(val);
         if (nvs_get_blob(_handle, "coolThresh", &val, &len) == ESP_OK && len == sizeof(float)) {
-            _settings.coolingThreshold = val;
+            _settings.coolingThreshold = std::clamp(val, CN105_TEMP_MIN, CN105_TEMP_MAX);
         }
     }
 

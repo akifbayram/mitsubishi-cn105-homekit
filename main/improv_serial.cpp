@@ -251,7 +251,13 @@ static void process_byte(uint8_t b) {
 
 // ── FreeRTOS task ─────────────────────────────────────────────────────────────
 static void improv_task(void* /*arg*/) {
-    fcntl(fileno(stdin), F_SETFL, O_NONBLOCK);
+    // Save and restore the stdin flags: the UART-console REPL (plain esp32/c3)
+    // does not reset them itself, and a leaked O_NONBLOCK makes linenoise()
+    // spin on EAGAIN forever — endless prompt spam, dead espnow-* commands.
+    // (The USB-Serial-JTAG REPL resets flags in its constructor, masking this.)
+    const int stdin_fd = fileno(stdin);
+    const int prev_fl = fcntl(stdin_fd, F_GETFL, 0);
+    fcntl(stdin_fd, F_SETFL, (prev_fl < 0 ? 0 : prev_fl) | O_NONBLOCK);
 
     s_cur_state = STATE_AUTHORIZED;
     s_parse = SYNC_I;
@@ -263,12 +269,17 @@ static void improv_task(void* /*arg*/) {
 
         int c = fgetc(stdin);
         if (c == EOF) {
-            vTaskDelay(pdMS_TO_TICKS(5));
+            // FREERTOS_HZ=100: pdMS_TO_TICKS(<10) rounds to 0 ticks — a yield,
+            // not a delay — so this pri-1 task busy-spins on empty stdin,
+            // starving IDLE0 and tripping the task WDT on single-core chips.
+            // Keep this >= 2 ticks (20 ms).
+            vTaskDelay(pdMS_TO_TICKS(20));
             continue;
         }
         process_byte((uint8_t)c);
     }
 
+    fcntl(stdin_fd, F_SETFL, prev_fl < 0 ? 0 : prev_fl);
     LOG_INFO("[Improv] Stopped");
     s_task_handle = nullptr;
     vTaskDelete(nullptr);
@@ -280,7 +291,9 @@ void improv_serial_start(const char* deviceName) {
     strncpy(s_device_name, deviceName, sizeof(s_device_name) - 1);
     s_device_name[sizeof(s_device_name) - 1] = '\0';
     improv_set_console_raw(true);   // binary-clean console for the framed protocol
-    xTaskCreate(improv_task, "improv", 4096, nullptr, tskIDLE_PRIORITY + 1, &s_task_handle);
+    // 6144: handle_scan_wifi puts ~720B of ScannedNetwork on the stack and
+    // scanNetworks adds ~1.8KB of wifi_ap_record_t — 4096 left no headroom.
+    xTaskCreate(improv_task, "improv", 6144, nullptr, tskIDLE_PRIORITY + 1, &s_task_handle);
     LOG_INFO("[Improv] Task created");
 }
 

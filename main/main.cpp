@@ -281,6 +281,10 @@ extern "C" void app_main(void)
         // ── ESP-NOW remote — every iter (~10 ms) ────────────────────────
         espnowLink.loop();
 
+        // ── Button — every iter (~10 ms): the 2 s / 10 s hold thresholds
+        // need finer sampling than the 1 Hz recovery check below
+        wifiRecovery.checkButton();
+
         // ── WiFi recovery — 1 Hz ────────────────────────────────────────
         if (now - lastWifiCheck >= 1000) {
             wifiRecovery.loop();
@@ -355,7 +359,7 @@ extern "C" void app_main(void)
                 if (strcmp(pr, "paired") == 0) {
                     pairLedHoldState = SLED_PAIR_OK;
                     pairLedHoldUntil = nowMs + 5000;
-                } else if (strcmp(pr, "timeout") == 0) {
+                } else if (strcmp(pr, "timeout") == 0 || strcmp(pr, "error") == 0) {
                     pairLedHoldState = SLED_PAIR_FAIL;
                     pairLedHoldUntil = nowMs + 3000;
                 }
@@ -365,6 +369,10 @@ extern "C" void app_main(void)
         }
         bool pairHold = pairLedHoldUntil &&
                         (int32_t)(pairLedHoldUntil - uptime_ms()) > 0;
+        // Zero the deadline once expired: a stale non-zero value re-arms the
+        // hold when uptime wraps (~24.8 days), locking the LED into the pairing
+        // pattern (SLED_PAIR_FAIL is identical to the AC-error blink).
+        if (pairLedHoldUntil && !pairHold) pairLedHoldUntil = 0;
 
         // RGB LED priority: OTA > pairing OK/FAIL hold > pairing listening > status
         if (statusLED.getState() != SLED_OTA) {

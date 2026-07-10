@@ -20,7 +20,9 @@ constexpr int8_t   WIFI_RESET_BUTTON_PIN = PIN_BUTTON;  // From board profile (-
 class WifiRecovery {
 public:
     void begin(const char *apName, const char *displayName);    // Initialize: store AP name, configure button GPIO
-    void loop();                       // Call from main loop: check WiFi, manage AP, handle button
+    void loop();                       // Call from main loop at ~1 Hz: check WiFi, manage AP
+    void checkButton();                // Call every main-loop iteration: 1 Hz sampling mis-measures
+                                       // hold times by up to ±1 s (2 s vs 10 s thresholds)
     bool isAPActive() const { return _apActive; }
     void setChangePending(bool pending); // Set/clear the NVS flag
     void activateNow();                  // Immediately enable fallback AP (no timeout)
@@ -30,7 +32,6 @@ public:
 private:
     void enableFallbackAP();
     void disableFallbackAP();
-    void checkButton();
     void refreshCachedSSID();          // Re-read SSID from WifiManager NVS into _cachedSSID
     static uint32_t safeUptimeMs();    // uptime_ms() that never returns 0 (sentinel avoidance)
 

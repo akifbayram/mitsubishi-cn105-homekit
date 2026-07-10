@@ -97,18 +97,64 @@ inline void jsonAppend(char *buf, size_t cap, int *pos, const char *fmt, ...) {
     *pos = (w < 0) ? (int)cap : *pos + w;
 }
 
-// Escape a string for safe embedding in a JSON string literal.
+// Length of the UTF-8 sequence starting at src (which must not be NUL), or 0 if
+// the bytes do not form a valid sequence. Rejects overlongs, surrogates, and
+// out-of-range leads — RFC 6455 makes browsers kill the whole WebSocket on any
+// invalid UTF-8 in a text frame.
+inline size_t utf8SeqLen(const unsigned char *s) {
+    unsigned char b = s[0];
+    if (b < 0x80) return 1;
+    size_t n; unsigned char lo = 0x80, hi = 0xBF;
+    if (b >= 0xC2 && b <= 0xDF)      { n = 2; }
+    else if (b == 0xE0)              { n = 3; lo = 0xA0; }
+    else if (b >= 0xE1 && b <= 0xEC) { n = 3; }
+    else if (b == 0xED)              { n = 3; hi = 0x9F; }   // exclude surrogates
+    else if (b >= 0xEE && b <= 0xEF) { n = 3; }
+    else if (b == 0xF0)              { n = 4; lo = 0x90; }
+    else if (b >= 0xF1 && b <= 0xF3) { n = 4; }
+    else if (b == 0xF4)              { n = 4; hi = 0x8F; }   // cap at U+10FFFF
+    else return 0;
+    if (s[1] < lo || s[1] > hi) return 0;
+    for (size_t k = 2; k < n; k++)
+        if (s[k] < 0x80 || s[k] > 0xBF) return 0;
+    return n;
+}
+
+// Escape a string for safe embedding in a JSON string literal. Source bytes can
+// be hostile (e.g. BLE-advertised device names): control chars are \u-escaped
+// and invalid UTF-8 is replaced with '?' so neither JSON.parse nor the
+// WebSocket UTF-8 check can be broken by a nearby advertiser.
 inline size_t jsonEscape(const char *src, char *dst, size_t dstLen) {
     size_t j = 0;
     for (size_t i = 0; src[i] && j < dstLen - 2; i++) {
-        if (src[i] == '"' || src[i] == '\\') {
-            if (j < dstLen - 3) { dst[j++] = '\\'; dst[j++] = src[i]; }
-        } else if (src[i] == '\n') {
+        unsigned char c = (unsigned char)src[i];
+        if (c == '"' || c == '\\') {
+            if (j < dstLen - 3) { dst[j++] = '\\'; dst[j++] = (char)c; }
+        } else if (c == '\n') {
             if (j < dstLen - 3) { dst[j++] = '\\'; dst[j++] = 'n'; }
-        } else if (src[i] == '\r') {
+        } else if (c == '\r') {
             // skip carriage returns
+        } else if (c < 0x20) {
+            if (j + 6 < dstLen - 1) {
+                static const char hex[] = "0123456789abcdef";
+                dst[j++] = '\\'; dst[j++] = 'u'; dst[j++] = '0'; dst[j++] = '0';
+                dst[j++] = hex[c >> 4]; dst[j++] = hex[c & 0x0F];
+            }
+        } else if (c >= 0x80) {
+            size_t n = utf8SeqLen((const unsigned char *)src + i);
+            if (n >= 2) {
+                // valid sequence: copy whole if it fits, drop whole if not —
+                // never split it (a partial sequence is invalid UTF-8 again)
+                if (j + n < dstLen - 1)
+                    for (size_t k = 0; k < n; k++) dst[j++] = src[i + k];
+                i += n - 1;
+            } else {
+                dst[j++] = '?';
+                // swallow the invalid sequence's continuation bytes too
+                while ((unsigned char)src[i + 1] >= 0x80 && (unsigned char)src[i + 1] <= 0xBF) i++;
+            }
         } else {
-            dst[j++] = src[i];
+            dst[j++] = (char)c;
         }
     }
     dst[j] = '\0';
