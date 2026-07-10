@@ -1,105 +1,65 @@
 #!/usr/bin/env bash
-# Bond a Dial to a unit over two serial ports. Reads each MAC, generates a
-# random per-pair LMK, and writes the bond to both via their console commands.
+# Pair a Dial to a unit over two serial ports, using Serin Link v2's
+# over-the-air signed pairing: open the unit's 60 s pairing window, kick the
+# dial's 'pair' verb, then poll the unit until the bond commits.
+#
+# v2 replaced the v1 serial bond injection (espnow-pmk / espnow-pair <mac>
+# <lmk>): the per-pair key is derived inside the X25519+Ed25519 handshake and
+# nothing secret crosses the serial ports — this script is just automation
+# around the two console verbs a human would otherwise type.
 #
 # Usage: ./scripts/pair_dial.sh <unit_port> <dial_port>
 # Example: ./scripts/pair_dial.sh /dev/ttyACM0 /dev/ttyACM1
 #
 # Requirements:
 #   - python3 + pyserial  (pip install pyserial)
-#   - openssl             (for random LMK generation)
-#   - Both devices flashed and connected over USB
-#   - PMK: exported PMK_HEX=<32 hex> or PMK_FILE (default ~/.espnow_test_pmk)
+#   - Both devices flashed with Serin Link v2 firmware and connected over USB
 #
-# Both devices restart after pairing. The Dial's offline indicator should
-# clear within ~5 s once they reboot and lock channels.
+# On success the dial reboots itself and re-locks onto the unit within ~5 s.
 set -euo pipefail
 
 UNIT_PORT="${1:?unit serial port (e.g. /dev/ttyACM0)}"
 DIAL_PORT="${2:?dial serial port (e.g. /dev/ttyACM1)}"
 PY="${PYTHON:-python3}"
 
-# Optional PMK provisioning. Both ends must share the same 16-byte PMK for the
-# encrypted link to authenticate; since 68747a7 the unit reads it from NVS, so
-# a bond written without a PMK yields a unit that says "bonded" but never links.
-# PMK_HEX=<32 hex> wins; else PMK_FILE (default ~/.espnow_test_pmk) is read as
-# 16 raw bytes and hex-encoded. If neither is available we warn and skip.
-PMK_HEX="${PMK_HEX:-}"
-PMK_FILE="${PMK_FILE:-$HOME/.espnow_test_pmk}"
-if [ -z "$PMK_HEX" ] && [ -f "$PMK_FILE" ]; then
-  PMK_HEX="$(head -c 16 "$PMK_FILE" | od -An -v -tx1 | tr -d ' \n')"
-fi
-if [ -n "$PMK_HEX" ] && [ "${#PMK_HEX}" -ne 32 ]; then
-  echo "ERROR: PMK must be exactly 32 hex chars (16 bytes), got ${#PMK_HEX}"; exit 1
-fi
-
-read_mac() {  # $1 = port
-  "$PY" - "$1" <<'EOF'
-import sys, time, serial
-port = sys.argv[1]
-s = serial.Serial(port, 115200, timeout=2)
-time.sleep(0.3); s.reset_input_buffer()
-s.write(b"espnow-mac\r\n"); time.sleep(0.5)
-out = s.read(4096).decode(errors="ignore")
-for line in out.splitlines():
-    if "ESPNOW-MAC" in line:
-        print(line.split()[-1]); break
-else:
-    print(f"no MAC from {port}", file=sys.stderr)
-    sys.exit(1)
-s.close()
-EOF
-}
-
-send_pair() {  # $1 = port, $2 = peer mac, $3 = lmk hex
-  "$PY" - "$1" "$2" "$3" <<'EOF'
-import sys, time, serial
-port, mac, lmk = sys.argv[1], sys.argv[2], sys.argv[3]
-s = serial.Serial(port, 115200, timeout=2)
-time.sleep(0.3); s.reset_input_buffer()
-s.write(f"espnow-pair {mac} {lmk}\r\n".encode()); time.sleep(0.8)
-out = s.read(4096).decode(errors="ignore").strip()
-print(out)
-s.close()
-if "ESPNOW-PAIR OK" not in out:
-    sys.exit(1)
-EOF
-}
-
-send_pmk() {  # $1 = port, $2 = pmk hex; nonzero exit if not acknowledged
+console() {  # $1 = port, $2 = command; echoes ~1.5 s of device output
   "$PY" - "$1" "$2" <<'EOF'
 import sys, time, serial
-port, pmk = sys.argv[1], sys.argv[2]
-s = serial.Serial(port, 115200, timeout=2)
-time.sleep(0.3); s.reset_input_buffer()
-s.write(f"espnow-pmk {pmk}\r\n".encode()); time.sleep(0.8)
-out = s.read(4096).decode(errors="ignore").strip()
-print(out)
+port, cmd = sys.argv[1], sys.argv[2]
+s = serial.Serial(port, 115200, timeout=0.2)
+s.write((cmd + "\r\n").encode()); s.flush()
+end = time.time() + 1.5
+out = b""
+while time.time() < end:
+    out += s.read(256)
 s.close()
-if "ESPNOW-PMK OK" not in out:
-    sys.exit(1)
+sys.stdout.write(out.decode(errors="replace"))
 EOF
 }
 
-echo "Reading MACs..."
-UNIT_MAC="$(read_mac "$UNIT_PORT")"
-DIAL_MAC="$(read_mac "$DIAL_PORT")"
-echo "unit=$UNIT_MAC dial=$DIAL_MAC"
-[ -n "$UNIT_MAC" ] && [ -n "$DIAL_MAC" ] || { echo "ERROR: failed to read a MAC"; exit 1; }
+echo "== opening the unit's pairing window (60 s) =="
+console "$UNIT_PORT" "espnow-pair" | grep -q "ESPNOW-PAIR" \
+  || { echo "ERROR: unit did not ack espnow-pair (needs Serin Link v2 firmware)"; exit 1; }
 
-if [ -n "$PMK_HEX" ]; then
-  echo "-- provisioning unit PMK --"
-  send_pmk "$UNIT_PORT" "$PMK_HEX" \
-    || { echo "ERROR: unit did not ack espnow-pmk (unit firmware must be >= 0.2.5 with the espnow-pmk command)"; exit 1; }
-  echo "-- provisioning dial PMK --"
-  send_pmk "$DIAL_PORT" "$PMK_HEX" \
-    || echo "WARN: dial did not ack espnow-pmk (older dial fw bakes its PMK at build) — ensure it matches"
-else
-  echo "WARN: no PMK provided (set PMK_HEX or PMK_FILE) — the unit must already have a PMK in NVS or the link will not authenticate"
-fi
+echo "== starting the dial's signed pairing sweep =="
+console "$DIAL_PORT" "pair" > /dev/null \
+  || { echo "ERROR: could not reach the dial console on $DIAL_PORT"; exit 1; }
 
-LMK="$(openssl rand -hex 16)"
-echo "lmk=$LMK"
-echo "-- pairing unit --"; send_pair "$UNIT_PORT" "$DIAL_MAC" "$LMK"
-echo "-- pairing dial --"; send_pair "$DIAL_PORT" "$UNIT_MAC" "$LMK"
-echo "done; both devices restart and should link within a few seconds."
+echo "== waiting for the bond to commit (channel sweep can take ~10-45 s) =="
+for _ in $(seq 1 24); do
+  sleep 3
+  st="$(console "$UNIT_PORT" "espnow-status" | grep -o 'ESPNOW-STATUS.*' | tail -1 | tr -d '\r')"
+  echo "  ${st:-<no status>}"
+  case "$st" in
+    *result=paired*)
+      echo "PAIRED OK — the dial reboots and re-locks within ~5 s."
+      exit 0 ;;
+    *result=timeout*|*result=full*|*result=pin-mismatch*)
+      echo "ERROR: pairing ended without a bond: $st"
+      echo "       (pin-mismatch: the dial knows a different identity for this"
+      echo "        unit — forget the zone on the dial first if intentional)"
+      exit 1 ;;
+  esac
+done
+echo "ERROR: no bond after ~72 s. Watch both consoles (idf.py monitor) and retry."
+exit 1
