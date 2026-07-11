@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 // ════════════════════════════════════════════════════════════════════════════
 // HomeKit (HAP) initialization and management — esp-homekit-sdk backend
 // ════════════════════════════════════════════════════════════════════════════
@@ -34,6 +36,10 @@ void homekit_reset_pairings(void);
 
 /// Get a human-readable status string reflecting the current HAP state.
 const char* homekit_get_status_string(void);
+
+// Mode capability mask the HAP accessory database was built with at boot.
+// Differs from settings.get().modeMask after a web-UI change until restart.
+uint8_t homekit_get_boot_mode_mask(void);
 
 #ifdef __cplusplus
 }

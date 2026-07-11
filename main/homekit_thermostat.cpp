@@ -118,6 +118,16 @@ static float resolveAutoTarget(const CN105State &s) {
 
 // ── Write callback ──────────────────────────────────────────────────────────
 
+// HomeKit target state -> capability bit (0 = Off / not gated).
+static uint8_t hk_state_cap_bit(uint8_t hkState) {
+    switch (hkState) {
+        case 1: return MODE_CAP_HEAT;
+        case 2: return MODE_CAP_COOL;
+        case 3: return MODE_CAP_AUTO;
+        default: return 0;
+    }
+}
+
 static int thermostat_write_cb(hap_write_data_t write_data[], int count,
                                 void *serv_priv, void *write_priv)
 {
@@ -145,6 +155,15 @@ static int thermostat_write_cb(hap_write_data_t write_data[], int count,
 
         if (!strcmp(uuid, HAP_CHAR_UUID_TARGET_HEATING_COOLING_STATE)) {
             uint8_t hkState = w->val.u;
+            uint8_t capBit = hk_state_cap_bit(hkState);
+            if (capBit && !(settings.get().modeMask & capBit)) {
+                // Valid-values is advisory to controllers; also covers the
+                // window where the mask changed but the device hasn't rebooted.
+                LOG_WARN("[HK:Thermo] target state %d rejected — disabled by capability mask", hkState);
+                *(w->status) = HAP_STATUS_VAL_INVALID;
+                ret = HAP_FAIL;
+                continue;
+            }
             LOG_INFO("[HK:Thermo] HomeKit -> target state: %s (%d)",
                      hkTargetStateStr(hkState), hkState);
             if (hkState == 0) {
@@ -238,9 +257,16 @@ void homekit_create_thermostat(hap_acc_t *acc)
     s_targetTemp   = hap_serv_get_char_by_uuid(serv, HAP_CHAR_UUID_TARGET_TEMPERATURE);
     s_tempUnits    = hap_serv_get_char_by_uuid(serv, HAP_CHAR_UUID_TEMPERATURE_DISPLAY_UNITS);
 
-    // Set valid values for target state (0=Off, 1=Heat, 2=Cool, 3=Auto)
-    uint8_t validStates[] = {0, 1, 2, 3};
-    hap_char_add_valid_vals(s_targetState, validStates, 4);
+    // Set valid values for target state (0=Off, 1=Heat, 2=Cool, 3=Auto),
+    // filtered by the unit's capability mask (Settings > Unit Capabilities).
+    uint8_t validStates[4];
+    uint8_t nValid = 0;
+    uint8_t mask = settings.get().modeMask;
+    validStates[nValid++] = 0;
+    if (mask & MODE_CAP_HEAT) validStates[nValid++] = 1;
+    if (mask & MODE_CAP_COOL) validStates[nValid++] = 2;
+    if (mask & MODE_CAP_AUTO) validStates[nValid++] = 3;
+    hap_char_add_valid_vals(s_targetState, validStates, nValid);
 
     // Set constraints on current temperature
     hap_char_float_set_constraints(s_currentTemp, -10.0f, 50.0f, 0.5f);
@@ -280,8 +306,8 @@ void homekit_create_thermostat(hap_acc_t *acc)
     // Add to accessory
     hap_acc_add_serv(acc, serv);
 
-    LOG_INFO("[HK:Thermo] Service created (Off/Heat/Cool/Auto, %.0f-%.0f C)",
-             CN105_TEMP_MIN, CN105_TEMP_MAX);
+    LOG_INFO("[HK:Thermo] Service created (mask=0x%02X, %.0f-%.0f C)",
+             mask, CN105_TEMP_MIN, CN105_TEMP_MAX);
 }
 
 // ── Sync function (called from main loop) ───────────────────────────────────

@@ -85,7 +85,61 @@ static void homekit_set_setup_id(const char* setupId)
     }
 }
 
+// ── HAP config-number (c#) bump on capability-mask change ───────────────────
+// The HAP config number tells paired Home apps their cached accessory
+// database (services/characteristics) is stale and must be re-fetched. The
+// SDK only auto-bumps it in hap_add_bridged_accessory()/hap_remove_
+// bridged_accessory() (adding/removing a whole bridged accessory) — it has no
+// idea that our Dry/Fan switches and thermostat valid-values change shape
+// based on `modeMask` on the SAME accessory. So we track the mask the HAP
+// database was last built with ourselves, in a dedicated NVS namespace (not
+// DeviceSettings — this is HomeKit-internal bookkeeping, not a user setting),
+// and bump c# by hand via hap_update_config_number() when it changes.
+static void homekit_bump_config_number_if_services_changed(uint8_t currentMask)
+{
+    nvs_handle_t h;
+    esp_err_t err = nvs_open("hk-meta", NVS_READWRITE, &h);
+    if (err != ESP_OK) {
+        LOG_ERROR("[HK] hk-meta nvs_open failed: %s", esp_err_to_name(err));
+        return;
+    }
+
+    uint8_t storedMask = 0;
+    err = nvs_get_u8(h, "svcMask", &storedMask);
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
+        // First boot after this feature was added (or first-ever boot): the
+        // HAP database matches whatever a paired controller last saw (older
+        // firmware always built the fixed all-modes DB, and modeMask
+        // defaults to MODE_CAP_ALL), so there's nothing to reconcile — just
+        // start tracking from here.
+        nvs_set_u8(h, "svcMask", currentMask);
+        nvs_commit(h);
+    } else if (err == ESP_OK) {
+        if (storedMask != currentMask) {
+            LOG_INFO("[HK] Service set changed (mask 0x%02X -> 0x%02X) — bumping config number",
+                     storedMask, currentMask);
+            int ret = hap_update_config_number();
+            if (ret != HAP_SUCCESS) {
+                LOG_ERROR("[HK] hap_update_config_number failed: %d", ret);
+            }
+            nvs_set_u8(h, "svcMask", currentMask);
+            nvs_commit(h);
+        }
+    } else {
+        LOG_ERROR("[HK] hk-meta nvs_get_u8 failed: %s", esp_err_to_name(err));
+    }
+
+    nvs_close(h);
+}
+
 // ── Public API ──────────────────────────────────────────────────────────────
+
+static uint8_t s_bootModeMask = MODE_CAP_ALL;
+
+uint8_t homekit_get_boot_mode_mask(void)
+{
+    return s_bootModeMask;
+}
 
 bool homekit_init(const char* name, const char* manufacturer,
                   const char* model, const char* serialNumber,
@@ -99,6 +153,8 @@ bool homekit_init(const char* name, const char* manufacturer,
     static bool s_bridgeAdded       = false;
     static bool s_acAdded           = false;
     static bool s_handlerRegistered = false;
+
+    s_bootModeMask = settings.get().modeMask;
 
     if (!s_coreInited) {
         hap_cfg_t hap_cfg;
@@ -206,6 +262,12 @@ bool homekit_init(const char* name, const char* manufacturer,
         LOG_ERROR("[HK] hap_start failed: %d", ret);
         return false;
     }
+
+    // hap_start() succeeded: the accessory DB (services shaped by
+    // s_bootModeMask) is now what's live. Reconcile against what it was last
+    // built with and bump c# if the capability mask — and therefore the
+    // service set — changed since the last successful start.
+    homekit_bump_config_number_if_services_changed(s_bootModeMask);
 
     // Override the hardcoded "MyHost" mDNS hostname from esp-homekit-sdk
     // with our unique per-device hostname (e.g. "Serin-AB12")

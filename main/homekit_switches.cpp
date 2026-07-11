@@ -56,6 +56,12 @@ static int fan_mode_write_cb(hap_write_data_t write_data[], int count,
 
         if (!strcmp(uuid, HAP_CHAR_UUID_ON)) {
             bool on = w->val.b;
+            if (on && !(settings.get().modeMask & MODE_CAP_FAN)) {
+                LOG_WARN("[HK:FanMode] ON rejected — FAN disabled by capability mask");
+                *(w->status) = HAP_STATUS_VAL_INVALID;
+                ret = HAP_FAIL;
+                continue;
+            }
             if (on) {
                 LOG_INFO("[HK:FanMode] HomeKit -> ON");
                 g_homekitCtrl->setPower(true);
@@ -189,6 +195,12 @@ static int dry_mode_write_cb(hap_write_data_t write_data[], int count,
 
         if (!strcmp(uuid, HAP_CHAR_UUID_ON)) {
             bool on = w->val.b;
+            if (on && !(settings.get().modeMask & MODE_CAP_DRY)) {
+                LOG_WARN("[HK:DryMode] ON rejected — DRY disabled by capability mask");
+                *(w->status) = HAP_STATUS_VAL_INVALID;
+                ret = HAP_FAIL;
+                continue;
+            }
             if (on) {
                 LOG_INFO("[HK:DryMode] HomeKit -> ON");
                 g_homekitCtrl->setPower(true);
