@@ -86,6 +86,13 @@ void SettingsStore::begin() {
         _settings.vaneConfig = val;
     }
 
+    // modeMask — uint8_t (sanitized here so consumers can trust it everywhere)
+    {
+        uint8_t val = MODE_CAP_ALL;
+        nvs_get_u8(_handle, "modeMask", &val);
+        _settings.modeMask = mode_mask_sanitize(val);
+    }
+
 #ifdef BLE_ENABLE
     // bleEnabled — bool stored as uint8_t
     // First-boot default honors the -DBLE_SENSOR_DEFAULT_ON build flag; a stored
@@ -150,6 +157,7 @@ void SettingsStore::save() {
     nvs_set_str(_handle, "setupCode", _settings.setupCode);
     nvs_set_u8(_handle, "wifiChgPend", _settings.wifiChangePending ? 1 : 0);
     nvs_set_u8(_handle, "vaneConfig", _settings.vaneConfig);
+    nvs_set_u8(_handle, "modeMask", _settings.modeMask);
 #ifdef BLE_ENABLE
     nvs_set_u8(_handle, "bleOn", _settings.bleEnabled ? 1 : 0);
     nvs_set_str(_handle, "bleAddr", _settings.bleSensorAddr);

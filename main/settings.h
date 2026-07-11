@@ -6,6 +6,7 @@
 #include "logging.h"
 #include "branding.h"
 #include "ble_config.h"
+#include "mode_caps.h"
 
 struct DeviceSettings {
     LogLevel logLevel    = LOG_LEVEL_INFO;
@@ -17,6 +18,7 @@ struct DeviceSettings {
     char     setupCode[9] = "";        // HomeKit pairing code (8 digits)
     bool     wifiChangePending = false; // True after WiFi creds changed via web UI (shorter fallback timeout)
     uint8_t  vaneConfig = 2;          // 0=no vanes, 1=vertical only, 2=vertical+horizontal
+    uint8_t  modeMask = MODE_CAP_ALL; // MODE_CAP_* bits — operating modes this unit supports (mode_caps.h)
 #ifdef BLE_ENABLE
     bool     bleEnabled = false;          // Master BLE on/off (lazy NimBLE init)
     char     bleSensorAddr[18] = "";      // "AA:BB:CC:DD:EE:FF" or empty

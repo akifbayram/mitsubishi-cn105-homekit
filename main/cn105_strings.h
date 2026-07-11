@@ -2,6 +2,7 @@
 
 #include "cn105_protocol.h"
 #include <cstring>
+#include "mode_caps.h"
 
 // ════════════════════════════════════════════════════════════════════════════
 // CN105 Protocol enum <-> string conversions
@@ -39,6 +40,24 @@ inline uint8_t strToMode(const char *s) {
     if (strcmp(s, "fan")  == 0) return CN105_MODE_FAN;
     if (strcmp(s, "auto") == 0) return CN105_MODE_AUTO;
     return CN105_MODE_AUTO;
+}
+
+// ── Mode capability mask (mode_caps.h) ──────────────────────────────────────
+
+inline uint8_t modeToCapBit(uint8_t mode) {
+    switch (mode) {
+        case CN105_MODE_HEAT: return MODE_CAP_HEAT;
+        case CN105_MODE_COOL: return MODE_CAP_COOL;
+        case CN105_MODE_DRY:  return MODE_CAP_DRY;
+        case CN105_MODE_FAN:  return MODE_CAP_FAN;
+        case CN105_MODE_AUTO: return MODE_CAP_AUTO;
+        default:              return 0;   // unknown modes are never gated
+    }
+}
+
+inline bool mode_mask_allows(uint8_t mask, uint8_t mode) {
+    uint8_t bit = modeToCapBit(mode);
+    return bit == 0 || (mask & bit) != 0;
 }
 
 // ── Fan Speed ───────────────────────────────────────────────────────────────
