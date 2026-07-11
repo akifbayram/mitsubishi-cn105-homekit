@@ -110,9 +110,14 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
         char strVal[16];
         if (jsonGetString(msg, "mode", strVal, sizeof(strVal))) {
             uint8_t mode = strToMode(strVal);
-            LOG_INFO("Set mode=%s (0x%02X)", strVal, mode);
-            _ctrl->setMode(mode);
-            hasControlChange = true;
+            if (!mode_mask_allows(settings.get().modeMask, mode)) {
+                // Stale/foreign client — the UI hides disabled modes.
+                LOG_WARN("Set mode=%s rejected — disabled by capability mask", strVal);
+            } else {
+                LOG_INFO("Set mode=%s (0x%02X)", strVal, mode);
+                _ctrl->setMode(mode);
+                hasControlChange = true;
+            }
         }
 
         float floatVal;
@@ -215,6 +220,13 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
                 LOG_INFO("Config vaneConfig=%d", intVal);
                 changed = true;
             }
+        }
+
+        if (jsonGetInt(msg, "modeMask", &intVal)) {
+            uint8_t m = mode_mask_sanitize((uint8_t)intVal);
+            settings.get().modeMask = m;
+            LOG_INFO("Config modeMask=0x%02X", m);
+            changed = true;
         }
 
         char unitVal[4];
@@ -517,6 +529,8 @@ void WebUI::pushState() {
         ",\"pollInterval\":%lu"
         ",\"tempUnit\":\"%s\""
         ",\"vaneConfig\":%d"
+        ",\"modeMask\":%d"
+        ",\"modeMaskBoot\":%d"
         ",\"hkPaired\":%s"
         ",\"hkControllers\":%d"
         ",\"hkStatus\":\"%s\""
@@ -526,6 +540,8 @@ void WebUI::pushState() {
         (unsigned long)cfg.pollMs,
         cfg.useFahrenheit ? "F" : "C",
         (int)cfg.vaneConfig,
+        (int)cfg.modeMask,
+        (int)homekit_get_boot_mode_mask(),
         hkControllers > 0 ? "true" : "false",
         hkControllers,
         homekit_get_status_string(),
