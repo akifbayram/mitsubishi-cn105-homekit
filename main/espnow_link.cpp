@@ -32,6 +32,7 @@
 #include "esp_utils.h"
 #include "logging.h"
 #include "cn105_protocol.h"
+#include "cn105_strings.h"
 #include "wifi_manager.h"
 #include "homekit_setup.h"
 #include "settings.h"
@@ -320,8 +321,14 @@ static bool h_apply(void *, uint16_t mask, const struct sl2_cmd_pkt *cmd) {
         if (cmd->mode == SL2_MODE_OFF) {
             s_ctrl->setPower(false);
         } else {
-            s_ctrl->setPower(true);
-            s_ctrl->setMode(mode_from_sl2(cmd->mode));
+            uint8_t cnMode = mode_from_sl2(cmd->mode);
+            if (!mode_mask_allows(settings.get().modeMask, cnMode)) {
+                // Dial with a stale CAPS cache (re-pull is in flight).
+                LOG_WARN("Link CMD mode %u rejected — disabled by capability mask", cmd->mode);
+            } else {
+                s_ctrl->setPower(true);
+                s_ctrl->setMode(cnMode);
+            }
         }
     }
     if (mask & SL2_CM_TEMP)  s_ctrl->setTargetTemp(sl2_dc_to_c(cmd->set_dc));
@@ -339,9 +346,14 @@ static bool h_apply(void *, uint16_t mask, const struct sl2_cmd_pkt *cmd) {
 
 static bool h_get_caps(void *, struct sl2_caps_pkt *out) {
     out->caps_flags = 0;
-    out->modes = (uint16_t)((1u << SL2_MODE_OFF) | (1u << SL2_MODE_HEAT) |
-                            (1u << SL2_MODE_COOL) | (1u << SL2_MODE_DRY) |
-                            (1u << SL2_MODE_FAN_ONLY) | (1u << SL2_MODE_AUTO));
+    uint8_t mm = settings.get().modeMask;
+    uint16_t modes = (uint16_t)(1u << SL2_MODE_OFF);   // Off is always available
+    if (mm & MODE_CAP_HEAT) modes |= (uint16_t)(1u << SL2_MODE_HEAT);
+    if (mm & MODE_CAP_COOL) modes |= (uint16_t)(1u << SL2_MODE_COOL);
+    if (mm & MODE_CAP_DRY)  modes |= (uint16_t)(1u << SL2_MODE_DRY);
+    if (mm & MODE_CAP_FAN)  modes |= (uint16_t)(1u << SL2_MODE_FAN_ONLY);
+    if (mm & MODE_CAP_AUTO) modes |= (uint16_t)(1u << SL2_MODE_AUTO);
+    out->modes = modes;
     out->presets = 0;
     out->fan_steps = 5;
     out->fan_flags = SL2_FAN_HAS_AUTO;
