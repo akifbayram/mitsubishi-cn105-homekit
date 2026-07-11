@@ -1,4 +1,5 @@
 #include "homekit_services.h"
+#include "cn105_strings.h"
 #include "settings.h"
 #include "logging.h"
 #include "esp_utils.h"
@@ -118,16 +119,6 @@ static float resolveAutoTarget(const CN105State &s) {
 
 // ── Write callback ──────────────────────────────────────────────────────────
 
-// HomeKit target state -> capability bit (0 = Off / not gated).
-static uint8_t hk_state_cap_bit(uint8_t hkState) {
-    switch (hkState) {
-        case 1: return MODE_CAP_HEAT;
-        case 2: return MODE_CAP_COOL;
-        case 3: return MODE_CAP_AUTO;
-        default: return 0;
-    }
-}
-
 static int thermostat_write_cb(hap_write_data_t write_data[], int count,
                                 void *serv_priv, void *write_priv)
 {
@@ -155,7 +146,10 @@ static int thermostat_write_cb(hap_write_data_t write_data[], int count,
 
         if (!strcmp(uuid, HAP_CHAR_UUID_TARGET_HEATING_COOLING_STATE)) {
             uint8_t hkState = w->val.u;
-            uint8_t capBit = hk_state_cap_bit(hkState);
+            // Off (0) is never gated; 1..3 reuse the existing HK->CN105 table
+            // so the gating check can't drift from what setMode() will do.
+            uint8_t capBit = (hkState == 0)
+                ? 0 : modeToCapBit(hkTargetStateToCN105Mode(hkState));
             if (capBit && !(settings.get().modeMask & capBit)) {
                 // Valid-values is advisory to controllers; also covers the
                 // window where the mask changed but the device hasn't rebooted.

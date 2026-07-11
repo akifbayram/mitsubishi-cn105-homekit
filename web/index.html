@@ -205,6 +205,8 @@ input[type=range].slim::-moz-range-thumb{width:22px;height:22px;}
   background:#fff;box-shadow:0 2px 5px rgba(0,0,0,.3);transition:transform .2s;}
 .ios-toggle input:checked+.ios-toggle-slider{background:var(--green);}
 .ios-toggle input:checked+.ios-toggle-slider::before{transform:translateX(20px);}
+.inset-row.cap-disabled{opacity:.45;}
+.inset-row.cap-disabled input{pointer-events:none;}
 
 /* ===== Inset rows (BLE toggles, settings) ===== */
 .inset-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:15px 18px;border-bottom:1px solid var(--sep);}
@@ -698,6 +700,30 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       </div>
     </div>
     <div class="inset-block">
+      <div class="lbl">Unit Capabilities</div>
+      <div class="sub" style="margin:2px 0 4px">Match this to the modes your unit supports. Unsupported modes are hidden here, in the Home app, and on a paired Link.</div>
+      <div class="inset-row" style="padding-left:0;padding-right:0">
+        <span class="lbl">Heat</span>
+        <label class="ios-toggle"><input type="checkbox" id="capHeat" onchange="onCapChange(this)" aria-label="Unit supports heating"><span class="ios-toggle-slider"></span></label>
+      </div>
+      <div class="inset-row" style="padding-left:0;padding-right:0">
+        <span class="lbl">Cool</span>
+        <label class="ios-toggle"><input type="checkbox" id="capCool" onchange="onCapChange(this)" aria-label="Unit supports cooling"><span class="ios-toggle-slider"></span></label>
+      </div>
+      <div class="inset-row" id="capAutoRow" style="padding-left:0;padding-right:0">
+        <div><div class="lbl">Auto</div><div class="sub">Requires both Heat and Cool.</div></div>
+        <label class="ios-toggle"><input type="checkbox" id="capAuto" onchange="onCapChange(this)" aria-label="Unit supports auto mode"><span class="ios-toggle-slider"></span></label>
+      </div>
+      <div class="inset-row" style="padding-left:0;padding-right:0">
+        <span class="lbl">Dry</span>
+        <label class="ios-toggle"><input type="checkbox" id="capDry" onchange="onCapChange(this)" aria-label="Unit supports dry mode"><span class="ios-toggle-slider"></span></label>
+      </div>
+      <div class="inset-row" style="padding-left:0;padding-right:0;border-bottom:none">
+        <span class="lbl">Fan</span>
+        <label class="ios-toggle"><input type="checkbox" id="capFan" onchange="onCapChange(this)" aria-label="Unit supports fan-only mode"><span class="ios-toggle-slider"></span></label>
+      </div>
+    </div>
+    <div class="inset-block">
       <div class="lbl" style="margin-bottom:10px">Log Level</div>
       <div class="seg compact" id="logLevelGrp">
         <div class="seg-bg"></div>
@@ -713,6 +739,10 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     </div>
     <div style="padding:14px 18px 18px;border-top:1px solid var(--sep)">
       <button class="save-btn" onclick="saveConfig()">Save Settings</button>
+      <div id="capBanner" class="ble-banner muted" style="display:none;margin-top:12px;flex-direction:column;align-items:stretch;gap:10px;text-align:center">
+        Mode changes saved. Restart to apply them to HomeKit.
+        <button class="btn-danger" onclick="restartDevice()">Reboot Now</button>
+      </div>
     </div>
   </div>
 
@@ -1580,10 +1610,17 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       if(s.logLevel!=null) setActive('logLevelGrp',String(s.logLevel));
       if(s.pollInterval!=null&&!$('cfgPoll').matches(':focus')) $('cfgPoll').value=s.pollInterval;
       if(s.vaneConfig!=null) setActive('vaneTypeGrp',String(s.vaneConfig));
+      if(s.modeMask!=null) applyCapMask(s.modeMask);
     }
     if(s.vaneConfig!=null){
       $('vaneSection').style.display=s.vaneConfig>=1?'':'none';
       $('wideVaneSection').style.display=s.vaneConfig>=2?'':'none';
+    }
+    if(s.modeMask!=null){
+      applyModeVisibility(s.modeMask, s.power?s.mode:null);
+      if(s.modeMaskBoot!=null){
+        $('capBanner').style.display=(s.modeMask!==s.modeMaskBoot)?'flex':'none';
+      }
     }
 
     if(s.hkPaired!=null){
@@ -2030,6 +2067,53 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   };
 
   function getSegVal(id){var g=document.getElementById(id),a=g&&g.querySelector('button.active');return a?a.getAttribute('data-v'):null;}
+
+  // ── Unit capabilities (mode mask) ──────────────────────────────────────────
+  // Bit values mirror MODE_CAP_* in main/mode_caps.h.
+  var CAP_BITS={heat:1,cool:2,dry:4,fan:8,auto:16};
+  var CAP_IDS={heat:'capHeat',cool:'capCool',dry:'capDry',fan:'capFan',auto:'capAuto'};
+  function getCapMask(){var m=0;for(var k in CAP_IDS){if($(CAP_IDS[k]).checked)m|=CAP_BITS[k];}return m;}
+  var lastCapMask=null;
+  function applyCapMask(m){
+    if(m===lastCapMask)return;  // runs on every 1 Hz push; skip unchanged
+    lastCapMask=m;
+    for(var k in CAP_IDS){$(CAP_IDS[k]).checked=!!(m&CAP_BITS[k]);}
+    updateCapDeps();
+  }
+  function updateCapDeps(){
+    // Mirrors mode_mask_sanitize() for UX; the firmware re-sanitizes anyway.
+    var autoOk=$('capHeat').checked&&$('capCool').checked;
+    var auto=$('capAuto');
+    auto.disabled=!autoOk;
+    if(!autoOk&&auto.checked)auto.checked=false;
+    $('capAutoRow').classList.toggle('cap-disabled',!autoOk);
+  }
+  window.onCapChange=function(inp){
+    if(!($('capHeat').checked||$('capCool').checked||$('capDry').checked||$('capFan').checked)){
+      inp.checked=true;
+      showToast('At least one mode must stay enabled',true);
+      return;
+    }
+    updateCapDeps();
+    settingsDirty=true;
+    lastCapMask=null;  // user edited: next push must reapply even if the mask value is unchanged
+  };
+  var lastModeVis=null;
+  function applyModeVisibility(mask,currentMode){
+    // A disabled mode that is currently active (e.g. set via IR remote) stays
+    // visible so the selector reflects reality and offers a way out.
+    var key=mask+'|'+(currentMode||'');
+    if(key===lastModeVis)return;
+    lastModeVis=key;
+    var btns=$('modeGrp').querySelectorAll('button[data-v]');
+    for(var i=0;i<btns.length;i++){
+      var v=btns[i].getAttribute('data-v');
+      var show=(v==='off')||!CAP_BITS[v]||!!(mask&CAP_BITS[v])||(v===currentMode);
+      btns[i].classList.toggle('hidden',!show);
+    }
+    updateSegBg('modeGrp');
+  }
+
   window.setVaneType=function(b){setActive('vaneTypeGrp',b.getAttribute('data-v'));settingsDirty=true;};
   window.setLogLevel=function(b){setActive('logLevelGrp',b.getAttribute('data-v'));settingsDirty=true;};
   window.saveConfig=function(){
@@ -2039,7 +2123,8 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       deviceName:name,
       logLevel:parseInt(getSegVal('logLevelGrp')),
       pollInterval:parseInt($('cfgPoll').value),
-      vaneConfig:parseInt(getSegVal('vaneTypeGrp'))
+      vaneConfig:parseInt(getSegVal('vaneTypeGrp')),
+      modeMask:getCapMask()
     });
     if(ok) settingsDirty=false;
     showToast(ok?'Settings saved':'Not connected — not saved',!ok);

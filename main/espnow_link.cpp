@@ -348,11 +348,13 @@ static bool h_get_caps(void *, struct sl2_caps_pkt *out) {
     out->caps_flags = 0;
     uint8_t mm = settings.get().modeMask;
     uint16_t modes = (uint16_t)(1u << SL2_MODE_OFF);   // Off is always available
-    if (mm & MODE_CAP_HEAT) modes |= (uint16_t)(1u << SL2_MODE_HEAT);
-    if (mm & MODE_CAP_COOL) modes |= (uint16_t)(1u << SL2_MODE_COOL);
-    if (mm & MODE_CAP_DRY)  modes |= (uint16_t)(1u << SL2_MODE_DRY);
-    if (mm & MODE_CAP_FAN)  modes |= (uint16_t)(1u << SL2_MODE_FAN_ONLY);
-    if (mm & MODE_CAP_AUTO) modes |= (uint16_t)(1u << SL2_MODE_AUTO);
+    // Compose the existing CN105->cap-bit and CN105->sl2 tables so this list
+    // is the only place that enumerates the real modes.
+    static constexpr uint8_t kCn105Modes[] = {
+        CN105_MODE_HEAT, CN105_MODE_COOL, CN105_MODE_DRY, CN105_MODE_FAN, CN105_MODE_AUTO,
+    };
+    for (uint8_t m : kCn105Modes)
+        if (mm & modeToCapBit(m)) modes |= (uint16_t)(1u << mode_to_sl2(true, m));
     out->modes = modes;
     out->presets = 0;
     out->fan_steps = 5;

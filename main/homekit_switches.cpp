@@ -19,6 +19,20 @@ static const char *TAG = "hk_switch";
 // ── External controller reference ───────────────────────────────────────────
 extern CN105Controller *g_homekitCtrl;
 
+// Shared ON-write guard for both mode switches: reject when the mode is
+// disabled by the capability mask (covers controllers that ignore the boot
+// gating, and the window between a mask change and the applying restart).
+// Returns true when the write was rejected; caller continues to the next one.
+static bool reject_masked_on(hap_write_data_t *w, int *ret,
+                             uint8_t capBit, const char *tag, const char *mode)
+{
+    if (settings.get().modeMask & capBit) return false;
+    LOG_WARN("[HK:%s] ON rejected — %s disabled by capability mask", tag, mode);
+    *(w->status) = HAP_STATUS_VAL_INVALID;
+    *ret = HAP_FAIL;
+    return true;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Fan Mode Switch
 // ═══════════════════════════════════════════════════════════════════════════
@@ -56,12 +70,7 @@ static int fan_mode_write_cb(hap_write_data_t write_data[], int count,
 
         if (!strcmp(uuid, HAP_CHAR_UUID_ON)) {
             bool on = w->val.b;
-            if (on && !(settings.get().modeMask & MODE_CAP_FAN)) {
-                LOG_WARN("[HK:FanMode] ON rejected — FAN disabled by capability mask");
-                *(w->status) = HAP_STATUS_VAL_INVALID;
-                ret = HAP_FAIL;
-                continue;
-            }
+            if (on && reject_masked_on(w, &ret, MODE_CAP_FAN, "FanMode", "FAN")) continue;
             if (on) {
                 LOG_INFO("[HK:FanMode] HomeKit -> ON");
                 g_homekitCtrl->setPower(true);
@@ -195,12 +204,7 @@ static int dry_mode_write_cb(hap_write_data_t write_data[], int count,
 
         if (!strcmp(uuid, HAP_CHAR_UUID_ON)) {
             bool on = w->val.b;
-            if (on && !(settings.get().modeMask & MODE_CAP_DRY)) {
-                LOG_WARN("[HK:DryMode] ON rejected — DRY disabled by capability mask");
-                *(w->status) = HAP_STATUS_VAL_INVALID;
-                ret = HAP_FAIL;
-                continue;
-            }
+            if (on && reject_masked_on(w, &ret, MODE_CAP_DRY, "DryMode", "DRY")) continue;
             if (on) {
                 LOG_INFO("[HK:DryMode] HomeKit -> ON");
                 g_homekitCtrl->setPower(true);

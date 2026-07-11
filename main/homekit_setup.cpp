@@ -106,27 +106,26 @@ static void homekit_bump_config_number_if_services_changed(uint8_t currentMask)
 
     uint8_t storedMask = 0;
     err = nvs_get_u8(h, "svcMask", &storedMask);
-    if (err == ESP_ERR_NVS_NOT_FOUND) {
-        // First boot after this feature was added (or first-ever boot): the
-        // HAP database matches whatever a paired controller last saw (older
-        // firmware always built the fixed all-modes DB, and modeMask
-        // defaults to MODE_CAP_ALL), so there's nothing to reconcile — just
-        // start tracking from here.
+    // ESP_ERR_NVS_NOT_FOUND = first boot after this feature was added (or
+    // first-ever boot): the HAP database matches whatever a paired controller
+    // last saw (older firmware always built the fixed all-modes DB, and
+    // modeMask defaults to MODE_CAP_ALL), so there's nothing to reconcile —
+    // just start tracking from here, without bumping.
+    bool store = (err == ESP_ERR_NVS_NOT_FOUND);
+    if (err == ESP_OK && storedMask != currentMask) {
+        LOG_INFO("[HK] Service set changed (mask 0x%02X -> 0x%02X) — bumping config number",
+                 storedMask, currentMask);
+        int ret = hap_update_config_number();
+        if (ret != HAP_SUCCESS) {
+            LOG_ERROR("[HK] hap_update_config_number failed: %d", ret);
+        }
+        store = true;
+    } else if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
+        LOG_ERROR("[HK] hk-meta nvs_get_u8 failed: %s", esp_err_to_name(err));
+    }
+    if (store) {
         nvs_set_u8(h, "svcMask", currentMask);
         nvs_commit(h);
-    } else if (err == ESP_OK) {
-        if (storedMask != currentMask) {
-            LOG_INFO("[HK] Service set changed (mask 0x%02X -> 0x%02X) — bumping config number",
-                     storedMask, currentMask);
-            int ret = hap_update_config_number();
-            if (ret != HAP_SUCCESS) {
-                LOG_ERROR("[HK] hap_update_config_number failed: %d", ret);
-            }
-            nvs_set_u8(h, "svcMask", currentMask);
-            nvs_commit(h);
-        }
-    } else {
-        LOG_ERROR("[HK] hk-meta nvs_get_u8 failed: %s", esp_err_to_name(err));
     }
 
     nvs_close(h);
