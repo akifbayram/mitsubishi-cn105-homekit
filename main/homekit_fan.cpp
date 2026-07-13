@@ -59,9 +59,16 @@ static int fan_write_cb(hap_write_data_t write_data[], int count,
                          void *serv_priv, void *write_priv)
 {
     bool healthy = g_homekitCtrl && g_homekitCtrl->isHealthy();
-    // Track power across the batch: the Home app writes Active=1 and
-    // RotationSpeed together when turning the fan on.
+    // Effective power for RotationSpeed gating. The Home app writes Active=1
+    // and RotationSpeed together when turning the fan on, in no guaranteed
+    // order — pre-scan the batch for Active so a speed that precedes it in
+    // write_data[] isn't dropped as "unit off".
     bool power = healthy && g_homekitCtrl->getEffectiveState().power;
+    for (int i = 0; i < count; i++) {
+        if (!strcmp(hap_char_get_type_uuid(write_data[i].hc), HAP_CHAR_UUID_ACTIVE)) {
+            power = (write_data[i].val.u != 0);
+        }
+    }
     int ret = HAP_SUCCESS;
 
     for (int i = 0; i < count; i++) {
@@ -87,7 +94,6 @@ static int fan_write_cb(hap_write_data_t write_data[], int count,
             uint8_t active = w->val.u;
             LOG_INFO("[HK:Fan] HomeKit -> active: %d", active);
             g_homekitCtrl->setPower(active != 0);
-            power = (active != 0);
             hap_char_update_val(w->hc, &w->val);
             *(w->status) = HAP_STATUS_SUCCESS;
 

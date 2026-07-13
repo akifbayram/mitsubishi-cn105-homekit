@@ -72,33 +72,47 @@ void CN105Controller::taskFunc(void *arg) {
 #endif
 
 bool CN105Controller::isHealthy() const {
-    return _state.connected &&
-           _lastSuccessfulResponse > 0 &&
-           (uptime_ms() - _lastSuccessfulResponse) < CN105_COMMS_TIMEOUT;
+    taskENTER_CRITICAL(&_mux);
+    bool connected = _state.connected;
+    uint32_t last = _lastSuccessfulResponse;
+    taskEXIT_CRITICAL(&_mux);
+    return connected && last > 0 && (uptime_ms() - last) < CN105_COMMS_TIMEOUT;
 }
 
 uint32_t CN105Controller::getLastResponseAge() const {
-    if (_lastSuccessfulResponse == 0) return UINT32_MAX;
-    return uptime_ms() - _lastSuccessfulResponse;
+    taskENTER_CRITICAL(&_mux);
+    uint32_t last = _lastSuccessfulResponse;
+    taskEXIT_CRITICAL(&_mux);
+    if (last == 0) return UINT32_MAX;
+    return uptime_ms() - last;
 }
 
-bool CN105Controller::isFieldInGrace(bool hasField) const {
-    if (!hasField) return false;
-    // Always use wanted value while flag is set (echavet pattern: suppress
-    // until heat pump confirms). Safety timeout prevents stuck state if
-    // confirmation never arrives (e.g. heat pump rejects the value).
-    constexpr uint32_t GRACE_SAFETY_TIMEOUT = 10000;  // 10s max
-    return (uptime_ms() - _wanted.lastChange) < GRACE_SAFETY_TIMEOUT;
+CN105State CN105Controller::getState() const {
+    taskENTER_CRITICAL(&_mux);
+    CN105State s = _state;
+    taskEXIT_CRITICAL(&_mux);
+    return s;
 }
 
 CN105State CN105Controller::getEffectiveState() const {
+    taskENTER_CRITICAL(&_mux);
     CN105State eff = _state;
-    if (isFieldInGrace(_wanted.hasPower))    eff.power     = _wanted.power;
-    if (isFieldInGrace(_wanted.hasMode))     eff.mode      = _wanted.mode;
-    if (isFieldInGrace(_wanted.hasTemp))     eff.targetTemp = _wanted.targetTemp;
-    if (isFieldInGrace(_wanted.hasFan))      eff.fanSpeed  = _wanted.fanSpeed;
-    if (isFieldInGrace(_wanted.hasVane))     eff.vane      = _wanted.vane;
-    if (isFieldInGrace(_wanted.hasWideVane)) eff.wideVane  = _wanted.wideVane;
+    const WantedSettings w = _wanted;
+    taskEXIT_CRITICAL(&_mux);
+    // Wanted fields mask the actual heat pump values while in the grace
+    // window (echavet pattern: suppress until the heat pump confirms). The
+    // safety timeout prevents a stuck state if confirmation never arrives
+    // (e.g. the heat pump rejects the value or the SET was lost).
+    constexpr uint32_t GRACE_SAFETY_TIMEOUT = 10000;  // 10s max
+    bool inGrace = (uptime_ms() - w.lastChange) < GRACE_SAFETY_TIMEOUT;
+    if (inGrace) {
+        if (w.hasPower)    eff.power      = w.power;
+        if (w.hasMode)     eff.mode       = w.mode;
+        if (w.hasTemp)     eff.targetTemp = w.targetTemp;
+        if (w.hasFan)      eff.fanSpeed   = w.fanSpeed;
+        if (w.hasVane)     eff.vane       = w.vane;
+        if (w.hasWideVane) eff.wideVane   = w.wideVane;
+    }
     return eff;
 }
 
@@ -131,20 +145,30 @@ void CN105Controller::loop() {
         return;
     }
 
-    // ── Send pending changes (priority over polling, only outside a cycle) ──
-    if ((_setFlags1 != 0 || _setFlags2 != 0) && !_cycleRunning) {
-        LOG_INFO("Sending pending set command (flags=0x%02X flags2=0x%02X)", _setFlags1, _setFlags2);
-        sendSetPacket();
-        _setFlags1 = 0;
-        _setFlags2 = 0;
+    // ── Send committed changes (priority over polling, only outside a cycle) ──
+    // Snapshot-and-clear under the lock, then transmit from the snapshot so a
+    // producer staging a new batch mid-TX can neither tear this packet nor
+    // lose its own (its flags accumulate in the freshly cleared _staged).
+    if (_sendRequested && !_cycleRunning) {
+        taskENTER_CRITICAL(&_mux);
+        const PendingCommand cmd = _staged;
+        _staged = PendingCommand{};
+        _sendRequested = false;
+        _wanted.hasBeenSent = true;
+        taskEXIT_CRITICAL(&_mux);
+        LOG_INFO("Sending pending set command (flags=0x%02X flags2=0x%02X)", cmd.flags1, cmd.flags2);
+        sendSetPacket(cmd);
         _lastCycleEnd = now + CN105_DEFER_DELAY;
         return;
     }
 
     // ── Send pending remote temperature (same deferred pattern) ──────────
     if (_pendingRemoteTemp && !_cycleRunning) {
-        sendRemoteTempPacket();
+        taskENTER_CRITICAL(&_mux);
+        const float remoteTempC = _pendingRemoteTempC;
         _pendingRemoteTemp = false;
+        taskEXIT_CRITICAL(&_mux);
+        sendRemoteTempPacket(remoteTempC);
         _lastCycleEnd = now + CN105_DEFER_DELAY;
         return;
     }
@@ -191,7 +215,9 @@ void CN105Controller::loop() {
         (nowMs - _lastSuccessfulResponse) > CN105_COMMS_TIMEOUT) {
         LOG_ERROR("COMMUNICATION LOST! No response for %lums (timeout=%dms)",
                   (unsigned long)(nowMs - _lastSuccessfulResponse), CN105_COMMS_TIMEOUT);
+        taskENTER_CRITICAL(&_mux);
         _state.connected = false;
+        taskEXIT_CRITICAL(&_mux);
         _initialConnectDone = false;
         _connectRetries = 0;
         _cycleRunning = false;
@@ -205,82 +231,95 @@ void CN105Controller::loop() {
 
 void CN105Controller::setPower(bool on) {
     LOG_INFO("CMD: setPower(%s)", on ? "ON" : "OFF");
-    _setFlags1 |= CN105_FLAG_POWER;
-    _pendingPower = on;
+    uint32_t now = uptime_ms();
+    taskENTER_CRITICAL(&_mux);
+    _staged.flags1 |= CN105_FLAG_POWER;
+    _staged.power = on;
     _wanted.hasPower = true;
     _wanted.power = on;
     _wanted.hasBeenSent = false;
-    _wanted.lastChange = uptime_ms();
+    _wanted.lastChange = now;
+    taskEXIT_CRITICAL(&_mux);
 }
 
 void CN105Controller::setMode(uint8_t mode) {
     LOG_INFO("CMD: setMode(%s / 0x%02X)", modeToLogStr(mode), mode);
-    _setFlags1 |= CN105_FLAG_MODE;
-    _pendingMode = mode;
+    uint32_t now = uptime_ms();
+    taskENTER_CRITICAL(&_mux);
+    _staged.flags1 |= CN105_FLAG_MODE;
+    _staged.mode = mode;
     _wanted.hasMode = true;
     _wanted.mode = mode;
     _wanted.hasBeenSent = false;
-    _wanted.lastChange = uptime_ms();
+    _wanted.lastChange = now;
+    taskEXIT_CRITICAL(&_mux);
 }
 
 void CN105Controller::setTargetTemp(float tempC) {
     float clamped = std::clamp(tempC, CN105_TEMP_MIN, CN105_TEMP_MAX);
     LOG_INFO("CMD: setTargetTemp(%.1f%sC)", clamped, "\xC2\xB0");
-    _setFlags1 |= CN105_FLAG_TEMP;
-    _pendingTemp = clamped;
+    uint32_t now = uptime_ms();
+    taskENTER_CRITICAL(&_mux);
+    _staged.flags1 |= CN105_FLAG_TEMP;
+    _staged.temp = clamped;
     _wanted.hasTemp = true;
     _wanted.targetTemp = clamped;
     _wanted.hasBeenSent = false;
-    _wanted.lastChange = uptime_ms();
+    _wanted.lastChange = now;
+    taskEXIT_CRITICAL(&_mux);
 }
 
 void CN105Controller::setFanSpeed(uint8_t speed) {
     LOG_INFO("CMD: setFanSpeed(%s / 0x%02X)", fanToLogStr(speed), speed);
-    _setFlags1 |= CN105_FLAG_FAN;
-    _pendingFan = speed;
+    uint32_t now = uptime_ms();
+    taskENTER_CRITICAL(&_mux);
+    _staged.flags1 |= CN105_FLAG_FAN;
+    _staged.fan = speed;
     _wanted.hasFan = true;
     _wanted.fanSpeed = speed;
     _wanted.hasBeenSent = false;
-    _wanted.lastChange = uptime_ms();
+    _wanted.lastChange = now;
+    taskEXIT_CRITICAL(&_mux);
 }
 
 void CN105Controller::setVane(uint8_t position) {
     LOG_INFO("CMD: setVane(%s / 0x%02X)", vaneToLogStr(position), position);
-    _setFlags1 |= CN105_FLAG_VANE;
-    _pendingVane = position;
+    uint32_t now = uptime_ms();
+    taskENTER_CRITICAL(&_mux);
+    _staged.flags1 |= CN105_FLAG_VANE;
+    _staged.vane = position;
     _wanted.hasVane = true;
     _wanted.vane = position;
     _wanted.hasBeenSent = false;
-    _wanted.lastChange = uptime_ms();
+    _wanted.lastChange = now;
+    taskEXIT_CRITICAL(&_mux);
 }
 
 void CN105Controller::setWideVane(uint8_t position) {
     LOG_INFO("CMD: setWideVane(%s / 0x%02X)", wideVaneToLogStr(position), position);
-    _setFlags2 |= CN105_FLAG2_WVANE;
-    _pendingWideVane = position;
+    uint32_t now = uptime_ms();
+    taskENTER_CRITICAL(&_mux);
+    _staged.flags2 |= CN105_FLAG2_WVANE;
+    _staged.wideVane = position;
     _wanted.hasWideVane = true;
     _wanted.wideVane = position;
     _wanted.hasBeenSent = false;
-    _wanted.lastChange = uptime_ms();
+    _wanted.lastChange = now;
+    taskEXIT_CRITICAL(&_mux);
 }
 
 void CN105Controller::sendPendingChanges() {
-    if ((_setFlags1 == 0 && _setFlags2 == 0) || !_state.connected) return;
-
-    // Don't send SET during an active poll cycle — the heat pump may drop
-    // commands while it's processing INFO_REQ/RESP exchanges.  Leave the
-    // pending flags set; cn105.loop() will send once the cycle completes.
-    if (_cycleRunning) {
-        LOG_DEBUG("Deferring pending changes (cycle running, flags=0x%02X flags2=0x%02X)",
-                  _setFlags1, _setFlags2);
-        return;
+    // Commit only — the CN105 task transmits from loop() once outside a poll
+    // cycle (see the threading contract in cn105_protocol.h). Transmitting
+    // here, on the caller's task, would race the poll cycle: the heat pump
+    // silently drops SETs that arrive mid-cycle.
+    taskENTER_CRITICAL(&_mux);
+    bool hasPending = (_staged.flags1 != 0 || _staged.flags2 != 0);
+    if (hasPending) _sendRequested = true;
+    taskEXIT_CRITICAL(&_mux);
+    if (hasPending) {
+        LOG_DEBUG("Set command committed, CN105 task will transmit");
     }
-
-    LOG_INFO("Flushing pending changes (flags=0x%02X flags2=0x%02X)", _setFlags1, _setFlags2);
-    sendSetPacket();
-    _setFlags1 = 0;
-    _setFlags2 = 0;
-    _lastCycleEnd = uptime_ms() + CN105_DEFER_DELAY;
 }
 
 void CN105Controller::sendRemoteTemperature(float tempC) {
@@ -288,14 +327,18 @@ void CN105Controller::sendRemoteTemperature(float tempC) {
         LOG_WARN("sendRemoteTemperature(NAN) ignored — use clearRemoteTemperature()");
         return;
     }
+    taskENTER_CRITICAL(&_mux);
     _pendingRemoteTemp = true;
     _pendingRemoteTempC = tempC;
+    taskEXIT_CRITICAL(&_mux);
     LOG_DEBUG("CMD: sendRemoteTemperature(%.1f%sC)", tempC, "\xC2\xB0");
 }
 
 void CN105Controller::clearRemoteTemperature() {
+    taskENTER_CRITICAL(&_mux);
     _pendingRemoteTemp = true;
     _pendingRemoteTempC = NAN;
+    taskEXIT_CRITICAL(&_mux);
     LOG_DEBUG("CMD: clearRemoteTemperature()");
 }
 
@@ -307,7 +350,14 @@ float CN105Controller::quantizeRemoteTemp(float tempC) {
     return std::clamp(roundf(tempC * 2.0f) / 2.0f, 0.5f, 63.5f);
 }
 
-void CN105Controller::sendRemoteTempPacket() {
+float CN105Controller::quantizeSetpoint(float tempC) const {
+    float clamped = std::clamp(tempC, CN105_TEMP_MIN, CN105_TEMP_MAX);
+    float rounded = roundf(clamped * 2.0f) / 2.0f;
+    // Legacy integer encoding drops the half degree (see sendSetPacket)
+    return _tempMode ? rounded : (float)(int)rounded;
+}
+
+void CN105Controller::sendRemoteTempPacket(float tempC) {
     uint8_t pkt[22];
     memset(pkt, 0, sizeof(pkt));
     buildHeader(pkt, CN105_PKT_SET, CN105_DATA_LEN);
@@ -320,7 +370,6 @@ void CN105Controller::sendRemoteTempPacket() {
     // pkt[8]   = enhanced encoding: temp * 2 + 128 (or 0x80 when disabled)
     pkt[5] = 0x07;
 
-    float tempC = _pendingRemoteTempC;
     if (!std::isnan(tempC)) {
         float rounded = quantizeRemoteTemp(tempC);
         pkt[6] = 0x01;
@@ -395,53 +444,55 @@ void CN105Controller::sendInfoRequest(uint8_t infoType) {
     _uart->write(pkt, 22);
 }
 
-void CN105Controller::sendSetPacket() {
+void CN105Controller::sendSetPacket(const PendingCommand &cmd) {
     uint8_t pkt[22];
     memset(pkt, 0, sizeof(pkt));
     buildHeader(pkt, CN105_PKT_SET, CN105_DATA_LEN);
 
     pkt[5] = 0x01;
-    pkt[6] = _setFlags1;
+    pkt[6] = cmd.flags1;
 
-    if (_setFlags1 & CN105_FLAG_POWER) {
-        pkt[8] = _pendingPower ? CN105_POWER_ON : CN105_POWER_OFF;
-        LOG_INFO("SET power=%s", _pendingPower ? "ON" : "OFF");
+    if (cmd.flags1 & CN105_FLAG_POWER) {
+        pkt[8] = cmd.power ? CN105_POWER_ON : CN105_POWER_OFF;
+        LOG_INFO("SET power=%s", cmd.power ? "ON" : "OFF");
     }
 
-    if (_setFlags1 & CN105_FLAG_MODE) {
-        pkt[9] = _pendingMode;
-        LOG_INFO("SET mode=%s (0x%02X)", modeToLogStr(_pendingMode), _pendingMode);
+    if (cmd.flags1 & CN105_FLAG_MODE) {
+        pkt[9] = cmd.mode;
+        LOG_INFO("SET mode=%s (0x%02X)", modeToLogStr(cmd.mode), cmd.mode);
     }
 
-    if (_setFlags1 & CN105_FLAG_TEMP) {
-        float clamped = std::clamp(_pendingTemp, CN105_TEMP_MIN, CN105_TEMP_MAX);
-        float rounded = round(clamped * 2.0f) / 2.0f;
+    if (cmd.flags1 & CN105_FLAG_TEMP) {
+        // quantizeSetpoint is the single source of truth for what the unit
+        // will end up at (and report back) — keep the encoding below in step
+        // with it.
+        float q = quantizeSetpoint(cmd.temp);
         if (_tempMode) {
             // Enhanced mode: byte 19 carries 0.5C precision, byte 10 = 0
             pkt[10] = 0x00;
-            pkt[19] = (uint8_t)((rounded * 2.0f) + 128.0f);
+            pkt[19] = (uint8_t)((q * 2.0f) + 128.0f);
         } else {
             // Legacy mode: byte 10 carries integer temp, byte 19 = 0
-            pkt[10] = (uint8_t)(31 - (int)rounded);
+            pkt[10] = (uint8_t)(31 - (int)q);
         }
-        LOG_INFO("SET temp=%.1f%sC (tempMode=%s)", rounded, "\xC2\xB0", _tempMode ? "enhanced" : "legacy");
+        LOG_INFO("SET temp=%.1f%sC (tempMode=%s)", q, "\xC2\xB0", _tempMode ? "enhanced" : "legacy");
     }
 
-    if (_setFlags1 & CN105_FLAG_FAN) {
-        pkt[11] = _pendingFan;
-        LOG_INFO("SET fan=%s (0x%02X)", fanToLogStr(_pendingFan), _pendingFan);
+    if (cmd.flags1 & CN105_FLAG_FAN) {
+        pkt[11] = cmd.fan;
+        LOG_INFO("SET fan=%s (0x%02X)", fanToLogStr(cmd.fan), cmd.fan);
     }
 
-    if (_setFlags1 & CN105_FLAG_VANE) {
-        pkt[12] = _pendingVane;
-        LOG_INFO("SET vane=%s (0x%02X)", vaneToLogStr(_pendingVane), _pendingVane);
+    if (cmd.flags1 & CN105_FLAG_VANE) {
+        pkt[12] = cmd.vane;
+        LOG_INFO("SET vane=%s (0x%02X)", vaneToLogStr(cmd.vane), cmd.vane);
     }
 
     // Wide vane (horizontal) — uses second control flag byte (packet[7])
-    pkt[7] = _setFlags2;
-    if (_setFlags2 & CN105_FLAG2_WVANE) {
-        pkt[18] = _pendingWideVane;
-        LOG_INFO("SET wideVane=%s (0x%02X)", wideVaneToLogStr(_pendingWideVane), _pendingWideVane);
+    pkt[7] = cmd.flags2;
+    if (cmd.flags2 & CN105_FLAG2_WVANE) {
+        pkt[18] = cmd.wideVane;
+        LOG_INFO("SET wideVane=%s (0x%02X)", wideVaneToLogStr(cmd.wideVane), cmd.wideVane);
     }
 
     pkt[21] = calcChecksum(pkt, 21);
@@ -450,7 +501,6 @@ void CN105Controller::sendSetPacket() {
         LOG_DEBUG("TX SET (%d bytes): %s", 22, hex);
     }
     _uart->write(pkt, 22);
-    _wanted.hasBeenSent = true;
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -544,17 +594,21 @@ void CN105Controller::processPacket(const uint8_t *pkt, uint8_t len) {
     switch (pktType) {
         case CN105_PKT_CONNECT_OK:
             LOG_INFO("Connected to heat pump");
+            taskENTER_CRITICAL(&_mux);
             _state.connected = true;
             _state.lastUpdate = uptime_ms();
             _lastSuccessfulResponse = _state.lastUpdate;
+            taskEXIT_CRITICAL(&_mux);
             _initialConnectDone = true;
             _connectRetries = 0;
             break;
 
         case CN105_PKT_SET_ACK:
             LOG_INFO("SET command acknowledged");
+            taskENTER_CRITICAL(&_mux);
             _state.lastUpdate = uptime_ms();
             _lastSuccessfulResponse = _state.lastUpdate;
+            taskEXIT_CRITICAL(&_mux);
             break;
 
         case CN105_PKT_INFO_RESP: {
@@ -614,116 +668,106 @@ void CN105Controller::handleInfoResponse(const uint8_t *data, uint8_t dataLen) {
     }
 
     uint32_t now = uptime_ms();
-    _state.lastUpdate = now;
-    _lastSuccessfulResponse = now;
+
+    // Decode into a local copy, then commit under _mux in one place at the
+    // end — cross-task readers never observe a half-decoded response.
+    // Reading _state without the lock here is fine: this task is its only
+    // writer.
+    CN105State next = _state;
+    next.lastUpdate = now;
+    bool settingsDecoded = false;
 
     switch (data[0]) {
         case CN105_INFO_SETTINGS:
             if (dataLen >= 8) {
-                _state.power = (data[3] != 0);
+                next.power = (data[3] != 0);
                 uint8_t rawMode = data[4];
                 if (rawMode > 0x08) {
                     LOG_DEBUG("SETTINGS: stripping iSee flag (0x%02X -> 0x%02X)",
                               rawMode, rawMode - 0x08);
                     rawMode -= 0x08;
                 }
-                _state.mode = rawMode;
-                _state.fanSpeed = data[6];
-                _state.vane = data[7];
+                next.mode = rawMode;
+                next.fanSpeed = data[6];
+                next.vane = data[7];
 
                 // Wide vane (horizontal): lower nibble of data[10]
                 if (dataLen >= 11) {
-                    _state.wideVane = data[10] & 0x0F;
+                    next.wideVane = data[10] & 0x0F;
                 }
 
                 if (dataLen >= 12 && data[11] != 0) {
-                    _state.targetTemp = ((float)data[11] - 128.0f) / 2.0f;
+                    next.targetTemp = ((float)data[11] - 128.0f) / 2.0f;
                     _tempMode = true;  // Unit supports enhanced temp encoding
                 } else {
-                    _state.targetTemp = 31.0f - (float)data[5];
+                    next.targetTemp = 31.0f - (float)data[5];
                 }
                 LOG_DEBUG("SETTINGS: power=%s mode=%s fan=%s vane=%s wvane=%s target=%.1f%sC",
-                          _state.power ? "ON" : "OFF", modeToLogStr(_state.mode),
-                          fanToLogStr(_state.fanSpeed), vaneToLogStr(_state.vane),
-                          wideVaneToLogStr(_state.wideVane), _state.targetTemp, "\xC2\xB0");
-
-                // ── Clear wanted flags when heat pump confirms matching values ──
-                // Only check after the command has been sent (echavet pattern)
-                if (_wanted.hasBeenSent) {
-                    if (_wanted.hasPower && _state.power == _wanted.power)
-                        _wanted.hasPower = false;
-                    if (_wanted.hasMode && _state.mode == _wanted.mode)
-                        _wanted.hasMode = false;
-                    if (_wanted.hasTemp && fabsf(_state.targetTemp - _wanted.targetTemp) < 0.3f)
-                        _wanted.hasTemp = false;
-                    if (_wanted.hasFan && _state.fanSpeed == _wanted.fanSpeed)
-                        _wanted.hasFan = false;
-                    if (_wanted.hasVane && _state.vane == _wanted.vane)
-                        _wanted.hasVane = false;
-                    if (_wanted.hasWideVane && _state.wideVane == _wanted.wideVane)
-                        _wanted.hasWideVane = false;
-                }
+                          next.power ? "ON" : "OFF", modeToLogStr(next.mode),
+                          fanToLogStr(next.fanSpeed), vaneToLogStr(next.vane),
+                          wideVaneToLogStr(next.wideVane), next.targetTemp, "\xC2\xB0");
+                settingsDecoded = true;
             }
             break;
 
         case CN105_INFO_ROOMTEMP:
             if (dataLen >= 7 && data[6] != 0) {
-                _state.roomTemp = ((float)data[6] - 128.0f) / 2.0f;
+                next.roomTemp = ((float)data[6] - 128.0f) / 2.0f;
             } else if (dataLen >= 4) {
-                _state.roomTemp = (float)data[3] + 10.0f;
+                next.roomTemp = (float)data[3] + 10.0f;
             }
             // Outside air temperature: data[5], formula (val - 128) / 2.0
             // Valid when > 1; some units report 0x01 (-63.5C) when idle = invalid
             if (dataLen >= 6 && data[5] > 1) {
-                _state.outsideTemp = ((float)data[5] - 128.0f) / 2.0f;
-                _state.outsideTempValid = true;
+                next.outsideTemp = ((float)data[5] - 128.0f) / 2.0f;
+                next.outsideTempValid = true;
             } else {
-                _state.outsideTempValid = false;
+                next.outsideTempValid = false;
             }
             // Runtime hours: data[11:13] as 24-bit value, divided by 60
             if (dataLen >= 14 && (data[11] | data[12] | data[13]) != 0) {
                 uint32_t rawMinutes = ((uint32_t)data[11] << 16) |
                                       ((uint32_t)data[12] << 8) |
                                        (uint32_t)data[13];
-                _state.runtimeHours = (float)rawMinutes / 60.0f;
-                _state.runtimeValid = true;
+                next.runtimeHours = (float)rawMinutes / 60.0f;
+                next.runtimeValid = true;
             }
             if (currentLogLevel >= LOG_LEVEL_DEBUG) {
                 char outsideStr[8] = "N/A", runtimeStr[12] = "N/A";
-                if (_state.outsideTempValid) snprintf(outsideStr, sizeof(outsideStr), "%.1f", _state.outsideTemp);
-                if (_state.runtimeValid) snprintf(runtimeStr, sizeof(runtimeStr), "%.1f", _state.runtimeHours);
+                if (next.outsideTempValid) snprintf(outsideStr, sizeof(outsideStr), "%.1f", next.outsideTemp);
+                if (next.runtimeValid) snprintf(runtimeStr, sizeof(runtimeStr), "%.1f", next.runtimeHours);
                 LOG_DEBUG("ROOMTEMP: %.1f\xC2\xB0""C  outside=%s  runtime=%s",
-                          _state.roomTemp, outsideStr, runtimeStr);
+                          next.roomTemp, outsideStr, runtimeStr);
             }
             break;
 
         case CN105_INFO_STATUS:
             if (dataLen >= 5) {
-                _state.compressorHz = data[3];
-                _state.operating = (data[4] != 0);
+                next.compressorHz = data[3];
+                next.operating = (data[4] != 0);
                 LOG_DEBUG("STATUS: compressor=%dHz operating=%s",
-                          _state.compressorHz, _state.operating ? "YES" : "NO");
+                          next.compressorHz, next.operating ? "YES" : "NO");
             }
             break;
 
         case CN105_INFO_STANDBY:
             if (dataLen >= 6) {
-                _state.subMode = data[3];
-                _state.stage = data[4];
-                _state.autoSubMode = data[5];
+                next.subMode = data[3];
+                next.stage = data[4];
+                next.autoSubMode = data[5];
                 LOG_DEBUG("STANDBY: subMode=%s stage=%s autoSub=%s",
-                          subModeToLogStr(_state.subMode),
-                          stageToLogStr(_state.stage),
-                          autoSubModeToLogStr(_state.autoSubMode));
+                          subModeToLogStr(next.subMode),
+                          stageToLogStr(next.stage),
+                          autoSubModeToLogStr(next.autoSubMode));
             }
             break;
 
         case CN105_INFO_ERRORCODE:
             if (dataLen >= 5) {
-                _state.errorCode = data[4];
-                _state.hasError = (data[4] != 0x80);
+                next.errorCode = data[4];
+                next.hasError = (data[4] != 0x80);
                 _errorPollFailures = 0;  // Reset failure counter on success
-                if (_state.hasError) {
+                if (next.hasError) {
                     LOG_WARN("ERROR CODE: 0x%02X", data[4]);
                 } else {
                     LOG_DEBUG("ERROR: normal (0x80)");
@@ -735,4 +779,28 @@ void CN105Controller::handleInfoResponse(const uint8_t *data, uint8_t dataLen) {
             LOG_WARN("INFO_RESP unknown type 0x%02X", data[0]);
             break;
     }
+
+    taskENTER_CRITICAL(&_mux);
+    _state = next;
+    _lastSuccessfulResponse = now;
+    // Clear wanted flags when the heat pump confirms matching values — only
+    // meaningful on a SETTINGS response, and only after the command has been
+    // sent (echavet pattern). Under the lock: a producer staging a new
+    // command mid-check must not have its fresh has* flag cleared by a stale
+    // match.
+    if (settingsDecoded && _wanted.hasBeenSent) {
+        if (_wanted.hasPower && next.power == _wanted.power)
+            _wanted.hasPower = false;
+        if (_wanted.hasMode && next.mode == _wanted.mode)
+            _wanted.hasMode = false;
+        if (_wanted.hasTemp && fabsf(next.targetTemp - _wanted.targetTemp) < 0.3f)
+            _wanted.hasTemp = false;
+        if (_wanted.hasFan && next.fanSpeed == _wanted.fanSpeed)
+            _wanted.hasFan = false;
+        if (_wanted.hasVane && next.vane == _wanted.vane)
+            _wanted.hasVane = false;
+        if (_wanted.hasWideVane && next.wideVane == _wanted.wideVane)
+            _wanted.hasWideVane = false;
+    }
+    taskEXIT_CRITICAL(&_mux);
 }

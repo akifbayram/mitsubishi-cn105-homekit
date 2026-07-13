@@ -66,8 +66,8 @@ static const char *resetReasonStr(esp_reset_reason_t r) {
 }
 
 // ── State flags ─────────────────────────────────────────────────────────────
+// (HomeKit started-ness lives in homekit_is_started() — no parallel flag here)
 static bool webUIStarted      = false;
-static bool homekitStarted    = false;
 static bool espnowConsoleInit = false;   // ESP-NOW REPL one-shot attempted
 static bool firmwareValidated = false;
 static bool lastAPState       = false;
@@ -239,7 +239,13 @@ extern "C" void app_main(void)
         uint32_t now = uptime_ms();
 
         // ── Deferred HomeKit init (one-shot after WiFi connects, skipped in safe mode)
-        if (!safeMode && !homekitStarted && WifiManager::isConnected()) {
+        // Retries are backed off to every 10s — a persistent failure (e.g.
+        // hap_start() refusing) would otherwise retry every loop iteration
+        // and flood the log.
+        static uint32_t nextHomekitAttempt = 0;
+        if (!safeMode && !homekit_is_started() && WifiManager::isConnected() &&
+            now >= nextHomekitAttempt) {
+            nextHomekitAttempt = now + 10000;
             // WiFi is up: drop the captive portal handler now that we have a real
             // network. HAP binds its own port (8080), so there's no contention
             // with the web UI on port 80.
@@ -248,11 +254,9 @@ extern "C" void app_main(void)
                 lastAPState = false;
             }
             homekit_services_set_controller(&cn105);
-            homekitStarted = homekit_init(displayName, BRAND_MANUFACTURER,
-                                           BRAND_MODEL, serialNumber, FW_VERSION,
-                                           apName);
-            if (!homekitStarted) {
-                LOG_ERROR("HomeKit init failed, will retry next loop");
+            if (!homekit_init(displayName, BRAND_MANUFACTURER, BRAND_MODEL,
+                              serialNumber, FW_VERSION, apName)) {
+                LOG_ERROR("HomeKit init failed, will retry in 10s");
             }
         }
 
@@ -268,7 +272,7 @@ extern "C" void app_main(void)
         }
 
         // ── Push state to HomeKit (throttled internally) ─────────────────
-        if (homekitStarted) {
+        if (homekit_is_started()) {
             homekit_sync_thermostat(cn105);
             homekit_sync_fan(cn105);
             homekit_sync_switches(cn105);
@@ -364,7 +368,7 @@ extern "C" void app_main(void)
             if (espnowLink.pairingActive()) {
                 statusLED.setState(SLED_PAIR_LISTEN);
             } else if (webUIStarted) {
-                const CN105State &st = cn105.getState();
+                const CN105State st = cn105.getState();
                 if (st.hasError) {
                     statusLED.setState(SLED_ERROR_CODE);
                 } else if (!cn105.isConnected()) {

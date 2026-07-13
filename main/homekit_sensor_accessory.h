@@ -16,4 +16,10 @@ void homekit_sensor_begin(const char* serial, const char* fwRev);
 /// surfacing as "Not Responding" — when BLE is disabled or data is stale.
 void homekit_sensor_loop();
 
+/// Whether the Remote Sensor bridged accessory exists in the live HAP
+/// database this boot. Feeds the service-shape reconcile in homekit_setup —
+/// without it, a boot where the accessory silently disappears (BLE disabled,
+/// MAC cleared) would leave paired Home apps with a ghost tile forever.
+bool homekit_sensor_is_present();
+
 #endif // BLE_ENABLE

@@ -33,7 +33,6 @@ static hap_char_t *s_statusActive  = nullptr;
 // ── Sync state ──────────────────────────────────────────────────────────────
 static uint32_t s_lastSync = 0;
 static bool     s_wasDisconnected = true;
-static float    s_lastSentAutoTarget = 0.0f;
 
 // ── External controller reference ───────────────────────────────────────────
 extern CN105Controller *g_homekitCtrl;
@@ -91,7 +90,14 @@ static uint8_t deriveCurrentState(const CN105State &s) {
                 if (s.autoSubMode == CN105_AUTOSUB_COOL) return 2;
                 if (s.roomTemp < s.targetTemp - 0.5f) return 1;
                 if (s.roomTemp > s.targetTemp + 0.5f) return 2;
-                return 1;
+                // Ambiguous (room ~= setpoint, no autoSubMode): guess by which
+                // half of the AUTO band the room sits in — near the heating
+                // threshold the unit was almost certainly heating, and vice versa.
+                {
+                    float bandMid = (settings.get().heatingThreshold +
+                                     settings.get().coolingThreshold) * 0.5f;
+                    return (s.roomTemp <= bandMid) ? 1 : 2;
+                }
             default: return 0;
         }
     }
@@ -107,14 +113,27 @@ static uint8_t deriveCurrentState(const CN105State &s) {
 // The unit's reported autoSubMode is intentionally NOT used to pick the side: it
 // lags and can latch to a stale side (e.g. left on HEAT after the room warmed past
 // `cool`), which made AUTO send the heating threshold while the room was already hot.
-static float resolveAutoTarget(const CN105State &s) {
+//
+// resendDeadband is how far the unit's reported setpoint may drift from the
+// resolved target before the sync loop corrects it. The comparison runs on
+// cn105.quantizeSetpoint(setpoint) — the value the unit will actually report
+// back — so quantization can never look like drift and the band edges use a
+// tight sub-grid 0.25 C. Inside the band the setpoint merely shadows the
+// room to keep the unit idle, so a coarse 1.0 C deadband avoids re-sending
+// a SET for every 0.5 C step of the room sensor.
+struct AutoTarget {
+    float setpoint;
+    float resendDeadband;
+};
+
+static AutoTarget resolveAutoTarget(const CN105State &s) {
     float heat = settings.get().heatingThreshold;
     float cool = settings.get().coolingThreshold;
     float room = s.roomTemp;
 
-    if (room < heat) return heat;   // below band -> heat toward heating threshold
-    if (room > cool) return cool;   // above band -> cool toward cooling threshold
-    return room;                    // inside band -> setpoint == room -> unit idles
+    if (room < heat) return {heat, 0.25f};  // below band -> heat toward heating threshold
+    if (room > cool) return {cool, 0.25f};  // above band -> cool toward cooling threshold
+    return {room, 1.0f};                    // inside band -> setpoint == room -> unit idles
 }
 
 // ── Write callback ──────────────────────────────────────────────────────────
@@ -132,6 +151,21 @@ static int thermostat_write_cb(hap_write_data_t write_data[], int count,
         // ConfiguredName (Home app rename) doesn't touch the heat pump —
         // accept it even when CN105 is down.
         if (!strcmp(uuid, HAP_CHAR_UUID_CONFIGURED_NAME)) {
+            hap_char_update_val(w->hc, &w->val);
+            *(w->status) = HAP_STATUS_SUCCESS;
+            continue;
+        }
+
+        // Display units don't touch the heat pump either. Persisted to the
+        // same setting the web UI's C/F toggle uses, so both stay in step
+        // (the sync loop pushes web-side changes back to this char).
+        if (!strcmp(uuid, HAP_CHAR_UUID_TEMPERATURE_DISPLAY_UNITS)) {
+            bool useF = (w->val.u == 1);
+            if (settings.get().useFahrenheit != useF) {
+                settings.get().useFahrenheit = useF;
+                settings.save();
+                LOG_INFO("[HK:Thermo] HomeKit -> display units: %s", useF ? "F" : "C");
+            }
             hap_char_update_val(w->hc, &w->val);
             *(w->status) = HAP_STATUS_SUCCESS;
             continue;
@@ -218,10 +252,6 @@ static int thermostat_write_cb(hap_write_data_t write_data[], int count,
             LOG_INFO("[HK:Thermo] HomeKit -> cooling threshold: %.1f C (heating: %.1f C)", cool, heat);
             *(w->status) = HAP_STATUS_SUCCESS;
 
-        } else if (!strcmp(uuid, HAP_CHAR_UUID_TEMPERATURE_DISPLAY_UNITS)) {
-            hap_char_update_val(w->hc, &w->val);
-            *(w->status) = HAP_STATUS_SUCCESS;
-
         } else {
             *(w->status) = HAP_STATUS_RES_ABSENT;
         }
@@ -238,7 +268,9 @@ static int thermostat_write_cb(hap_write_data_t write_data[], int count,
 void homekit_create_thermostat(hap_acc_t *acc)
 {
     // Create thermostat service with mandatory characteristics
-    hap_serv_t *serv = hap_serv_thermostat_create(0, 0, 20.0f, 22.0f, 0);
+    // (display units seeded from the persisted web-UI C/F setting)
+    hap_serv_t *serv = hap_serv_thermostat_create(
+        0, 0, 20.0f, 22.0f, settings.get().useFahrenheit ? 1 : 0);
     if (!serv) {
         LOG_ERROR("[HK:Thermo] Failed to create thermostat service");
         return;
@@ -410,17 +442,20 @@ void homekit_sync_thermostat(CN105Controller &cn105)
         }
     }
 
-    // Active-side tracking for dual setpoint AUTO
-    uint8_t hkTarget = cn105ToHKTargetState(s.power, s.mode);
-    if (hkTarget == 3) {  // AUTO mode
-        float autoTarget = resolveAutoTarget(s);
-        if (fabsf(autoTarget - s_lastSentAutoTarget) > 0.1f) {
-            LOG_INFO("[HK:Thermo] AUTO target %.1fC (room %.1f heat %.1f cool %.1f autoSub=%d)",
-                     autoTarget, s.roomTemp, settings.get().heatingThreshold,
-                     settings.get().coolingThreshold, s.autoSubMode);
-            cn105.setTargetTemp(autoTarget);
+    // Dual-setpoint AUTO: drive the unit's single setpoint from the two
+    // HomeKit thresholds. The resolved target is compared against the
+    // *effective* setpoint (wanted value during the grace window, heat-pump-
+    // confirmed after), so a lost SET, an IR-remote change, or a setpoint
+    // left over from another mode all self-correct on a later pass — there
+    // is deliberately no "last sent" shadow state to go stale.
+    if (s.power && s.mode == CN105_MODE_AUTO) {
+        AutoTarget want = resolveAutoTarget(s);
+        if (fabsf(cn105.quantizeSetpoint(want.setpoint) - s.targetTemp) > want.resendDeadband) {
+            LOG_INFO("[HK:Thermo] AUTO target %.1fC (unit at %.1f, room %.1f, heat %.1f, cool %.1f)",
+                     want.setpoint, s.targetTemp, s.roomTemp,
+                     settings.get().heatingThreshold, settings.get().coolingThreshold);
+            cn105.setTargetTemp(want.setpoint);
             cn105.sendPendingChanges();
-            s_lastSentAutoTarget = autoTarget;
         }
     }
 
@@ -439,6 +474,17 @@ void homekit_sync_thermostat(CN105Controller &cn105)
         if (forceSync || !cur || fabsf(cur->f - cool) > 0.1f) {
             hap_val_t v = { .f = cool };
             hap_char_update_val(s_coolThresh, &v);
+        }
+    }
+
+    // Display units follow the web UI's C/F setting (writes from the Home app
+    // update the same setting — see thermostat_write_cb)
+    if (s_tempUnits) {
+        uint8_t units = settings.get().useFahrenheit ? 1 : 0;
+        const hap_val_t *cur = hap_char_get_val(s_tempUnits);
+        if (forceSync || !cur || cur->u != units) {
+            hap_val_t v = { .u = units };
+            hap_char_update_val(s_tempUnits, &v);
         }
     }
 }

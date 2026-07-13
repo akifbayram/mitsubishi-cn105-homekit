@@ -321,8 +321,13 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
 
     } else if (strcmp(cmd, "hkReset") == 0) {
         LOG_WARN("HomeKit pairing reset requested");
-        sendWsText(httpd_req_to_sockfd(req), "{\"type\":\"info\",\"msg\":\"Removing HomeKit pairings...\"}");
-        homekit_reset_pairings();
+        if (homekit_reset_pairings()) {
+            // Success path reboots shortly after (SDK behavior)
+            sendWsText(httpd_req_to_sockfd(req), "{\"type\":\"info\",\"msg\":\"Removing HomeKit pairings...\"}");
+        } else {
+            sendWsText(httpd_req_to_sockfd(req),
+                       "{\"type\":\"error\",\"msg\":\"HomeKit is not running - nothing to reset\"}");
+        }
 
     } else if (strcmp(cmd, "forgetRemote") == 0) {
         LOG_WARN("ESP-NOW remote forget requested");
@@ -522,6 +527,11 @@ void WebUI::pushState() {
             espnowLink.pairResult());
     }
 
+    // Before HomeKit has started, its fields are placeholders — neutralize
+    // them here so clients don't need started-ness special cases: boot mask
+    // mirrors the current mask (nothing pending a restart), setup code/URI
+    // are empty. hkReady itself still drives the panel's placeholder state.
+    bool hkReady = homekit_is_started();
     int hkControllers = homekit_get_controller_count();
 
     jsonAppend(buf, sizeof(buf), &n,
@@ -531,6 +541,7 @@ void WebUI::pushState() {
         ",\"vaneConfig\":%d"
         ",\"modeMask\":%d"
         ",\"modeMaskBoot\":%d"
+        ",\"hkReady\":%s"
         ",\"hkPaired\":%s"
         ",\"hkControllers\":%d"
         ",\"hkStatus\":\"%s\""
@@ -541,12 +552,13 @@ void WebUI::pushState() {
         cfg.useFahrenheit ? "F" : "C",
         (int)cfg.vaneConfig,
         (int)cfg.modeMask,
-        (int)homekit_get_boot_mode_mask(),
-        hkControllers > 0 ? "true" : "false",
+        (int)(hkReady ? homekit_get_boot_mode_mask() : cfg.modeMask),
+        hkReady ? "true" : "false",
+        (hkReady && hkControllers > 0) ? "true" : "false",
         hkControllers,
         homekit_get_status_string(),
-        homekit_get_setup_code(),
-        homekit_get_setup_payload()
+        hkReady ? homekit_get_setup_code() : "",
+        hkReady ? homekit_get_setup_payload() : ""
     );
 
 #ifdef BLE_ENABLE

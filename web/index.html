@@ -262,6 +262,9 @@ input[type=range].slim::-moz-range-thumb{width:22px;height:22px;}
 .hk-qr canvas{width:100%;height:100%;image-rendering:pixelated;}
 .hk-code{font-size:25px;font-weight:600;color:var(--text);letter-spacing:1px;margin-top:5px;}
 .hk-hint{font-size:12px;color:var(--text2);margin-top:7px;line-height:1.4;}
+#hkPairedRow{display:none;align-items:center;gap:12px;}
+#hkPairedRow.on{display:flex;}
+#hkPairedRow.on+#hkPairing{margin-top:14px;}
 
 /* ===== Wi-Fi network list ===== */
 .wifi-scan-hdr{display:flex;align-items:center;justify-content:space-between;margin:14px 0 9px;}
@@ -301,7 +304,7 @@ input[type=range].slim::-moz-range-thumb{width:22px;height:22px;}
 .save-btn,.btn-primary{background:var(--accent);color:#fff;}
 .btn-secondary{background:var(--surface2);color:var(--accent);}
 .btn-danger{background:var(--surface2);color:var(--red);}
-.save-btn[disabled],.btn-secondary[disabled],.btn-primary[disabled]{opacity:.4;cursor:default;}
+.save-btn[disabled],.btn-secondary[disabled],.btn-primary[disabled],.btn-danger[disabled]{opacity:.4;cursor:default;}
 .save-btn.scanning{opacity:.7;cursor:default;}
 .btn-row{display:flex;gap:9px;}
 .btn-row>*{flex:1;min-width:0;}
@@ -599,22 +602,31 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   <h2 class="group-label">HomeKit<span class="section-summary"><span class="status-dot idle" id="hkDot"></span><span class="summary-text" id="hkStatusLabel">—</span></span></h2>
   <div class="card" id="homekitBody">
     <div id="hkBanner" class="ble-banner info hidden" style="margin-bottom:14px"></div>
-    <div class="hk-hero">
-      <div class="hk-qr"><canvas id="qrCanvas" width="200" height="200" role="img" aria-label="HomeKit pairing QR code"></canvas></div>
-      <div style="flex:1;min-width:0">
-        <span class="card-label">Setup Code</span>
-        <div class="hk-code mono" id="hkSetupCode">--</div>
-        <div class="hk-hint">Scan in the Home app, or enter this code to pair.</div>
-        <div class="hk-hint" style="margin-top:6px"><span id="hkControllers">--</span></div>
+    <!-- Paired: compact summary (a paired accessory can't add a second home
+         via QR, so the pairing hero collapses behind the toggle) -->
+    <div id="hkPairedRow">
+      <span class="icon-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg></span>
+      <div class="stack-tight" style="flex:1;min-width:0">
+        <div class="t">Paired with Apple Home</div>
+        <div class="b" id="hkControllers">--</div>
+      </div>
+      <button class="btn-secondary grow0" id="hkShowSetupBtn">Show Setup Code</button>
+    </div>
+    <div id="hkPairing">
+      <div class="hk-hero">
+        <div class="hk-qr"><canvas id="qrCanvas" width="200" height="200" role="img" aria-label="HomeKit pairing QR code"></canvas></div>
+        <div style="flex:1;min-width:0">
+          <span class="card-label">Setup Code</span>
+          <div class="hk-code mono" id="hkSetupCode">--</div>
+          <div class="hk-hint">Scan in the Home app, or enter this code to pair.</div>
+        </div>
+      </div>
+      <div class="btn-row" id="hkButtons" style="display:none;margin-top:14px">
+        <a id="hkSetupLink" href="com.apple.home://" class="btn-primary" style="text-decoration:none">Open Home App</a>
+        <button id="hkCopyBtn" class="btn-secondary grow0" onclick="copySetupCode()">Copy</button>
       </div>
     </div>
-    <div class="btn-row" id="hkButtons" style="display:none;margin-top:14px">
-      <a id="hkSetupLink" href="com.apple.home://" class="btn-primary" style="text-decoration:none">Open Home App</a>
-      <button id="hkCopyBtn" class="btn-secondary grow0" onclick="copySetupCode()">Copy</button>
-    </div>
-    <button class="btn-danger" style="margin-top:10px" onclick="resetHomeKit()">Reset HomeKit Pairing</button>
-    <span class="hidden" id="hkStatusText"></span>
-    <span class="hidden"><span class="status-dot idle" id="hkDotBody"></span></span>
+    <button class="btn-danger" id="hkResetBtn" style="margin-top:10px" onclick="resetHomeKit()">Reset HomeKit Pairing</button>
   </div>
 
   <!-- ===== DISPLAY LINK ===== -->
@@ -849,10 +861,18 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   var dualTemp=$('dualTemp'), sliderRow=$('sliderRow');
   var heatSlider=$('heatSlider'), coolSlider=$('coolSlider');
   var dualLocked=false;
-  var hkDot=$('hkDot'), hkDotBody=$('hkDotBody'), hkStatusText=$('hkStatusText');
+  var hkDot=$('hkDot');
   var hkControllersEl=$('hkControllers'), hkSetupCodeEl=$('hkSetupCode');
   var qrCanvas=$('qrCanvas');
   var lastQRURI='';
+  var hkPairedNow=false;      // last pushed paired state
+  var hkSetupExpanded=false;  // "Show Setup Code" toggle while paired
+  // Single renderer for the pairing hero's collapsed/expanded state — used by
+  // both the state push and the toggle button so the two can't drift.
+  function renderHkSetupToggle(){
+    $('hkPairing').style.display=(hkPairedNow&&!hkSetupExpanded)?'none':'';
+    $('hkShowSetupBtn').textContent=hkSetupExpanded?'Hide Setup Code':'Show Setup Code';
+  }
 
   // ── Segment indicator positioning ──────────────────────────────────────────
   function updateSegBg(grpId){
@@ -1628,29 +1648,42 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     if(s.hkPaired!=null){
       var hkLbl=$('hkStatusLabel');
       var hkBnr=$('hkBanner');
-      if(s.hkPaired){
+      var hkReady=s.hkReady===true;
+      hkPairedNow=hkReady&&s.hkPaired;
+      if(!hkReady){
+        // HAP server not running yet (no Wi-Fi / AP mode): nothing here is
+        // actionable, so show a neutral placeholder.
+        hkDot.className='status-dot idle';
+        hkLbl.textContent='Starting';
+        hkLbl.style.color='var(--text3)';
+        hkBnr.className='ble-banner muted';
+        hkBnr.textContent='HomeKit starts after the device connects to Wi-Fi.';
+        hkBnr.style.display='flex';
+      }else if(hkPairedNow){
         hkDot.className='status-dot active';
-        hkDotBody.className='status-dot active';
-        hkLbl.textContent='Paired';
+        hkLbl.textContent=s.hkStatus==='Connected'?'Connected':'Paired';
         hkLbl.style.color='var(--green)';
         hkBnr.style.display='none';
       }else{
         hkDot.className='status-dot warning';
-        hkDotBody.className='status-dot warning';
-        hkLbl.textContent='Not Paired';
+        hkLbl.textContent=s.hkStatus==='Pairing'?'Pairing…':'Not Paired';
         hkLbl.style.color='var(--orange)';
         hkBnr.className='ble-banner info';
         hkBnr.textContent='Scan the QR code or enter the setup code in the Home app to pair';
         hkBnr.style.display='flex';
       }
-      hkStatusText.textContent=s.hkStatus||'--';
-      hkControllersEl.textContent=s.hkControllers!=null?s.hkControllers+' paired':'--';
+      if(!hkPairedNow)hkSetupExpanded=false;
+      $('hkPairedRow').classList.toggle('on',hkPairedNow);
+      renderHkSetupToggle();
+      var nCtl=s.hkControllers;
+      hkControllersEl.textContent=nCtl==null?'--':nCtl+(nCtl===1?' controller':' controllers');
       hkSetupCodeEl.textContent=s.hkSetupCode||'--';
+      $('hkResetBtn').disabled=!hkReady;
       if(s.hkSetupURI&&s.hkSetupURI!==lastQRURI){
         lastQRURI=s.hkSetupURI;
         renderQR(s.hkSetupURI,qrCanvas);
-        $('hkButtons').style.display='flex';
       }
+      $('hkButtons').style.display=lastQRURI?'flex':'none';
     }
 
     // ── ESP-NOW remote (Dial) status ──────────────────────────────────────
@@ -2356,6 +2389,15 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     }
   };
 
+  document.getElementById('hkShowSetupBtn').addEventListener('click',function(){
+    hkSetupExpanded=!hkSetupExpanded;
+    renderHkSetupToggle();
+  });
+  // The com.apple.home:// deep link only resolves on Apple platforms
+  if(!/iPhone|iPad|iPod|Macintosh/.test(navigator.userAgent)){
+    $('hkSetupLink').style.display='none';
+  }
+
   document.getElementById('forgetRemoteBtn').addEventListener('click',function(){
     if(confirm('Forget the paired Link? The device will restart.')){
       send({cmd:'forgetRemote'});
@@ -2385,7 +2427,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     var code=$('hkSetupCode').textContent;
     if(!code||code==='--')return;
     var btn=$('hkCopyBtn');
-    copyText(code);
+    copyText(code.replace(/-/g,''));  // Home app manual entry wants bare digits
     btn.textContent='Copied!';
     setTimeout(function(){btn.textContent='Copy'},1500);
   };

@@ -85,46 +85,72 @@ static void homekit_set_setup_id(const char* setupId)
     }
 }
 
-// ── HAP config-number (c#) bump on capability-mask change ───────────────────
+// ── HAP config-number (c#) reconcile on service-shape change ────────────────
 // The HAP config number tells paired Home apps their cached accessory
 // database (services/characteristics) is stale and must be re-fetched. The
 // SDK only auto-bumps it in hap_add_bridged_accessory()/hap_remove_
-// bridged_accessory() (adding/removing a whole bridged accessory) — it has no
-// idea that our Dry/Fan switches and thermostat valid-values change shape
-// based on `modeMask` on the SAME accessory. So we track the mask the HAP
-// database was last built with ourselves, in a dedicated NVS namespace (not
-// DeviceSettings — this is HomeKit-internal bookkeeping, not a user setting),
-// and bump c# by hand via hap_update_config_number() when it changes.
-static void homekit_bump_config_number_if_services_changed(uint8_t currentMask)
+// bridged_accessory() while running — it has no idea that the database can
+// differ ACROSS BOOTS: our Dry/Fan switches and thermostat valid-values
+// change with `modeMask`, and the Remote Sensor bridged accessory is simply
+// never created when BLE is off or the sensor MAC was cleared. So we track a
+// "service shape" byte the HAP database was last built with ourselves, in a
+// dedicated NVS namespace (not DeviceSettings — this is HomeKit-internal
+// bookkeeping, not a user setting), and bump c# by hand via
+// hap_update_config_number() when it changes.
+//
+// Shape byte: bits 0-4 = the boot-time mode capability mask (MODE_CAP_*),
+// bit 7 = Remote Sensor accessory present.
+static constexpr uint8_t SHAPE_SENSOR_PRESENT = 0x80;
+
+static bool s_started = false;   // hap_start() has succeeded
+
+static uint8_t s_bootModeMask = MODE_CAP_ALL;
+
+static uint8_t current_service_shape(void)
 {
+    uint8_t shape = s_bootModeMask;
+#ifdef BLE_ENABLE
+    if (homekit_sensor_is_present()) shape |= SHAPE_SENSOR_PRESENT;
+#endif
+    return shape;
+}
+
+void homekit_reconcile_service_shape(void)
+{
+    if (!s_started) return;   // DB shape is meaningless before hap_start()
+
     nvs_handle_t h;
     esp_err_t err = nvs_open("hk-meta", NVS_READWRITE, &h);
     if (err != ESP_OK) {
         LOG_ERROR("[HK] hk-meta nvs_open failed: %s", esp_err_to_name(err));
         return;
     }
-
-    uint8_t storedMask = 0;
-    err = nvs_get_u8(h, "svcMask", &storedMask);
-    // ESP_ERR_NVS_NOT_FOUND = first boot after this feature was added (or
-    // first-ever boot): the HAP database matches whatever a paired controller
-    // last saw (older firmware always built the fixed all-modes DB, and
-    // modeMask defaults to MODE_CAP_ALL), so there's nothing to reconcile —
+    uint8_t shape = current_service_shape();
+    uint8_t storedShape = 0;
+    err = nvs_get_u8(h, "svcShape", &storedShape);
+    // ESP_ERR_NVS_NOT_FOUND = first boot with this feature (or first-ever
+    // boot): the live database is by definition what a paired controller
+    // last saw (or nobody is paired yet), so there's nothing to reconcile —
     // just start tracking from here, without bumping.
     bool store = (err == ESP_ERR_NVS_NOT_FOUND);
-    if (err == ESP_OK && storedMask != currentMask) {
-        LOG_INFO("[HK] Service set changed (mask 0x%02X -> 0x%02X) — bumping config number",
-                 storedMask, currentMask);
-        int ret = hap_update_config_number();
-        if (ret != HAP_SUCCESS) {
-            LOG_ERROR("[HK] hap_update_config_number failed: %d", ret);
+    if (err == ESP_OK && storedShape != shape) {
+        LOG_INFO("[HK] Service shape changed (0x%02X -> 0x%02X) — bumping config number",
+                 storedShape, shape);
+        if (hap_update_config_number() == HAP_SUCCESS) {
+            store = true;   // only record the new shape once the bump is queued
+        } else {
+            LOG_ERROR("[HK] hap_update_config_number failed — will retry next boot");
         }
-        store = true;
     } else if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
         LOG_ERROR("[HK] hk-meta nvs_get_u8 failed: %s", esp_err_to_name(err));
     }
     if (store) {
-        nvs_set_u8(h, "svcMask", currentMask);
+        // One-time migration: the key was renamed svcMask -> svcShape when
+        // the sensor-present bit was added; drop the old key alongside the
+        // first svcShape write so the two encodings can't be confused. (The
+        // rename re-baselines without a bump, same as a first-ever boot.)
+        nvs_erase_key(h, "svcMask");
+        nvs_set_u8(h, "svcShape", shape);
         nvs_commit(h);
     }
 
@@ -133,11 +159,14 @@ static void homekit_bump_config_number_if_services_changed(uint8_t currentMask)
 
 // ── Public API ──────────────────────────────────────────────────────────────
 
-static uint8_t s_bootModeMask = MODE_CAP_ALL;
-
 uint8_t homekit_get_boot_mode_mask(void)
 {
     return s_bootModeMask;
+}
+
+bool homekit_is_started(void)
+{
+    return s_started;
 }
 
 bool homekit_init(const char* name, const char* manufacturer,
@@ -262,11 +291,12 @@ bool homekit_init(const char* name, const char* manufacturer,
         return false;
     }
 
-    // hap_start() succeeded: the accessory DB (services shaped by
-    // s_bootModeMask) is now what's live. Reconcile against what it was last
-    // built with and bump c# if the capability mask — and therefore the
-    // service set — changed since the last successful start.
-    homekit_bump_config_number_if_services_changed(s_bootModeMask);
+    // hap_start() succeeded: the accessory DB (mode-gated services + sensor
+    // accessory) is now what's live. Reconcile against the shape it was last
+    // built with and bump c# if the service set changed since the last
+    // successful start.
+    s_started = true;
+    homekit_reconcile_service_shape();
 
     // Override the hardcoded "MyHost" mDNS hostname from esp-homekit-sdk
     // with our unique per-device hostname (e.g. "Serin-AB12")
@@ -352,10 +382,13 @@ int homekit_get_controller_count(void)
     return hap_get_paired_controller_count();
 }
 
-void homekit_reset_pairings(void)
+bool homekit_reset_pairings(void)
 {
     LOG_WARN("[HK] Resetting all pairings");
-    hap_reset_pairings();
+    // Fails when the HAP event loop isn't running yet (HomeKit never started,
+    // e.g. still in AP mode) — the caller must surface that, since on success
+    // the SDK erases the pairings and reboots the device.
+    return hap_reset_pairings() == HAP_SUCCESS;
 }
 
 const char* homekit_get_status_string(void)

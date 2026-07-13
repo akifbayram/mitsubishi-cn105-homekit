@@ -170,6 +170,13 @@ struct WantedSettings {
 };
 
 // ── CN105 Controller Class ──────────────────────────────────────────────────
+// Threading contract: the CN105 task (startTask) owns the UART and all
+// protocol state. Other tasks (HomeKit callbacks, web server, main loop) may
+// call the const getters and the command methods below — commands only stage
+// intent under a spinlock; the actual SET packet is transmitted by the CN105
+// task from loop(), between poll cycles. This keeps a single UART writer and
+// guarantees a SET can never land mid-poll-cycle (the heat pump silently
+// drops those).
 class CN105Controller {
 public:
     CN105Controller();
@@ -194,21 +201,21 @@ public:
     /// no response has ever been received.
     uint32_t getLastResponseAge() const;
 
-    /// Get the current state (read-only — actual heat pump values)
-    const CN105State& getState() const { return _state; }
+    /// Get the current state (actual heat pump values, no grace-window
+    /// masking). Locked snapshot; safe to call from any task. Use
+    /// getEffectiveState() for anything user-facing.
+    CN105State getState() const;
 
     /// Get effective state — substitutes wanted values during grace window.
     /// Use this instead of getState() for UI/HomeKit sync to prevent flicker.
+    /// Safe to call from any task.
     CN105State getEffectiveState() const;
 
-    /// Get wanted settings (for grace window substitution)
-    const WantedSettings& getWanted() const { return _wanted; }
-
-    /// Check if a field is in grace window (wanted value should be used)
-    /// Returns true if the field has a pending/recently-sent wanted value
-    bool isFieldInGrace(bool hasField) const;
-
-    /// ── Commands ────────────────────────────────────────────────────────────
+    /// ── Commands (safe to call from any task) ───────────────────────────────
+    /// Each setX() stages one field of a batch; sendPendingChanges() commits
+    /// the batch for transmission by the CN105 task. Nothing is sent until
+    /// sendPendingChanges() is called, so a multi-field batch (e.g. power +
+    /// mode from a HomeKit write) always goes out as a single SET packet.
     void setPower(bool on);
     void setMode(uint8_t mode);
     void setTargetTemp(float tempC);
@@ -216,7 +223,8 @@ public:
     void setVane(uint8_t position);
     void setWideVane(uint8_t position);
 
-    /// Send all pending changes in a single set packet
+    /// Commit the staged batch. The CN105 task transmits it from loop() as
+    /// soon as no poll cycle is active (typically within ~100 ms).
     void sendPendingChanges();
 
     /// Feed an external room temperature to the heat pump (0x07 packet),
@@ -233,6 +241,15 @@ public:
     /// encoding. Public so feeders can compare what the HP will actually see
     /// (e.g. the BLE keepalive's change detection).
     static float quantizeRemoteTemp(float tempC);
+
+    /// The clamp + rounding the SET path applies to a target temperature —
+    /// i.e. the setpoint the heat pump will report back after accepting it.
+    /// Public for the same reason as quantizeRemoteTemp(): callers that
+    /// compare a desired setpoint against the reported one (the HomeKit AUTO
+    /// logic) use this instead of hard-coding encoding knowledge. Depends on
+    /// the detected tempMode (0.5°C grid vs legacy whole degrees); the latch
+    /// is a single bool, safe to read from any task.
+    float quantizeSetpoint(float tempC) const;
 
     static uint8_t calcChecksum(const uint8_t *pkt, uint8_t len);
     static void    buildHeader(uint8_t *buf, uint8_t pktType, uint8_t dataLen);
@@ -275,18 +292,32 @@ private:
     uint8_t  _pollPhase       = 0;   // index into pollTypes[] within a cycle
     bool     _awaitingResponse = false; // waiting for response to current request
 
-    // ── Pending set command ─────────────────────────────────────────────────
-    uint8_t  _setFlags1       = 0;    // SET pkt[6]: power/mode/temp/fan/vane
-    uint8_t  _setFlags2       = 0;    // SET pkt[7]: wide vane
-    bool     _pendingPower    = false;
-    uint8_t  _pendingMode     = 0;
-    float    _pendingTemp     = 0;
-    uint8_t  _pendingFan      = 0;
-    uint8_t  _pendingVane     = 0;
-    uint8_t  _pendingWideVane = 0;
+    // ── Staged set command (cross-task mailbox) ─────────────────────────────
+    // Producers (any task) stage fields via setX() and commit with
+    // sendPendingChanges(); the CN105 task snapshots-and-clears in loop() and
+    // transmits from the snapshot. All access under _mux.
+    struct PendingCommand {
+        uint8_t flags1   = 0;    // SET pkt[6]: power/mode/temp/fan/vane
+        uint8_t flags2   = 0;    // SET pkt[7]: wide vane
+        bool    power    = false;
+        uint8_t mode     = 0;
+        float   temp     = 0;
+        uint8_t fan      = 0;
+        uint8_t vane     = 0;
+        uint8_t wideVane = 0;
+    };
+    PendingCommand _staged;
+    bool           _sendRequested = false;  // set by sendPendingChanges(), cleared by loop()
 
     // ── Wanted settings (anti-flicker) ───────────────────────────────────────
     WantedSettings _wanted;
+
+    // One rule for all cross-task protocol state: _staged/_sendRequested,
+    // _wanted, _pendingRemoteTemp*, _state, and _lastSuccessfulResponse are
+    // only touched under this lock — writers (the CN105 task) and readers
+    // alike. Held only for short copies/flag flips — never across UART I/O
+    // or logging.
+    mutable portMUX_TYPE _mux = portMUX_INITIALIZER_UNLOCKED;
 
     // ── Runtime-configurable timing ─────────────────────────────────────────
     uint32_t _updateInterval = CN105_UPDATE_INTERVAL;
@@ -310,9 +341,9 @@ private:
     // ── Internal methods ────────────────────────────────────────────────────
     void sendConnectPacket();
     void sendInfoRequest(uint8_t infoType);
-    void sendSetPacket();
+    void sendSetPacket(const PendingCommand &cmd);
     void processPacket(const uint8_t *pkt, uint8_t len);
     void handleInfoResponse(const uint8_t *data, uint8_t dataLen);
     void readSerial();
-    void sendRemoteTempPacket();
+    void sendRemoteTempPacket(float tempC);
 };

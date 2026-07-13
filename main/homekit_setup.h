@@ -31,15 +31,27 @@ const char* homekit_get_setup_code(void);
 /// Get the number of paired controllers.
 int homekit_get_controller_count(void);
 
-/// Remove all HomeKit pairings and reboot.
-void homekit_reset_pairings(void);
+/// Remove all HomeKit pairings and reboot. Returns false when HomeKit isn't
+/// running (nothing was reset); on success the device reboots shortly after.
+bool homekit_reset_pairings(void);
 
 /// Get a human-readable status string reflecting the current HAP state.
 const char* homekit_get_status_string(void);
 
+/// True once homekit_init() has fully succeeded (HAP server running).
+bool homekit_is_started(void);
+
 // Mode capability mask the HAP accessory database was built with at boot.
 // Differs from settings.get().modeMask after a web-UI change until restart.
 uint8_t homekit_get_boot_mode_mask(void);
+
+/// Reconcile the live HAP service shape (mode-gated services + Remote Sensor
+/// accessory presence) against the shape recorded in NVS, bumping the HAP
+/// config number on mismatch so paired Home apps refresh their cached
+/// accessory database. Runs after hap_start(); call again whenever the shape
+/// changes at runtime (e.g. the sensor accessory is created). No-op before
+/// HomeKit has started.
+void homekit_reconcile_service_shape(void);
 
 #ifdef __cplusplus
 }
