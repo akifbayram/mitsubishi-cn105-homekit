@@ -1,5 +1,5 @@
 #pragma once
-// SwitchBot / Govee / PVVX / BTHome BLE advertisement decoders.
+// SwitchBot / Govee / PVVX / ATC1441 / BTHome BLE advertisement decoders.
 //
 // Split out of ble_sensor.cpp so it compiles standalone (see test/ble_decoders/).
 // Pure logic — no NimBLE/FreeRTOS/ESP dependencies. Consumed by the scan
@@ -47,19 +47,22 @@ static bool decodeGoveeCombined(const uint8_t* data, uint8_t offset, SensorReadi
     return true;
 }
 
-// Govee H5072/H5075 — 3-byte combined temp+hum encoding
+// Govee H5072/H5075 — 3-byte combined temp+hum encoding. Real H5075 frames are
+// 8 bytes incl company id (trailer byte, per govee-ble); older firmware sends 7.
 // Manufacturer data 0xEC88: [0-1]=company ID, [2]=padding, [3-5]=combined, [6]=battery|error
 static bool decodeGoveeV3(const uint8_t* mfr, uint8_t len, SensorReading& out) {
-    if (len < 7 || (mfr[6] & 0x80)) return false;
+    if ((len != 7 && len != 8) || (mfr[6] & 0x80)) return false;
     if (!decodeGoveeCombined(mfr, 3, out)) return false;
     out.batt = (int8_t)(mfr[6] & 0x7F);
     return true;
 }
 
-// Govee H5074/H5051/H5052/H5071 — little-endian temp/hum
+// Govee H5074/H5051/H5052/H5071 — little-endian temp/hum. Frames are 9 bytes
+// incl company id for H5074, 11 for H5051 (per govee-ble); the >=9 floor is
+// what separates this family from the 7-8 byte V3 frames.
 // Manufacturer data 0xEC88: [0-1]=company ID, [2]=reserved, [3-4]=temp LE, [5-6]=hum LE, [7]=battery
 static bool decodeGoveeV2(const uint8_t* mfr, uint8_t len, SensorReading& out) {
-    if (len < 8) return false;
+    if (len < 9) return false;
     int16_t rawTemp = (int16_t)(mfr[3] | (mfr[4] << 8));
     uint16_t rawHum = (uint16_t)(mfr[5] | (mfr[6] << 8));
     float temp = (float)rawTemp / 100.0f;
@@ -67,7 +70,7 @@ static bool decodeGoveeV2(const uint8_t* mfr, uint8_t len, SensorReading& out) {
     if (!validTemp(temp) || !validHum(hum)) return false;
     out.temp = temp;
     out.hum = hum;
-    if (len >= 8 && validBatt((int8_t)mfr[7])) out.batt = (int8_t)mfr[7];
+    if (validBatt((int8_t)mfr[7])) out.batt = (int8_t)mfr[7];
     return true;
 }
 
@@ -80,10 +83,11 @@ static bool decodeGoveeV1(const uint8_t* mfr, uint8_t len, SensorReading& out) {
     return true;
 }
 
-// Xiaomi LYWSD03MMC / CGG1 with PVVX custom firmware
-// Service data UUID 0x181A: [0-5]=MAC, [6-7]=temp LE, [8-9]=hum LE, ..., [12]=battery
+// Xiaomi LYWSD03MMC / CGG1 with PVVX firmware in its "custom" format (15 bytes,
+// little-endian). Service data UUID 0x181A: [0-5]=MAC, [6-7]=temp LE (0.01 C),
+// [8-9]=hum LE (0.01 %), [10-11]=battery mV, [12]=battery %, [13]=counter, [14]=flags
 static bool decodePVVX(const uint8_t* svc, uint8_t len, SensorReading& out) {
-    if (len < 13) return false;
+    if (len < 15) return false;
     int16_t rawTemp = (int16_t)(svc[6] | (svc[7] << 8));
     uint16_t rawHum = (uint16_t)(svc[8] | (svc[9] << 8));
     float temp = (float)rawTemp / 100.0f;
@@ -95,44 +99,93 @@ static bool decodePVVX(const uint8_t* svc, uint8_t len, SensorReading& out) {
     return true;
 }
 
-// BTHome v2 — Service data UUID 0xFCD2, TLV objects
+// Xiaomi LYWSD03MMC with atc1441 firmware (or PVVX in "atc1441" format) —
+// exactly 13 bytes, multi-byte fields BIG-endian (unlike PVVX custom).
+// Service data UUID 0x181A: [0-5]=MAC, [6-7]=temp BE (0.1 C), [8]=humidity %,
+// [9]=battery %, [10-11]=battery mV, [12]=frame counter
+static bool decodeATC1441(const uint8_t* svc, uint8_t len, SensorReading& out) {
+    if (len != 13) return false;
+    float temp = (float)(int16_t)((svc[6] << 8) | svc[7]) / 10.0f;
+    float hum  = (float)svc[8];
+    if (!validTemp(temp) || !validHum(hum)) return false;
+    out.temp = temp;
+    out.hum  = hum;
+    if (validBatt((int8_t)svc[9])) out.batt = (int8_t)svc[9];
+    return true;
+}
+
+// Payload length of a BTHome v2 object, or -1 if unknown. Object ids are
+// ordered ascending in the advertisement (per spec), so nothing above 0x45 —
+// the last id we decode — can precede a temperature; the table stops there.
+// Unknown ids stop the walk: the format has no per-object length byte, so a
+// wrong guess would corrupt every field after it.
+static int bthomeObjLen(uint8_t id) {
+    if (id >= 0x0F && id <= 0x2D) return 1;   // binary sensors — all uint8
+    switch (id) {
+        case 0x00: case 0x01: case 0x09: case 0x2E: case 0x2F: case 0x3A:
+            return 1;   // packet id, battery, count8, humidity8, moisture8, button
+        case 0x02: case 0x03: case 0x06: case 0x07: case 0x08: case 0x0C:
+        case 0x0D: case 0x0E: case 0x12: case 0x13: case 0x14: case 0x3C:
+        case 0x3D: case 0x3F: case 0x40: case 0x41: case 0x43: case 0x44:
+        case 0x45:
+            return 2;   // 16-bit measurements/events
+        case 0x04: case 0x05: case 0x0A: case 0x0B: case 0x42:
+            return 3;   // 24-bit measurements
+        case 0x3E:
+            return 4;   // count32
+        default:
+            return -1;
+    }
+}
+
+// BTHome v2 — Service data UUID 0xFCD2: device-info byte, then TLV objects.
+// Decodes both temperature/humidity representations seen in the wild: 0x02/0x03
+// (0.01 precision — PVVX, b-parasite) and 0x45/0x2E (0.1 C / 1 % — Shelly BLU H&T).
 static bool decodeBTHome(const uint8_t* svc, uint8_t len, SensorReading& out) {
     if (len < 3) return false;
-    uint8_t devInfo = svc[0];
-    if ((devInfo & 0x01) != 0) return false;  // Encrypted
+    if ((svc[0] & 0x01) != 0) return false;   // encrypted — can't decode
+    if ((svc[0] >> 5) != 2) return false;     // not BTHome version 2
+    SensorReading r;
     bool gotTemp = false;
     uint8_t i = 1;
     while (i < len) {
         uint8_t objId = svc[i++];
-        if (i >= len) break;
+        int n = bthomeObjLen(objId);
+        if (n < 0 || i + n > len) break;      // unknown id / truncated — stop
         switch (objId) {
-            case 0x02: {
-                if (i + 2 > len) return gotTemp;
-                int16_t raw = (int16_t)(svc[i] | (svc[i+1] << 8));
-                float t = (float)raw / 100.0f;
-                if (validTemp(t)) { out.temp = t; gotTemp = true; }
-                i += 2;
+            case 0x01:                        // battery, uint8 %
+                if (validBatt((int8_t)svc[i])) r.batt = (int8_t)svc[i];
+                break;
+            case 0x02: {                      // temperature, sint16, 0.01 C
+                float t = (float)(int16_t)(svc[i] | (svc[i+1] << 8)) / 100.0f;
+                if (validTemp(t)) { r.temp = t; gotTemp = true; }
                 break;
             }
-            case 0x03: {
-                if (i + 2 > len) return gotTemp;
-                uint16_t raw = (uint16_t)(svc[i] | (svc[i+1] << 8));
-                float h = (float)raw / 100.0f;
-                if (validHum(h)) out.hum = h;
-                i += 2;
+            case 0x03: {                      // humidity, uint16, 0.01 %
+                float h = (float)(uint16_t)(svc[i] | (svc[i+1] << 8)) / 100.0f;
+                if (validHum(h)) r.hum = h;
                 break;
             }
-            case 0x01: {
-                if (i + 1 > len) return gotTemp;
-                if (validBatt((int8_t)svc[i])) out.batt = (int8_t)svc[i];
-                i += 1;
+            case 0x2E:                        // humidity, uint8, 1 %
+                if (validHum((float)svc[i])) r.hum = (float)svc[i];
+                break;
+            case 0x45: {                      // temperature, sint16, 0.1 C
+                float t = (float)(int16_t)(svc[i] | (svc[i+1] << 8)) / 10.0f;
+                if (validTemp(t)) { r.temp = t; gotTemp = true; }
                 break;
             }
-            default:
-                return gotTemp;
+            default:                          // recognised but unused — skip
+                break;
         }
+        i += (uint8_t)n;
     }
-    return gotTemp;
+    // A temperature is what identifies a usable sensor; publish only then, so a
+    // rejected frame can't leak partial values into the caller's reading.
+    if (!gotTemp) return false;
+    out.temp = r.temp;
+    if (!std::isnan(r.hum)) out.hum = r.hum;
+    if (r.batt >= 0)        out.batt = r.batt;
+    return true;
 }
 
 // SwitchBot Meter family — proprietary format, readings split across AD fields.
@@ -253,10 +306,10 @@ static DecodeResult tryDecode(uint8_t fieldType, const uint8_t* data, uint8_t le
     if (fieldType == 0xFF && len >= 2) {
         uint16_t cid = data[0] | (data[1] << 8);
         if (cid == 0xEC88) {
-            if (len <= 7 && decodeGoveeV3(data, len, out))
-                return {true, "Govee V3"};
-            if (len > 7 && decodeGoveeV2(data, len, out))
-                return {true, "Govee V2"};
+            // Each decoder gates on its own family's frame lengths (disjoint,
+            // see the decoders), so trying both in order is unambiguous
+            if (decodeGoveeV3(data, len, out)) return {true, "Govee V3"};
+            if (decodeGoveeV2(data, len, out)) return {true, "Govee V2"};
         }
         if (cid == 0x0001 && len >= 8 && decodeGoveeV1(data, len, out))
             return {true, "Govee V1"};
@@ -266,8 +319,12 @@ static DecodeResult tryDecode(uint8_t fieldType, const uint8_t* data, uint8_t le
     }
     if (fieldType == 0x16 && len >= 2) {
         uint16_t uuid = data[0] | (data[1] << 8);
-        if (uuid == 0x181A && len >= 15 && decodePVVX(data + 2, len - 2, out))
-            return {true, "PVVX"};
+        if (uuid == 0x181A) {
+            // Same UUID, two incompatible layouts — each decoder gates on its
+            // own frame length (atc1441 exactly 13, PVVX custom 15)
+            if (decodeATC1441(data + 2, len - 2, out)) return {true, "ATC1441"};
+            if (decodePVVX(data + 2, len - 2, out))    return {true, "PVVX"};
+        }
         if (uuid == 0xFCD2 && decodeBTHome(data + 2, len - 2, out))
             return {true, "BTHome v2"};
         if (uuid == 0xFD3D && decodeSwitchBotSvc(data + 2, len - 2, out))

@@ -219,10 +219,20 @@ public:
     /// Send all pending changes in a single set packet
     void sendPendingChanges();
 
-    /// Send external temperature to heat pump (0x07 packet).
-    /// tempC > 0: override internal thermistor. tempC == 0: revert to internal.
+    /// Feed an external room temperature to the heat pump (0x07 packet),
+    /// overriding its internal thermistor. Clamped to the protocol's encodable
+    /// range (see sendRemoteTempPacket). NAN is rejected.
     /// Uses deferred-send pattern — actual UART write happens between poll cycles.
     void sendRemoteTemperature(float tempC);
+
+    /// Hand temperature control back to the heat pump's internal thermistor
+    /// (0x07 packet with the disable marker). Same deferred-send pattern.
+    void clearRemoteTemperature();
+
+    /// The 0.5°C wire grid + clamp applied to remote temperatures before
+    /// encoding. Public so feeders can compare what the HP will actually see
+    /// (e.g. the BLE keepalive's change detection).
+    static float quantizeRemoteTemp(float tempC);
 
     static uint8_t calcChecksum(const uint8_t *pkt, uint8_t len);
     static void    buildHeader(uint8_t *buf, uint8_t pktType, uint8_t dataLen);
@@ -288,9 +298,9 @@ private:
     uint8_t  _errorPollFailures = 0;   // consecutive failures
     bool     _errorPollDisabled = false; // true after 3 failures
 
-    // ── Pending remote temperature ──────────────────────────────────────
+    // ── Pending remote temperature (NAN = clear/revert to internal) ─────
     bool     _pendingRemoteTemp  = false;
-    float    _pendingRemoteTempC = 0.0f;
+    float    _pendingRemoteTempC = 0.0f;   // only read while _pendingRemoteTemp is set
 
     // ── RX buffer ───────────────────────────────────────────────────────────
     uint8_t  _rxBuf[32];

@@ -8,10 +8,12 @@
 #include <cstring>
 #include "cn105_protocol.h"
 
-// ── Timing constants ────────────────────────────────────────────────────────
+// ── Tunables ────────────────────────────────────────────────────────────────
 constexpr uint32_t BLE_KEEPALIVE_MS     = 20000;  // Resend temp to HP every 20s
-constexpr int      BLE_MAX_DISCOVERED   = 10;     // Max devices in discovery scan
+constexpr uint32_t BLE_RESEND_MIN_MS    = 5000;   // Min gap between value-change resends
+constexpr int      BLE_MAX_DISCOVERED   = 20;     // Max devices in discovery scan
 constexpr uint32_t BLE_DISCOVERY_MS     = 10000;  // Discovery scan duration
+constexpr int8_t   BLE_BATT_LOW_PCT     = 20;     // Battery % at/below = low (HomeKit + web UI)
 
 // ── Discovery result ────────────────────────────────────────────────────────
 struct BleDiscoveredDevice {
@@ -36,10 +38,11 @@ namespace BleSensor {
     int      rssi();          // BLE advertisement RSSI
     bool     isActive();      // Has fresh data
     bool     isStale();       // No data for stale timeout
+    bool     isReverted();    // Stale watchdog handed the HP back to its internal sensor
     uint32_t lastUpdateAge(); // ms since last reading
     bool     isEnabled();     // Feed toggle (NVS)
-    void     setEnabled(bool enabled);
-    void     setAddr(const char* mac);   // Update MAC, restart scan
+    void     setEnabled(bool enabled);   // Persist feed toggle; loop() reacts to the change
+    void     setAddr(const char* mac);   // Update MAC ("" clears), reset readings, restart scan
     const char* getAddr();
     const char* sensorType();            // Detected sensor type (nullptr if unknown)
 
@@ -48,7 +51,9 @@ namespace BleSensor {
     bool isDiscovering();
     bool pollDiscoveryUpdate();          // Returns true when new devices found
     bool pollDiscoveryComplete();        // Returns true once when done
-    const BleDiscoveredDevice* discoveryResults(int& count);
+    // Copy current results into out (up to max). Returns count; *truncated set
+    // when more devices were seen than fit.
+    int  discoveryResults(BleDiscoveredDevice* out, int max, bool* truncated);
 }
 
 #endif // BLE_ENABLE

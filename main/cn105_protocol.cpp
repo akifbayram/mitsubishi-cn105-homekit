@@ -284,9 +284,27 @@ void CN105Controller::sendPendingChanges() {
 }
 
 void CN105Controller::sendRemoteTemperature(float tempC) {
+    if (std::isnan(tempC)) {
+        LOG_WARN("sendRemoteTemperature(NAN) ignored — use clearRemoteTemperature()");
+        return;
+    }
     _pendingRemoteTemp = true;
     _pendingRemoteTempC = tempC;
-    LOG_INFO("CMD: sendRemoteTemperature(%.1f%sC)", tempC, "\xC2\xB0");
+    LOG_DEBUG("CMD: sendRemoteTemperature(%.1f%sC)", tempC, "\xC2\xB0");
+}
+
+void CN105Controller::clearRemoteTemperature() {
+    _pendingRemoteTemp = true;
+    _pendingRemoteTempC = NAN;
+    LOG_DEBUG("CMD: clearRemoteTemperature()");
+}
+
+float CN105Controller::quantizeRemoteTemp(float tempC) {
+    // Round to the protocol's 0.5 C grid, then clamp to what the enhanced byte
+    // can encode: 0.0 C would produce 0x80, which doubles as the disable
+    // marker, so the floor is 0.5 C. An indoor unit only needs to know "colder
+    // than range" — the exact sub-zero value adds nothing.
+    return std::clamp(roundf(tempC * 2.0f) / 2.0f, 0.5f, 63.5f);
 }
 
 void CN105Controller::sendRemoteTempPacket() {
@@ -303,14 +321,18 @@ void CN105Controller::sendRemoteTempPacket() {
     pkt[5] = 0x07;
 
     float tempC = _pendingRemoteTempC;
-    if (tempC > 0.0f) {
-        float rounded = round(tempC * 2.0f) / 2.0f;
+    if (!std::isnan(tempC)) {
+        float rounded = quantizeRemoteTemp(tempC);
         pkt[6] = 0x01;
-        pkt[7] = (uint8_t)(3 + ((rounded - 10.0f) * 2.0f));
+        // The legacy byte underflows below 8.5 C; clamp so legacy-tempMode
+        // units read 8.5 C instead of a wrapped garbage value.
+        pkt[7] = (uint8_t)std::max(3.0f + (rounded - 10.0f) * 2.0f, 0.0f);
         pkt[8] = (uint8_t)(rounded * 2.0f + 128.0f);
+        LOG_INFO("Remote temp SET (%.1f%sC)", rounded, "\xC2\xB0");
     } else {
         pkt[6] = 0x00;
         pkt[8] = 0x80;
+        LOG_INFO("Remote temp CLEARED — internal thermistor active");
     }
 
     pkt[21] = calcChecksum(pkt, 21);
@@ -319,7 +341,6 @@ void CN105Controller::sendRemoteTempPacket() {
         LOG_DEBUG("TX REMOTE_TEMP (%d bytes): %s", 22, hex);
     }
     _uart->write(pkt, 22);
-    LOG_INFO("Remote temp %s (%.1f%sC)", tempC > 0.0f ? "SET" : "REVERTED", tempC, "\xC2\xB0");
 }
 
 // ════════════════════════════════════════════════════════════════════════════

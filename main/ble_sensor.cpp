@@ -21,7 +21,16 @@
 
 static const char *TAG = "ble";
 
-// ── Static state (thread-safe via spinlock) ─────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════════════
+// State
+//
+// Three tasks touch this module: the NimBLE host task (scan callback), the
+// httpd task (web UI setters), and the main task (loop()). Shared multi-byte
+// state lives under s_mux; cross-task flags are std::atomic; everything else is
+// main-task-only and marked as such.
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ── Latest reading (guarded by s_mux) ───────────────────────────────────────
 static portMUX_TYPE s_mux = portMUX_INITIALIZER_UNLOCKED;
 static float    s_temperature = NAN;
 static float    s_humidity    = NAN;
@@ -29,15 +38,29 @@ static int8_t   s_battery     = -1;
 static int      s_rssi        = 0;
 static uint32_t s_lastUpdate  = 0;
 
-// ── Scanner state ───────────────────────────────────────────────────────────
-static uint8_t  s_targetAddr[6] = {0};
-static char     s_targetLower[18] = {0};  // lowercase "aa:bb:cc:dd:ee:ff"
+// ── Scan target (guarded by s_mux — setAddr rewrites it from the httpd task
+//    while the scan callback compares against it) ────────────────────────────
+static char     s_targetMac[18] = {0};   // "AA:BB:CC:DD:EE:FF"; compared case-insensitively
 static bool     s_addrValid     = false;
-static bool     s_scanning      = false;
-static bool     s_staleReverted = false;
+
+// ── Scan duty profiles ──────────────────────────────────────────────────────
+// SEARCH runs a 90 % window to find the sensor fast; TRACK drops to 30 % once
+// readings flow — advertisements arrive every ~2 s, so a 60 ms window every
+// 200 ms still catches one within a few seconds while easing WiFi coexistence
+// and power. Both stay ACTIVE scans: Govee V2 readings ride in the SCAN_RSP.
+enum class ScanProfile : uint8_t { SEARCH, TRACK };
+struct ScanParams { uint16_t itvl, window; };            // units of 0.625 ms
+static constexpr ScanParams SCAN_PARAMS[] = {
+    {160, 144},   // SEARCH: 100 ms interval / 90 ms window
+    {320,  96},   // TRACK:  200 ms interval / 60 ms window
+};
+static std::atomic<ScanProfile> s_scanProfile{ScanProfile::SEARCH};
+
+static std::atomic<bool> s_scanning{false};
+static std::atomic<bool> s_staleReverted{false};
 
 static std::atomic<bool> s_nimbleInitialized{false};
-static std::atomic<bool> s_pendingInit{false};
+static std::atomic<bool> s_pendingSync{false};    // Enable toggle changed — (re)sync NimBLE state
 static std::atomic<bool> s_pendingClear{false};   // Deferred clearRemoteTemperature
 // Deferred scan stop+restart, drained in loop(). Set from the httpd task instead
 // of calling stopScan()/startScan() directly: ble_gap_disc_cancel() can block on
@@ -45,19 +68,23 @@ static std::atomic<bool> s_pendingClear{false};   // Deferred clearRemoteTempera
 static std::atomic<bool> s_pendingRestart{false};
 static std::atomic<bool> s_bleEnabled{false};      // Mirror of settings.bleEnabled
 
-// ── Keepalive state ─────────────────────────────────────────────────────────
+// ── Keepalive state (main task only) ────────────────────────────────────────
 static uint32_t s_lastKeepalive = 0;
+static float    s_lastSentTemp  = NAN;   // last value sent to the HP
+static bool     s_prevFeed      = false; // feed-toggle edge detection
 
-// ── Detected type ───────────────────────────────────────────────────────────
-static const char* s_sensorType = nullptr;
-static bool s_typeLogged = false;
+// ── Detected type (logged once per configured sensor, on nullptr → value) ───
+static std::atomic<const char*> s_sensorType{nullptr};
 
 // ── Discovery state ─────────────────────────────────────────────────────────
+// Results are written from the NimBLE host task and read from the main task —
+// array, count, truncated flag, and pushed-count all live under s_mux.
 static BleDiscoveredDevice s_discovered[BLE_MAX_DISCOVERED];
-static int      s_discoveryCount    = 0;
-static bool     s_discoveryMode     = false;
-static uint32_t s_discoveryStart    = 0;
-static int      s_lastPushedCount   = 0;
+static int      s_discoveryCount     = 0;
+static bool     s_discoveryTruncated = false;
+static int      s_lastPushedCount    = 0;
+static std::atomic<bool>     s_discoveryMode{false};
+static std::atomic<uint32_t> s_discoveryStart{0};
 
 // ── Spinlock helper ─────────────────────────────────────────────────────────
 template<typename T>
@@ -68,57 +95,57 @@ static T readLocked(const T& var) {
     return v;
 }
 
-// ── MAC address parser: "AA:BB:CC:DD:EE:FF" → uint8_t[6] ───────────────────
-static bool parseMac(const char* str, uint8_t out[6]) {
+static bool targetConfigured() {
+    return readLocked(s_addrValid);
+}
+
+// A scan should be running whenever there's a target to track or a discovery
+// window open (callers also check NimBLE is up and BLE enabled)
+static bool wantScan() {
+    return targetConfigured() || s_discoveryMode.load();
+}
+
+// ── MAC format validator: "AA:BB:CC:DD:EE:FF" (any case) ───────────────────
+static bool validMac(const char* str) {
     if (!str || strlen(str) != 17) return false;
     unsigned int b[6];
-    if (sscanf(str, "%02x:%02x:%02x:%02x:%02x:%02x",
-               &b[0], &b[1], &b[2], &b[3], &b[4], &b[5]) != 6)
-        return false;
-    for (int i = 0; i < 6; i++) out[i] = (uint8_t)b[i];
-    return true;
+    return sscanf(str, "%02x:%02x:%02x:%02x:%02x:%02x",
+                  &b[0], &b[1], &b[2], &b[3], &b[4], &b[5]) == 6;
 }
 
-// ── Update lowercase MAC string for address comparison ──────────────────────
-static void updateTargetLower() {
-    snprintf(s_targetLower, sizeof(s_targetLower), "%02x:%02x:%02x:%02x:%02x:%02x",
-             s_targetAddr[0], s_targetAddr[1], s_targetAddr[2],
-             s_targetAddr[3], s_targetAddr[4], s_targetAddr[5]);
-}
-
-// Add a discovered device to the results array (deduplicate by MAC)
+// Record a discovered device (deduplicated by MAC). Runs in the NimBLE scan
+// callback; the results array is shared with the main task, so the search and
+// insert happen under s_mux (string prep stays outside the lock).
 static void addDiscoveryResult(const char* addrLower, const char* name,
                                const char* type, int rssi, float temp, float hum) {
-    // Convert to uppercase for display
-    char addr[18];
-    strncpy(addr, addrLower, 17);
-    addr[17] = '\0';
-    for (int j = 0; j < 17; j++) {
-        if (addr[j] >= 'a' && addr[j] <= 'f') addr[j] -= 32;
+    BleDiscoveredDevice d;
+    snprintf(d.addr, sizeof(d.addr), "%s", addrLower);
+    for (int j = 0; j < 17 && d.addr[j]; j++) {
+        if (d.addr[j] >= 'a' && d.addr[j] <= 'f') d.addr[j] -= 32;  // uppercase for display
     }
+    snprintf(d.name, sizeof(d.name), "%s", name ? name : "");
+    d.type        = type;
+    d.rssi        = rssi;
+    d.temperature = temp;
+    d.humidity    = hum;
 
+    taskENTER_CRITICAL(&s_mux);
     // Already seen — refresh RSSI and the latest valid reading
     for (int j = 0; j < s_discoveryCount; j++) {
-        if (strcmp(s_discovered[j].addr, addr) == 0) {
+        if (strcmp(s_discovered[j].addr, d.addr) == 0) {
             s_discovered[j].rssi = rssi;
             if (!std::isnan(temp)) s_discovered[j].temperature = temp;
             if (!std::isnan(hum))  s_discovered[j].humidity    = hum;
+            taskEXIT_CRITICAL(&s_mux);
             return;
         }
     }
-
     // List only once a temperature decodes — a battery-only frame can't identify it
-    if (std::isnan(temp)) return;
-    if (s_discoveryCount < BLE_MAX_DISCOVERED) {
-        auto& d = s_discovered[s_discoveryCount];
-        snprintf(d.addr, sizeof(d.addr), "%s", addr);
-        snprintf(d.name, sizeof(d.name), "%s", name ? name : "");
-        d.type = type;
-        d.rssi = rssi;
-        d.temperature = temp;
-        d.humidity = hum;
-        s_discoveryCount++;
+    if (!std::isnan(temp)) {
+        if (s_discoveryCount < BLE_MAX_DISCOVERED) s_discovered[s_discoveryCount++] = d;
+        else s_discoveryTruncated = true;
     }
+    taskEXIT_CRITICAL(&s_mux);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -159,7 +186,7 @@ static int gap_event_cb(struct ble_gap_event *event, void *arg) {
 
         // Discovery mode: decode any sensor-type device for the results list so
         // the user can confirm the right device by its temperature/humidity
-        if (s_discoveryMode) {
+        if (s_discoveryMode.load()) {
             SensorReading r;
             const char* type = decodeAdvertisement(disc->data, disc->length_data, addrStr, r);
             if (type) {
@@ -169,32 +196,37 @@ static int gap_event_cb(struct ble_gap_event *event, void *arg) {
             }
         }
 
-        // MAC filter: only process the configured target sensor
-        if (!s_addrValid) return 0;
-        if (strcasecmp(addrStr, s_targetLower) != 0) return 0;
+        // MAC filter: only process the configured target sensor. Snapshot the
+        // target under the lock — setAddr rewrites it from the httpd task.
+        bool addrValid;
+        char target[18];
+        taskENTER_CRITICAL(&s_mux);
+        addrValid = s_addrValid;
+        memcpy(target, s_targetMac, sizeof(target));
+        taskEXIT_CRITICAL(&s_mux);
+        if (!addrValid || strcasecmp(addrStr, target) != 0) return 0;
 
         // Decode the live advertisement and publish the freshest reading
         SensorReading reading;
         const char* liveType = decodeAdvertisement(disc->data, disc->length_data, addrStr, reading);
         if (liveType) {
+            bool gotTemp = !std::isnan(reading.temp);
             taskENTER_CRITICAL(&s_mux);
-            if (!std::isnan(reading.temp)) {
-                s_temperature   = reading.temp;
+            if (gotTemp) {
+                s_temperature = reading.temp;
                 // Freshness follows the temperature: battery-only frames from
                 // split-field sensors (SwitchBot Pro family) must not keep the
                 // stale-revert watchdog from firing
-                s_lastUpdate    = uptime_ms();
-                s_staleReverted = false;
+                s_lastUpdate  = uptime_ms();
             }
             if (!std::isnan(reading.hum))  s_humidity = reading.hum;
             if (reading.batt >= 0)         s_battery  = reading.batt;
-            s_sensorType = liveType;
-            s_rssi       = disc->rssi;
+            s_rssi = disc->rssi;
             taskEXIT_CRITICAL(&s_mux);
 
-            if (!s_typeLogged) {
+            if (gotTemp) s_staleReverted.store(false);
+            if (s_sensorType.exchange(liveType) == nullptr) {
                 LOG_INFO("Detected sensor type: %s", liveType);
-                s_typeLogged = true;
             }
         }
 
@@ -203,8 +235,8 @@ static int gap_event_cb(struct ble_gap_event *event, void *arg) {
 
     if (event->type == BLE_GAP_EVENT_DISC_COMPLETE) {
         // Scan ended (duration expired or was cancelled) — restart if needed
-        s_scanning = false;
-        if (s_nimbleInitialized.load() && s_bleEnabled.load() && (s_addrValid || s_discoveryMode)) {
+        s_scanning.store(false);
+        if (s_nimbleInitialized.load() && s_bleEnabled.load() && wantScan()) {
             startScan();
             LOG_DEBUG("Scan restarted");
         }
@@ -220,18 +252,19 @@ static int gap_event_cb(struct ble_gap_event *event, void *arg) {
 
 static void startScan() {
     if (!s_nimbleInitialized.load()) return;
-    if (s_scanning) return;
+    if (s_scanning.load()) return;
 
     struct ble_gap_disc_params params;
     memset(&params, 0, sizeof(params));
     params.passive = 0;              // Active scan — required for sensors that put data in SCAN_RSP (e.g. Govee V2)
     params.filter_duplicates = 0;    // We want repeated advertisements
-    params.itvl = 160;              // 100ms in 0.625ms units
-    params.window = 144;            // 90ms in 0.625ms units (90% duty cycle)
+    const ScanParams& sp = SCAN_PARAMS[(uint8_t)s_scanProfile.load()];
+    params.itvl   = sp.itvl;
+    params.window = sp.window;
 
     int rc = ble_gap_disc(BLE_OWN_ADDR_PUBLIC, BLE_HS_FOREVER, &params, gap_event_cb, NULL);
     if (rc == 0) {
-        s_scanning = true;
+        s_scanning.store(true);
     } else {
         LOG_WARN("ble_gap_disc failed: %d", rc);
     }
@@ -239,13 +272,13 @@ static void startScan() {
 
 static void stopScan() {
     if (!s_nimbleInitialized.load()) return;
-    if (!s_scanning) return;
+    if (!s_scanning.load()) return;
     ble_gap_disc_cancel();
-    s_scanning = false;
+    s_scanning.store(false);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// Public API
+// NimBLE lifecycle
 // ══════════════════════════════════════════════════════════════════════════════
 
 static bool initNimble() {
@@ -276,16 +309,40 @@ static bool initNimble() {
     return true;
 }
 
+// Canonical IDF teardown: nimble_port_stop() makes nimble_port_run() return, at
+// which point the host task frees itself via nimble_port_freertos_deinit() (see
+// the task body in initNimble); nimble_port_deinit() then releases the stack and
+// controller RAM (~40-60 KB). Main task only.
+static void deinitNimble() {
+    if (!s_nimbleInitialized.load()) return;
+    stopScan();
+    if (nimble_port_stop() != 0) {
+        LOG_WARN("nimble_port_stop failed — keeping BLE stack resident");
+        return;
+    }
+    nimble_port_deinit();
+    s_nimbleInitialized.store(false);
+    LOG_INFO("NimBLE deinitialized. Heap: %u free", esp_get_free_heap_size());
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Public API
+// ══════════════════════════════════════════════════════════════════════════════
+
 void BleSensor::begin() {
     const char* addr = settings.get().bleSensorAddr;
-    if (strlen(addr) > 0 && parseMac(addr, s_targetAddr)) {
+    if (validMac(addr)) {
+        taskENTER_CRITICAL(&s_mux);
+        memcpy(s_targetMac, addr, 17);   // validMac guarantees exactly 17 chars
+        s_targetMac[17] = '\0';
         s_addrValid = true;
-        updateTargetLower();
+        taskEXIT_CRITICAL(&s_mux);
         LOG_INFO("Target sensor: %s", addr);
     } else {
         LOG_INFO("No sensor MAC configured — scanning deferred");
     }
 
+    s_prevFeed = settings.get().bleFeedEnabled;
     s_bleEnabled.store(settings.get().bleEnabled);
 
     if (!s_bleEnabled.load()) {
@@ -295,7 +352,7 @@ void BleSensor::begin() {
 
     if (!initNimble()) return;
 
-    if (s_addrValid) {
+    if (targetConfigured()) {
         startScan();
         LOG_INFO("Scanning started (auto-detect all sensor types)");
     }
@@ -306,22 +363,14 @@ void BleSensor::setBleEnabled(bool on) {
     settings.get().bleEnabled = on;
     settings.save();
 
-    if (on) {
-        if (s_nimbleInitialized.load()) {
-            s_pendingRestart.store(true);
-        } else {
-            // Defer NimBLE init to main loop (avoid blocking httpd task)
-            s_pendingInit.store(true);
-        }
-        LOG_INFO("BLE enabled");
-    } else {
-        // s_bleEnabled is already false, so the restart handler stops without re-scanning
-        s_pendingRestart.store(true);
-        // Defer clearRemoteTemperature to loop() (needs cn105 reference)
+    // NimBLE bring-up/teardown is deferred to loop() — neither may run on the
+    // httpd task. Disabling also hands the HP back to its internal sensor.
+    s_pendingSync.store(true);
+    if (!on) {
         s_pendingClear.store(true);
-        s_staleReverted = false;
-        LOG_INFO("BLE disabled");
+        s_staleReverted.store(false);
     }
+    LOG_INFO("BLE %s", on ? "enabled" : "disabled");
 }
 
 bool BleSensor::isBleEnabled() {
@@ -329,58 +378,83 @@ bool BleSensor::isBleEnabled() {
 }
 
 void BleSensor::loop(CN105Controller &cn105) {
-    // Handle deferred NimBLE init (requested from httpd task)
-    if (s_pendingInit.exchange(false)) {
-        if (!s_nimbleInitialized.load()) {
-            if (initNimble() && s_addrValid) {
-                startScan();
-                LOG_INFO("Scanning started (deferred init)");
-            }
-        } else if (s_addrValid) {
-            startScan();
+    // NimBLE follows the enable toggle (flipped from the httpd task): bring the
+    // stack up or tear it down here, then let the restart drain below own the
+    // scan start. Reading s_bleEnabled at drain time makes a rapid toggle
+    // converge on the final state.
+    if (s_pendingSync.exchange(false)) {
+        if (s_bleEnabled.load()) {
+            if (initNimble()) s_pendingRestart.store(true);
+        } else {
+            deinitNimble();
         }
     }
 
-    // Handle deferred clearRemoteTemperature (BLE was disabled from httpd task)
-    if (s_pendingClear.exchange(false)) {
-        if (cn105.isConnected()) {
-            cn105.sendRemoteTemperature(0);
-            LOG_INFO("Cleared remote temp — HP reverts to internal sensor");
-        }
-    }
-
-    // Handle deferred scan restart (sensor address changed from httpd task)
-    if (s_pendingRestart.exchange(false)) {
-        stopScan();
-        // Match the DISC_COMPLETE handler: discovery scans run without a
-        // configured address (that's how new sensors get found).
-        if (s_bleEnabled.load() && (s_addrValid || s_discoveryMode)) {
-            startScan();
-            LOG_INFO("Scan restarted for new sensor address");
-        }
+    // Deferred clearRemoteTemperature — kept pending until the CN105 link can
+    // actually carry it, so a clear issued while disconnected isn't lost
+    if (s_pendingClear.load() && cn105.isConnected()) {
+        cn105.clearRemoteTemperature();
+        s_pendingClear.store(false);
+        s_lastSentTemp = NAN;
     }
 
     if (!s_bleEnabled.load()) return;
 
     uint32_t now = uptime_ms();
-    float temp = readLocked(s_temperature);
-    uint32_t lastUpd = readLocked(s_lastUpdate);
+    float temp;
+    uint32_t lastUpd;
+    taskENTER_CRITICAL(&s_mux);
+    temp    = s_temperature;
+    lastUpd = s_lastUpdate;
+    taskEXIT_CRITICAL(&s_mux);
 
     uint32_t staleMs = (uint32_t)settings.get().bleStaleTimeoutS * 1000;
     bool active = lastUpd > 0 && (now - lastUpd) < staleMs;
-    bool stale = lastUpd > 0 && !active;
-    bool enabled = settings.get().bleFeedEnabled;
+    bool stale  = lastUpd > 0 && !active;
+    bool feed   = settings.get().bleFeedEnabled;
 
-    if (active && enabled && cn105.isConnected() && !std::isnan(temp) && (now - s_lastKeepalive >= BLE_KEEPALIVE_MS)) {
-        cn105.sendRemoteTemperature(temp);
-        s_lastKeepalive = now;
-        LOG_DEBUG("Keepalive sent: %.1f C", temp);
+    // Radio duty: hunt hard until readings flow, then back off (see ScanProfile)
+    ScanProfile want = (active && !s_discoveryMode.load()) ? ScanProfile::TRACK
+                                                           : ScanProfile::SEARCH;
+    if (s_scanProfile.exchange(want) != want) s_pendingRestart.store(true);
+
+    // Deferred scan stop+restart (enable, address change, profile switch, discovery)
+    if (s_pendingRestart.exchange(false)) {
+        stopScan();
+        if (wantScan()) startScan();
     }
 
-    if (stale && enabled && cn105.isConnected() && !s_staleReverted) {
-        cn105.sendRemoteTemperature(0);
-        s_staleReverted = true;
-        LOG_WARN("Sensor stale (%lus no data) — reverted to internal thermistor",
+    // Feed toggled from the web UI (httpd task): a falling edge hands the HP
+    // back to its internal sensor, a rising edge forces a prompt send below
+    if (feed != s_prevFeed) {
+        s_prevFeed      = feed;
+        s_lastKeepalive = 0;
+        s_lastSentTemp  = NAN;
+        if (!feed) s_pendingClear.store(true);
+    }
+
+    if (feed && active && cn105.isConnected() && !std::isnan(temp)) {
+        // Resend on the keepalive cadence, or as soon as the value the HP will
+        // actually see (quantizeRemoteTemp: 0.5 C grid + clamp) changes —
+        // rate-limited so a reading jittering across a grid boundary can't
+        // spam the UART
+        bool changed = std::isnan(s_lastSentTemp) ||
+                       CN105Controller::quantizeRemoteTemp(temp) !=
+                       CN105Controller::quantizeRemoteTemp(s_lastSentTemp);
+        uint32_t interval = changed ? BLE_RESEND_MIN_MS : BLE_KEEPALIVE_MS;
+        if (now - s_lastKeepalive >= interval) {
+            cn105.sendRemoteTemperature(temp);
+            s_lastKeepalive = now;
+            s_lastSentTemp  = temp;
+        }
+    }
+
+    // Stale watchdog — routes the revert through the s_pendingClear mailbox
+    // above, which owns the send, the retry-until-connected, and the
+    // s_lastSentTemp reset
+    if (feed && stale && !s_staleReverted.exchange(true)) {
+        s_pendingClear.store(true);
+        LOG_WARN("Sensor stale (%lus no data) — reverting to internal thermistor",
                  (unsigned long)((now - lastUpd) / 1000));
     }
 }
@@ -402,6 +476,10 @@ bool BleSensor::isStale() {
     return lu > 0 && (uptime_ms() - lu) >= staleMs;
 }
 
+bool BleSensor::isReverted() {
+    return s_staleReverted.load();
+}
+
 uint32_t BleSensor::lastUpdateAge() {
     uint32_t lu = readLocked(s_lastUpdate);
     if (lu == 0) return UINT32_MAX;
@@ -416,36 +494,53 @@ void BleSensor::setEnabled(bool enabled) {
     settings.get().bleFeedEnabled = enabled;
     settings.save();
     LOG_INFO("Feed %s", enabled ? "enabled" : "disabled");
+    // loop() reacts to the change: a falling edge clears the remote temp on the
+    // heat pump, a rising edge sends the current reading promptly
 }
 
 void BleSensor::setAddr(const char* mac) {
     if (!mac) return;
+    char* stored = settings.get().bleSensorAddr;
+    constexpr size_t storedSize = sizeof(settings.get().bleSensorAddr);
 
-    // Reset type detection for new sensor
-    s_sensorType = nullptr;
-    s_typeLogged = false;
+    // Unchanged (also "" == "") — keep detection state, no NVS wear, no restart
+    if (strcasecmp(mac, stored) == 0) return;
 
-    if (strlen(mac) == 0) {
-        s_addrValid = false;
-        memset(s_targetAddr, 0, 6);
-        memset(s_targetLower, 0, sizeof(s_targetLower));
-        strncpy(settings.get().bleSensorAddr, "", sizeof(settings.get().bleSensorAddr));
-        settings.save();
-        LOG_INFO("Sensor address cleared");
-        s_pendingRestart.store(true);
+    bool valid = strlen(mac) > 0;
+    if (valid && !validMac(mac)) {
+        LOG_WARN("Invalid MAC format: %s", mac);
         return;
     }
 
-    if (parseMac(mac, s_targetAddr)) {
-        s_addrValid = true;
-        updateTargetLower();
-        strncpy(settings.get().bleSensorAddr, mac, sizeof(settings.get().bleSensorAddr) - 1);
-        settings.get().bleSensorAddr[sizeof(settings.get().bleSensorAddr) - 1] = '\0';
-        settings.save();
+    // Different sensor: forget the old one's identity and readings in the same
+    // critical section as the target swap, so neither the feed nor the UI can
+    // keep presenting the old sensor's values as current
+    s_sensorType.store(nullptr);
+    taskENTER_CRITICAL(&s_mux);
+    memset(s_targetMac, 0, sizeof(s_targetMac));
+    if (valid) memcpy(s_targetMac, mac, 17);   // validMac guarantees exactly 17 chars
+    s_addrValid     = valid;
+    bool hadReading = s_lastUpdate != 0;
+    s_temperature   = NAN;
+    s_humidity      = NAN;
+    s_battery       = -1;
+    s_rssi          = 0;
+    s_lastUpdate    = 0;
+    taskEXIT_CRITICAL(&s_mux);
+    s_staleReverted.store(false);
+
+    // If the old reading may be live in the HP, hand it back to its internal
+    // thermistor now rather than after the stale timeout
+    if (hadReading && settings.get().bleFeedEnabled) s_pendingClear.store(true);
+
+    strncpy(stored, mac, storedSize - 1);
+    stored[storedSize - 1] = '\0';
+    settings.save();
+    s_pendingRestart.store(true);
+    if (valid) {
         LOG_INFO("Sensor address set: %s", mac);
-        s_pendingRestart.store(true);
     } else {
-        LOG_WARN("Invalid MAC format: %s", mac);
+        LOG_INFO("Sensor address cleared");
     }
 }
 
@@ -454,57 +549,67 @@ const char* BleSensor::getAddr() {
 }
 
 const char* BleSensor::sensorType() {
-    return s_sensorType;
+    return s_sensorType.load();
 }
 
 void BleSensor::startDiscovery() {
-    if (!s_bleEnabled.load() || !s_nimbleInitialized.load()) {
+    if (!s_bleEnabled.load()) {
         LOG_WARN("BLE discovery rejected — BLE not enabled");
         return;
     }
-    s_discoveryCount = 0;
-    s_lastPushedCount = 0;
-    s_discoveryMode = true;
-    s_discoveryStart = uptime_ms();
+    taskENTER_CRITICAL(&s_mux);
+    s_discoveryCount     = 0;
+    s_discoveryTruncated = false;
+    s_lastPushedCount    = 0;
+    taskEXIT_CRITICAL(&s_mux);
+    s_discoveryStart.store(uptime_ms());
+    s_discoveryMode.store(true);
 
-    if (!s_scanning) {
-        s_pendingRestart.store(true);
-    }
+    // The enable toggle may still have its NimBLE init queued (loop() drains it
+    // at 1 Hz) — queue again so a Scan tap right after enabling still works
+    if (!s_nimbleInitialized.load()) s_pendingSync.store(true);
+    s_pendingRestart.store(true);   // (re)start with the SEARCH profile
 
     LOG_INFO("Discovery scan started (%lums)", (unsigned long)BLE_DISCOVERY_MS);
 }
 
 bool BleSensor::isDiscovering() {
-    return s_discoveryMode;
+    return s_discoveryMode.load();
 }
 
 bool BleSensor::pollDiscoveryUpdate() {
-    if (!s_discoveryMode) return false;
-    if (s_discoveryCount > s_lastPushedCount) {
-        s_lastPushedCount = s_discoveryCount;
-        return true;
-    }
-    return false;
+    if (!s_discoveryMode.load()) return false;
+    taskENTER_CRITICAL(&s_mux);
+    bool fresh = s_discoveryCount > s_lastPushedCount;
+    if (fresh) s_lastPushedCount = s_discoveryCount;
+    taskEXIT_CRITICAL(&s_mux);
+    return fresh;
 }
 
 bool BleSensor::pollDiscoveryComplete() {
-    if (s_discoveryMode && uptime_ms() - s_discoveryStart >= BLE_DISCOVERY_MS) {
-        s_discoveryMode = false;
+    if (s_discoveryMode.load() &&
+        uptime_ms() - s_discoveryStart.load() >= BLE_DISCOVERY_MS) {
+        s_discoveryMode.store(false);
 
-        // Stop scanning if no target configured
-        if (!s_addrValid && s_scanning) {
+        // Stop scanning if no target configured; otherwise the next loop() pass
+        // restores the TRACK profile via the usual restart path
+        if (!targetConfigured() && s_scanning.load()) {
             stopScan();
         }
 
-        LOG_INFO("Discovery complete: %d sensor(s) found", s_discoveryCount);
+        LOG_INFO("Discovery complete: %d sensor(s) found", readLocked(s_discoveryCount));
         return true;
     }
     return false;
 }
 
-const BleDiscoveredDevice* BleSensor::discoveryResults(int& count) {
-    count = s_discoveryCount;
-    return s_discovered;
+int BleSensor::discoveryResults(BleDiscoveredDevice* out, int max, bool* truncated) {
+    taskENTER_CRITICAL(&s_mux);
+    int n = s_discoveryCount < max ? s_discoveryCount : max;
+    for (int i = 0; i < n; i++) out[i] = s_discovered[i];
+    if (truncated) *truncated = s_discoveryTruncated;
+    taskEXIT_CRITICAL(&s_mux);
+    return n;
 }
 
 #endif // BLE_ENABLE

@@ -236,8 +236,8 @@ input[type=range].slim::-moz-range-thumb{width:22px;height:22px;}
 .ble-banner.warn{background:color-mix(in srgb,var(--red) 14%,var(--surface2));color:var(--text);}
 .ble-banner.caution{background:color-mix(in srgb,var(--orange) 16%,var(--surface2));color:var(--text);}
 
-/* ===== BLE scan pick-list ===== */
-.ble-scan-item{display:flex;align-items:center;gap:11px;background:var(--surface2);border-radius:13px;padding:12px 13px;cursor:pointer;margin-bottom:8px;}
+/* ===== BLE scan pick-list (rows are real <button>s for keyboard access) ===== */
+.ble-scan-item{display:flex;align-items:center;gap:11px;background:var(--surface2);border-radius:13px;padding:12px 13px;cursor:pointer;margin-bottom:8px;width:100%;border:none;font:inherit;color:inherit;text-align:left;-webkit-appearance:none;appearance:none;}
 .ble-scan-item:active{background:var(--surface3);}
 .scan-info{flex:1;min-width:0;}
 .scan-type{font-size:14px;color:var(--text);font-weight:500;}
@@ -551,49 +551,47 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   <!-- Hidden until a state push carries bleEnabled: BLE_DISABLE builds never send it -->
   <h2 class="group-label" id="bleGroupLabel" style="display:none">Remote Sensor<span class="section-summary"><span class="status-dot idle" id="bleDot"></span><span class="summary-text" id="bleStatusLabel"></span></span></h2>
   <div class="card" id="bleCard" style="display:none">
-    <div id="bleBody">
-      <div id="bleBanner" class="ble-banner info hidden" style="margin-bottom:12px"></div>
-      <div class="status-grid cols3" id="bleStatusGrid">
-        <div class="status-item" id="bleTempRow"><span class="status-label">Temp</span><span id="bleTemp">--</span></div>
-        <div class="status-item" id="bleHumRow"><span class="status-label">Humidity</span><span id="bleHum">--</span></div>
-        <div class="status-item" id="bleBattRow"><span class="status-label">Battery</span><span id="bleBatt">--</span></div>
-        <div class="status-item"><span class="status-label">Signal</span><span id="bleRssiVal">--</span></div>
-        <div class="status-item" id="bleAgeItem"><span class="status-label">Updated</span><span id="bleAge">--</span></div>
-        <div class="status-item" id="bleSensorChip"><span class="status-label">Sensor</span><span id="bleSensorType">--</span></div>
-      </div>
-      <hr class="ble-sep" id="bleStatusSep">
+    <div id="bleBanner" class="ble-banner info hidden" style="margin-bottom:12px"></div>
+    <div class="status-grid cols3" id="bleStatusGrid">
+      <div class="status-item" id="bleTempRow"><span class="status-label">Temp</span><span id="bleTemp">--</span></div>
+      <div class="status-item" id="bleHumRow"><span class="status-label">Humidity</span><span id="bleHum">--</span></div>
+      <div class="status-item" id="bleBattRow"><span class="status-label">Battery</span><span id="bleBatt">--</span></div>
+      <div class="status-item"><span class="status-label">Signal</span><span id="bleRssiVal">--</span></div>
+      <div class="status-item" id="bleAgeItem"><span class="status-label">Updated</span><span id="bleAge">--</span></div>
+      <div class="status-item" id="bleSensorChip"><span class="status-label">Sensor</span><span id="bleSensorType">--</span></div>
+    </div>
+    <hr class="ble-sep" id="bleStatusSep">
 
-      <div class="inset-row" id="bleEnableRow" style="padding-left:0;padding-right:0;padding-top:0">
-        <div><div class="lbl">Enable Remote Sensor</div><div class="sub">Scans for a nearby BLE temperature sensor.</div></div>
-        <label class="ios-toggle">
-          <input type="checkbox" id="bleEnableToggle" onchange="toggleBleEnabled()" aria-label="Enable remote sensor">
-          <span class="ios-toggle-slider"></span>
-        </label>
-      </div>
-      <div class="inset-row" id="bleFeedRow" style="padding-left:0;padding-right:0">
-        <div><div class="lbl">Use as Room Temp</div><div class="sub" id="bleFeedHelp">Sends the reading to the heat pump as the room temperature.</div></div>
-        <label class="ios-toggle">
-          <input type="checkbox" id="bleFeedToggle" onchange="toggleBleFeed()" aria-label="Use remote sensor as room temperature">
-          <span class="ios-toggle-slider"></span>
-        </label>
-      </div>
-      <div class="inset-row" id="bleTimeoutRow" style="padding-left:0;padding-right:0;padding-bottom:0;border-bottom:none">
-        <div><div class="lbl">Sensor Timeout</div><div class="sub" id="bleTimeoutHelp">Falls back to the internal sensor if no reading arrives in time.</div></div>
-        <div class="num-chip"><input type="number" id="bleTimeoutInput" min="30" max="3600" step="10" aria-label="Sensor timeout in seconds"><span class="unit">sec</span></div>
-      </div>
+    <div class="inset-row" id="bleEnableRow" style="padding-left:0;padding-right:0;padding-top:0">
+      <div><div class="lbl">Enable Remote Sensor</div><div class="sub">Scans for a nearby BLE temperature sensor.</div></div>
+      <label class="ios-toggle">
+        <input type="checkbox" id="bleEnableToggle" onchange="toggleBleEnabled()" aria-label="Enable remote sensor">
+        <span class="ios-toggle-slider"></span>
+      </label>
+    </div>
+    <div class="inset-row" id="bleFeedRow" style="padding-left:0;padding-right:0">
+      <div><div class="lbl">Use as Room Temp</div><div class="sub" id="bleFeedHelp">Sends the reading to the heat pump as the room temperature.</div></div>
+      <label class="ios-toggle">
+        <input type="checkbox" id="bleFeedToggle" onchange="toggleBleFeed()" aria-label="Use remote sensor as room temperature">
+        <span class="ios-toggle-slider"></span>
+      </label>
+    </div>
+    <div class="inset-row" id="bleTimeoutRow" style="padding-left:0;padding-right:0;padding-bottom:0;border-bottom:none">
+      <div><div class="lbl">Sensor Timeout</div><div class="sub" id="bleTimeoutHelp">Falls back to the internal sensor if no reading arrives in time.</div></div>
+      <div class="num-chip"><input type="number" id="bleTimeoutInput" min="30" max="3600" step="10" aria-label="Sensor timeout in seconds"><span class="unit">sec</span></div>
+    </div>
 
-      <hr class="ble-sep" id="bleConfigSep">
-      <div id="bleConfigDiv">
-        <div class="card-label" style="margin-bottom:8px">Sensor MAC</div>
-        <div class="btn-row">
-          <input type="text" class="field mono" id="bleMacInput" placeholder="AA:BB:CC:DD:EE:FF" maxlength="17" spellcheck="false" autocomplete="off" aria-label="Sensor MAC address">
-          <button class="btn-primary grow0" id="bleScanBtn" onclick="startBleScan()">Scan</button>
-        </div>
-        <div class="ble-help">The Bluetooth address of the sensor to pair with.</div>
-        <div id="bleScanResults" style="display:none;margin-top:10px"></div>
-        <div id="bleToast" class="ble-banner info" style="display:none;margin-top:10px"></div>
-        <button class="btn-secondary" style="margin-top:10px" onclick="saveBleConfig()">Save Sensor</button>
+    <hr class="ble-sep" id="bleConfigSep">
+    <div id="bleConfigDiv">
+      <div class="card-label" style="margin-bottom:8px">Sensor MAC</div>
+      <div class="btn-row">
+        <input type="text" class="field mono" id="bleMacInput" placeholder="AA:BB:CC:DD:EE:FF" maxlength="17" spellcheck="false" autocomplete="off" aria-label="Sensor MAC address">
+        <button class="btn-primary grow0" id="bleScanBtn" onclick="startBleScan()">Scan</button>
       </div>
+      <div class="ble-help">The Bluetooth address of the sensor to pair with.</div>
+      <div id="bleScanResults" style="display:none;margin-top:10px"></div>
+      <div id="bleToast" class="ble-banner info" style="display:none;margin-top:10px"></div>
+      <button class="btn-secondary" style="margin-top:10px" onclick="saveBleConfig()">Save Sensor</button>
     </div>
   </div>
 
@@ -1482,7 +1480,6 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       var bleDot=$('bleDot');
       var banner=$('bleBanner');
       var statusLbl=$('bleStatusLabel');
-      var bleBody=$('bleBody');
       var waiting=!noMac&&!s.bleActive&&!s.bleStale;
       var stale=!!s.bleStale;
       var feedOff=!s.bleFeed;
@@ -1498,15 +1495,20 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       if(noMac){banner.className='ble-banner info';banner.textContent='Configure a sensor MAC address to begin';banner.style.display='flex'}
       else if(stale){
         var staleSec=Math.floor((s.bleStaleMs||0)/1000);
-        banner.className='ble-banner warn';banner.textContent='No update for '+staleSec+'s \u2014 reverted to internal sensor';banner.style.display='flex'
+        banner.className='ble-banner warn';
+        // bleReverted = the firmware's stale watchdog actually handed the HP
+        // back to its internal sensor (not inferred client-side)
+        banner.textContent='No update for '+staleSec+'s'+(s.bleReverted?' \u2014 reverted to internal sensor':'');
+        banner.style.display='flex'
       }
       else if(waiting){banner.className='ble-banner muted';banner.textContent='Scanning for sensor\u2026';banner.style.display='flex'}
       else if(s.bleActive&&feedOff){banner.className='ble-banner caution';banner.textContent='Not feeding temperature to heat pump';banner.style.display='flex'}
-      else if(s.bleBattery>=0&&s.bleBattery<=15){banner.className='ble-banner warn';banner.textContent='Sensor battery low ('+s.bleBattery+'%)';banner.style.display='flex'}
+      else if(s.bleBattLow){banner.className='ble-banner warn';banner.textContent='Sensor battery low ('+s.bleBattery+'%)';banner.style.display='flex'}
       else{banner.style.display='none'}
 
-      // Dim the readings while awaiting the first update (configured but no data yet)
-      bleBody.classList.toggle('ble-dimmed',waiting);
+      // Dim only the readings grid while awaiting the first update (configured
+      // but no data yet) — the controls below stay interactive and must look it
+      bleGrid.classList.toggle('ble-dimmed',waiting);
 
       // Temperature
       var tempStr=s.bleTemp!=null?fmtReadingTemp(s.bleTemp):'--';
@@ -1519,7 +1521,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       // Battery
       if(s.bleBattery>=0){
         $('bleBatt').textContent=s.bleBattery+'%';
-        $('bleBatt').style.color=s.bleBattery<=15?'var(--red)':s.bleBattery<=30?'var(--orange)':'';
+        $('bleBatt').style.color=s.bleBattLow?'var(--red)':s.bleBattery<=30?'var(--orange)':'';
       }else{$('bleBatt').textContent='--';$('bleBatt').style.color=''}
 
       // RSSI
@@ -1811,11 +1813,19 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
 
   window.saveBleConfig=function(){
     var mac=$('bleMacInput').value.trim().toUpperCase();
-    if(mac&&!/^([0-9A-F]{2}:){5}[0-9A-F]{2}$/.test(mac)){alert('Invalid MAC format');return}
+    if(mac&&!/^([0-9A-F]{2}:){5}[0-9A-F]{2}$/.test(mac)){showBleToast('Invalid MAC — use AA:BB:CC:DD:EE:FF',true);return}
     var t=parseInt($('bleTimeoutInput').value,10);
-    if(isNaN(t)||t<30||t>3600){alert('Timeout must be 30–3600 seconds');return}
+    if(isNaN(t)||t<30||t>3600){showBleToast('Timeout must be 30–3600 seconds',true);return}
     if(!send({cmd:'config',bleAddr:mac,bleTimeout:t})) showToast('Not connected — not saved',true);
   };
+  // Normalize the sensor MAC as it's typed or pasted: hex only, uppercase,
+  // a colon after every pair (so pasting "aabbccddeeff" just works)
+  $('bleMacInput').addEventListener('input',function(){
+    var hex=this.value.replace(/[^0-9a-fA-F]/g,'').toUpperCase().slice(0,12);
+    var parts=hex.match(/.{1,2}/g);
+    var v=parts?parts.join(':'):'';
+    if(v!==this.value)this.value=v;
+  });
   window.toggleBleEnabled=function(){
     if(!send({cmd:'config',bleEnabled:$('bleEnableToggle').checked})){
       $('bleEnableToggle').checked=!$('bleEnableToggle').checked;
@@ -1860,7 +1870,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     for(var i=0;i<msg.devices.length;i++){
       var d=msg.devices[i];
       var a=Math.abs(d.rssi);var str=a<=55?'4':a<=67?'3':a<=80?'2':'1';
-      var row=document.createElement('div');row.className='ble-scan-item';
+      var row=document.createElement('button');row.type='button';row.className='ble-scan-item';
       row.setAttribute('data-addr',d.addr);
       row.addEventListener('click',(function(addr){return function(){pickBleSensor(addr)}})(d.addr));
       var bars=document.createElement('span');bars.className='signal-bars';bars.setAttribute('data-strength',str);
@@ -1885,11 +1895,20 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       row.appendChild(bars);row.appendChild(info);row.appendChild(meta);
       el.appendChild(row);
     }
+    if(msg.truncated){
+      var more=document.createElement('div');
+      more.className='scan-msg';
+      more.textContent='More sensors in range — showing the first '+msg.devices.length;
+      el.appendChild(more);
+    }
     el.style.display='block';
   }
   var bleToastTimer=null;
-  function showBleToast(text){
+  // In-card toast (next to the MAC field) — deliberately not the global
+  // showToast(): sensor-config feedback belongs beside the input it refers to
+  function showBleToast(text,isErr){
     var t=$('bleToast');
+    t.className='ble-banner '+(isErr?'warn':'info');
     t.textContent=text;
     t.style.display='flex';
     if(bleToastTimer)clearTimeout(bleToastTimer);

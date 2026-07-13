@@ -87,27 +87,98 @@ static void test_switchbot_meter_single(void) {
 }
 
 // ── Govee V3 (0xEC88, combined @3), V2 (LE), V1 (0x0001, combined @4) ────────
+// 0xEC88 frame lengths (incl the 2-byte company id) tell the families apart,
+// per the govee-ble reference: H5072/H5075 = 8 (older firmware 7), H5074 = 9,
+// H5051 = 11.
 static void test_govee(void) {
-    // combined value 250500 (0x03d284) -> 25.0 C / 50.0 %
-    SensorReading v3; uint8_t g3[] = {0x08,0xff,0x88,0xec,0x00,0x03,0xd2,0x84,0x64};
+    // H5072/H5075: 8 bytes with a trailer byte; combined 250500 -> 25.0 C / 50.0 %
+    SensorReading v3; uint8_t g3[] = {0x09,0xff,0x88,0xec,0x00,0x03,0xd2,0x84,0x64,0x00};
     CHECK(isType(g3, sizeof g3, "Govee V3", v3) && feq(v3.temp,25.0f) && feq(v3.hum,50.0f) && v3.batt==100);
-    // V2 little-endian: 22.55 C / 45.10 %
-    SensorReading v2; uint8_t g2[] = {0x09,0xff,0x88,0xec,0x00,0xcf,0x08,0x9e,0x11,0x5a};
+    // Older H5072/H5075 firmware: same layout without the trailer (7 bytes)
+    SensorReading v3s; uint8_t g3s[] = {0x08,0xff,0x88,0xec,0x00,0x03,0xd2,0x84,0x64};
+    CHECK(isType(g3s, sizeof g3s, "Govee V3", v3s) && feq(v3s.temp,25.0f) && feq(v3s.hum,50.0f) && v3s.batt==100);
+    // Sign bit (0x800000) in the combined value: -10.1 C / 40.0 %
+    SensorReading v3n; uint8_t g3n[] = {0x09,0xff,0x88,0xec,0x00,0x81,0x8c,0x18,0x64,0x00};
+    CHECK(isType(g3n, sizeof g3n, "Govee V3", v3n) && feq(v3n.temp,-10.1f) && feq(v3n.hum,40.0f));
+    // H5074: 9 bytes, little-endian: 22.55 C / 45.10 %
+    SensorReading v2; uint8_t g2[] = {0x0a,0xff,0x88,0xec,0x00,0xcf,0x08,0x9e,0x11,0x5a,0x00};
     CHECK(isType(g2, sizeof g2, "Govee V2", v2) && feq(v2.temp,22.55f) && feq(v2.hum,45.10f) && v2.batt==90);
+    // H5051: 11 bytes, same layout with a longer tail
+    SensorReading v2l; uint8_t g2l[] = {0x0c,0xff,0x88,0xec,0x00,0xcf,0x08,0x9e,0x11,0x5a,0x00,0x00,0x00};
+    CHECK(isType(g2l, sizeof g2l, "Govee V2", v2l) && feq(v2l.temp,22.55f) && feq(v2l.hum,45.10f) && v2l.batt==90);
+    // An 8-byte frame is V3 by length; V2-shaped bytes must not decode as anything
+    SensorReading no; uint8_t g8[] = {0x09,0xff,0x88,0xec,0x00,0xcf,0x08,0x9e,0x11,0x5a};
+    CHECK(decodeAdvertisement(g8, sizeof g8, nullptr, no) == nullptr);
     // V1 (company 0x0001), combined @4
     SensorReading v1; uint8_t g1[] = {0x09,0xff,0x01,0x00,0x00,0x00,0x03,0xd2,0x84,0x64};
     CHECK(isType(g1, sizeof g1, "Govee V1", v1) && feq(v1.temp,25.0f) && feq(v1.hum,50.0f) && v1.batt==100);
 }
 
-// ── PVVX (0x181A) and BTHome v2 (0xFCD2) ────────────────────────────────────
-static void test_pvvx_bthome(void) {
-    // PVVX: temp 21.00, hum 55.00, batt 95
-    SensorReading p; uint8_t pv[] = {0x10,0x16,0x1a,0x18, 0xaa,0xbb,0xcc,0xdd,0xee,0xff,
-                                     0x34,0x08,0x7c,0x15,0x00,0x00,0x5f};
+// ── PVVX custom format (0x181A, 15 bytes, little-endian) ────────────────────
+static void test_pvvx(void) {
+    // Full frame: MAC, temp 21.00, hum 55.00, 2900 mV, batt 95, counter, flags
+    SensorReading p; uint8_t pv[] = {0x12,0x16,0x1a,0x18, 0xaa,0xbb,0xcc,0xdd,0xee,0xff,
+                                     0x34,0x08, 0x7c,0x15, 0x54,0x0b, 0x5f, 0x01, 0x04};
     CHECK(isType(pv, sizeof pv, "PVVX", p) && feq(p.temp,21.0f) && feq(p.hum,55.0f) && p.batt==95);
-    // BTHome v2: temp 23.45, hum 48.00, batt 88
-    SensorReading b; uint8_t bt[] = {0x0c,0x16,0xd2,0xfc, 0x40,0x02,0x29,0x09,0x03,0xc0,0x12,0x01,0x58};
+}
+
+// ── ATC1441 format (0x181A, 13 bytes, big-endian) ───────────────────────────
+static void test_atc1441(void) {
+    // 24.0 C / 45 % / batt 93 / 2900 mV / counter
+    SensorReading a; uint8_t at[] = {0x10,0x16,0x1a,0x18, 0xa4,0xc1,0x38,0xaa,0xbb,0xcc,
+                                     0x00,0xf0, 0x2d, 0x5d, 0x0b,0x54, 0x21};
+    CHECK(isType(at, sizeof at, "ATC1441", a) && feq(a.temp,24.0f) && feq(a.hum,45.0f) && a.batt==93);
+    // Temperature is signed: -8.3 C
+    SensorReading n; uint8_t ng[] = {0x10,0x16,0x1a,0x18, 0xa4,0xc1,0x38,0xaa,0xbb,0xcc,
+                                     0xff,0xad, 0x2d, 0x5d, 0x0b,0x54, 0x21};
+    CHECK(isType(ng, sizeof ng, "ATC1441", n) && feq(n.temp,-8.3f));
+    // Regression: 13-byte ATC frames used to reach the PVVX decoder, which could
+    // pass validation with garbage (25.6 C read byte-swapped as 0.01 C, hum and
+    // battery merged into 90.05 %). Must decode as ATC1441 with the true values.
+    SensorReading r; uint8_t rg[] = {0x10,0x16,0x1a,0x18, 0xa4,0xc1,0x38,0xaa,0xbb,0xcc,
+                                     0x01,0x00, 0x2d, 0x23, 0x0b,0x54, 0x21};
+    CHECK(isType(rg, sizeof rg, "ATC1441", r) && feq(r.temp,25.6f) && feq(r.hum,45.0f) && r.batt==35);
+    // A 14-byte 0x181A payload is neither ATC1441 (13) nor PVVX (15) — no decode
+    SensorReading x; uint8_t xx[] = {0x11,0x16,0x1a,0x18, 0xa4,0xc1,0x38,0xaa,0xbb,0xcc,
+                                     0x00,0xf0, 0x2d, 0x5d, 0x0b,0x54, 0x21, 0x00};
+    CHECK(decodeAdvertisement(xx, sizeof xx, nullptr, x) == nullptr);
+}
+
+// ── BTHome v2 (0xFCD2): object order, packet id, Shelly BLU H&T objects ─────
+static void test_bthome(void) {
+    // Spec-ordered frame (ids ascending): batt 88, temp 23.45, hum 48.00
+    SensorReading b; uint8_t bt[] = {0x0c,0x16,0xd2,0xfc, 0x40, 0x01,0x58, 0x02,0x29,0x09, 0x03,0xc0,0x12};
     CHECK(isType(bt, sizeof bt, "BTHome v2", b) && feq(b.temp,23.45f) && feq(b.hum,48.0f) && b.batt==88);
+    // Out-of-spec object order still tolerated (temp, hum, batt)
+    SensorReading o; uint8_t oo[] = {0x0c,0x16,0xd2,0xfc, 0x40, 0x02,0x29,0x09, 0x03,0xc0,0x12, 0x01,0x58};
+    CHECK(isType(oo, sizeof oo, "BTHome v2", o) && feq(o.temp,23.45f) && o.batt==88);
+    // Packet id (0x00) leads a spec-ordered payload — must be skipped, not abort
+    SensorReading p; uint8_t pid[] = {0x0e,0x16,0xd2,0xfc, 0x40, 0x00,0x0b, 0x01,0x58, 0x02,0x29,0x09, 0x03,0xc0,0x12};
+    CHECK(isType(pid, sizeof pid, "BTHome v2", p) && feq(p.temp,23.45f) && feq(p.hum,48.0f) && p.batt==88);
+    // Shelly BLU H&T shape: pid + battery + humidity (0x2E, 1 %) + temp (0x45, 0.1 C)
+    SensorReading s; uint8_t sh[] = {0x0d,0x16,0xd2,0xfc, 0x40, 0x00,0x4e, 0x01,0x64, 0x2e,0x2d, 0x45,0xea,0x00};
+    CHECK(isType(sh, sizeof sh, "BTHome v2", s) && feq(s.temp,23.4f) && feq(s.hum,45.0f) && s.batt==100);
+    // 0x45 temperature is signed: -5.5 C
+    SensorReading n; uint8_t ng[] = {0x07,0x16,0xd2,0xfc, 0x40, 0x45,0xc9,0xff};
+    CHECK(isType(ng, sizeof ng, "BTHome v2", n) && feq(n.temp,-5.5f));
+    // Button event (0x3A) before the 0x45 temp is skipped via the size table
+    SensorReading e; uint8_t ev[] = {0x09,0x16,0xd2,0xfc, 0x40, 0x3a,0x00, 0x45,0xea,0x00};
+    CHECK(isType(ev, sizeof ev, "BTHome v2", e) && feq(e.temp,23.4f));
+    // Unknown object id after temp: keep what already decoded
+    SensorReading u; uint8_t un[] = {0x0a,0x16,0xd2,0xfc, 0x40, 0x02,0x29,0x09, 0xe0,0x12,0x34};
+    CHECK(isType(un, sizeof un, "BTHome v2", u) && feq(u.temp,23.45f));
+    // Unknown object id before temp: size unknowable -> no decode
+    SensorReading x; uint8_t ux[] = {0x09,0x16,0xd2,0xfc, 0x40, 0xe0,0x12, 0x02,0x29,0x09};
+    CHECK(!isType(ux, sizeof ux, "BTHome v2", x) && std::isnan(x.temp));
+    // No temperature object -> not identified; partial values must not leak out
+    SensorReading h; uint8_t ho[] = {0x07,0x16,0xd2,0xfc, 0x40, 0x03,0xc0,0x12};
+    CHECK(!isType(ho, sizeof ho, "BTHome v2", h) && std::isnan(h.hum));
+    // Encrypted flag rejected
+    SensorReading c; uint8_t enc[] = {0x0c,0x16,0xd2,0xfc, 0x41, 0x01,0x58, 0x02,0x29,0x09, 0x03,0xc0,0x12};
+    CHECK(!isType(enc, sizeof enc, "BTHome v2", c));
+    // Future BTHome version (device-info bits 5-7 != 2) rejected
+    SensorReading v; uint8_t v3[] = {0x0c,0x16,0xd2,0xfc, 0x60, 0x01,0x58, 0x02,0x29,0x09, 0x03,0xc0,0x12};
+    CHECK(!isType(v3, sizeof v3, "BTHome v2", v));
 }
 
 int main(void) {
@@ -116,7 +187,9 @@ int main(void) {
     test_switchbot_nonmeter_gate();
     test_switchbot_meter_single();
     test_govee();
-    test_pvvx_bthome();
+    test_pvvx();
+    test_atc1441();
+    test_bthome();
     printf("ble_decoders: all %d checks passed\n", g_checks);
     return 0;
 }

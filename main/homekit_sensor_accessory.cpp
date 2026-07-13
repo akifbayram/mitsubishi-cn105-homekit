@@ -20,7 +20,6 @@ extern "C" {
 static const char *TAG = "hk_sensor";
 
 // ── Tuning ──────────────────────────────────────────────────────────────────
-static constexpr uint8_t BATT_LOW_THRESHOLD              = 20;  // StatusLowBattery=1 at/below this %
 static constexpr uint8_t HAP_CHARGING_STATE_NOT_CHARGEABLE = 2; // coin cell, not rechargeable
 
 // ── State ─────────────────────────────────────────────────────────────────────
@@ -46,7 +45,7 @@ static void read_battery(uint8_t *level, uint8_t *low)
 {
     int8_t raw = BleSensor::battery();
     *level = (raw >= 0) ? (uint8_t)raw : 100;
-    *low   = (*level <= BATT_LOW_THRESHOLD) ? 1 : 0;
+    *low   = (*level <= BLE_BATT_LOW_PCT) ? 1 : 0;
 }
 
 // Push a value to a HAP characteristic only when it actually changed (avoids

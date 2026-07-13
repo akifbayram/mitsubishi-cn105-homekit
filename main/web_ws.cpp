@@ -571,9 +571,11 @@ void WebUI::pushState() {
             ",\"bleRssi\":%d"
             ",\"bleActive\":%s"
             ",\"bleStale\":%s"
+            ",\"bleReverted\":%s"
             ",\"bleStaleMs\":%lu"
             ",\"bleAddr\":\"%s\""
             ",\"bleFeed\":%s"
+            ",\"bleBattLow\":%s"
             ",\"bleTimeout\":%u"
             ",\"bleDiscovering\":%s"
             ",\"bleSensorType\":%s%s%s",
@@ -584,9 +586,11 @@ void WebUI::pushState() {
             BleSensor::rssi(),
             BleSensor::isActive() ? "true" : "false",
             BleSensor::isStale() ? "true" : "false",
+            BleSensor::isReverted() ? "true" : "false",
             (unsigned long)staleMs,
             BleSensor::getAddr(),
             BleSensor::isEnabled() ? "true" : "false",
+            (bleB >= 0 && bleB <= BLE_BATT_LOW_PCT) ? "true" : "false",
             (unsigned int)settings.get().bleStaleTimeoutS,
             BleSensor::isDiscovering() ? "true" : "false",
             sType ? "\"" : "", sType ? sType : "null", sType ? "\"" : ""
@@ -633,15 +637,20 @@ void WebUI::pushDiscoveryResults(bool done) {
 #ifdef BLE_ENABLE
     if (!_server) return;
 
-    int count = 0;
-    const BleDiscoveredDevice* devs = BleSensor::discoveryResults(count);
+    BleDiscoveredDevice devs[BLE_MAX_DISCOVERED];
+    bool truncated = false;
+    int count = BleSensor::discoveryResults(devs, BLE_MAX_DISCOVERED, &truncated);
 
-    char buf[1536];
-    int n = snprintf(buf, sizeof(buf), "{\"type\":\"bleScanResults\",\"done\":%s,\"devices\":[",
-                     done ? "true" : "false");
+    // Worst-case JSON per device (addr + escaped name + type + fields); also the
+    // loop's reserve bound, so the buffer always fits BLE_MAX_DISCOVERED entries
+    constexpr size_t ENTRY_JSON_MAX = 160;
+    char buf[128 /* header + closing */ + BLE_MAX_DISCOVERED * ENTRY_JSON_MAX];
+    int n = snprintf(buf, sizeof(buf),
+                     "{\"type\":\"bleScanResults\",\"done\":%s,\"truncated\":%s,\"devices\":[",
+                     done ? "true" : "false", truncated ? "true" : "false");
 
     for (int i = 0; i < count; i++) {
-        if (n >= (int)sizeof(buf) - 160) break;  // Reserve space for entry + closing
+        if (n >= (int)(sizeof(buf) - ENTRY_JSON_MAX)) break;  // Reserve space for entry + closing
         char escName[50];
         jsonEscape(devs[i].name, escName, sizeof(escName));
         char tStr[8] = "null", hStr[8] = "null";
