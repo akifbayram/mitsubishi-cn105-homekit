@@ -59,6 +59,7 @@ static void build_state(sl2_link_t *l, struct sl2_state_pkt *p) {
     if (s.wifi)             p->flags |= SL2_SF_WIFI;
     if (s.use_f)            p->flags |= SL2_SF_USE_F;
     if (s.wifi_provisioned) p->flags |= SL2_SF_WIFI_PROVISIONED;
+    if (s.setup_ap)         p->flags |= SL2_SF_SETUP_AP;
     if (s.sensor_batt_low) p->flags2 |= SL2_SF2_SENSOR_BATT_LOW;
     p->mode = s.mode; p->action = s.action; p->fan = s.fan;
     p->vane_v = s.vane_v; p->vane_h = s.vane_h; p->preset = s.preset;
@@ -295,6 +296,25 @@ void sl2_link_on_recv(sl2_link_t *l, const uint8_t src[6], const uint8_t dst[6],
             d->last_probe_ms = now;
         }
         break;
+    case SL2_PKT_WIFI_SETUP:
+        if (len >= SL2_WIFI_SETUP_MIN_LEN) {
+            d->wifi_setup_req = true;
+            d->last_probe_ms = now;
+        }
+        break;
+    case SL2_PKT_DIAL_INFO:
+        if (len >= SL2_DIAL_INFO_MIN_LEN) {
+            struct sl2_dial_info_pkt di;
+            sl2_decode_pkt(&di, sizeof di, data, len);
+            d->peer_caps_seq = di.caps_seq;
+            memcpy(d->model, di.model, sizeof d->model);
+            d->model[sizeof d->model - 1] = 0;
+            memcpy(d->fw, di.fw, sizeof d->fw);
+            d->fw[sizeof d->fw - 1] = 0;
+            d->have_info = true;
+            d->last_probe_ms = now;
+        }
+        break;
     default:
         break;
     }
@@ -339,6 +359,11 @@ static void serve_pulls(sl2_link_t *l, sl2_dial_rt_t *d, uint32_t now) {
             r.ok = 1;
         l->port->send(l->port->ctx, d->bond.mac, &r, sizeof r);
         memset(&r, 0, sizeof r);            /* no PSK copy left behind */
+    }
+    if (d->wifi_setup_req) {
+        d->wifi_setup_req = false;
+        if (l->hvac->wifi_setup)
+            l->hvac->wifi_setup(l->hvac->ctx);   /* AP status echoes back via STATE */
     }
 }
 
@@ -488,6 +513,22 @@ bool sl2_link_any_live(sl2_link_t *l) {
         if (sl2_link_dial_live(l, i)) return true;
     return false;
 }
+
+bool sl2_link_dial_view(sl2_link_t *l, int idx, sl2_dial_view_t *out) {
+    if (idx < 0 || idx >= l->n_dials) return false;
+    const sl2_dial_rt_t *d = &l->dial[idx];
+    uint32_t now = l->port->now_ms(l->port->ctx);
+    memcpy(out->mac, d->bond.mac, 6);
+    out->live = dial_live_at(d, now);
+    out->last_seen_ms = d->last_probe_ms ? (int32_t)(now - d->last_probe_ms) : -1;
+    out->have_info = d->have_info;
+    memcpy(out->model, d->model, sizeof out->model);
+    memcpy(out->fw, d->fw, sizeof out->fw);
+    out->caps_seq = d->peer_caps_seq;
+    return true;
+}
+
+uint8_t sl2_link_caps_seq(const sl2_link_t *l) { return l->caps_seq; }
 
 void sl2_link_caps_changed(sl2_link_t *l) {
     l->caps_seq++;

@@ -93,25 +93,25 @@ static void test_switchbot_meter_single(void) {
 static void test_govee(void) {
     // H5072/H5075: 8 bytes with a trailer byte; combined 250500 -> 25.0 C / 50.0 %
     SensorReading v3; uint8_t g3[] = {0x09,0xff,0x88,0xec,0x00,0x03,0xd2,0x84,0x64,0x00};
-    CHECK(isType(g3, sizeof g3, "Govee V3", v3) && feq(v3.temp,25.0f) && feq(v3.hum,50.0f) && v3.batt==100);
+    CHECK(isType(g3, sizeof g3, "Govee", v3) && feq(v3.temp,25.0f) && feq(v3.hum,50.0f) && v3.batt==100);
     // Older H5072/H5075 firmware: same layout without the trailer (7 bytes)
     SensorReading v3s; uint8_t g3s[] = {0x08,0xff,0x88,0xec,0x00,0x03,0xd2,0x84,0x64};
-    CHECK(isType(g3s, sizeof g3s, "Govee V3", v3s) && feq(v3s.temp,25.0f) && feq(v3s.hum,50.0f) && v3s.batt==100);
+    CHECK(isType(g3s, sizeof g3s, "Govee", v3s) && feq(v3s.temp,25.0f) && feq(v3s.hum,50.0f) && v3s.batt==100);
     // Sign bit (0x800000) in the combined value: -10.1 C / 40.0 %
     SensorReading v3n; uint8_t g3n[] = {0x09,0xff,0x88,0xec,0x00,0x81,0x8c,0x18,0x64,0x00};
-    CHECK(isType(g3n, sizeof g3n, "Govee V3", v3n) && feq(v3n.temp,-10.1f) && feq(v3n.hum,40.0f));
+    CHECK(isType(g3n, sizeof g3n, "Govee", v3n) && feq(v3n.temp,-10.1f) && feq(v3n.hum,40.0f));
     // H5074: 9 bytes, little-endian: 22.55 C / 45.10 %
     SensorReading v2; uint8_t g2[] = {0x0a,0xff,0x88,0xec,0x00,0xcf,0x08,0x9e,0x11,0x5a,0x00};
-    CHECK(isType(g2, sizeof g2, "Govee V2", v2) && feq(v2.temp,22.55f) && feq(v2.hum,45.10f) && v2.batt==90);
+    CHECK(isType(g2, sizeof g2, "Govee", v2) && feq(v2.temp,22.55f) && feq(v2.hum,45.10f) && v2.batt==90);
     // H5051: 11 bytes, same layout with a longer tail
     SensorReading v2l; uint8_t g2l[] = {0x0c,0xff,0x88,0xec,0x00,0xcf,0x08,0x9e,0x11,0x5a,0x00,0x00,0x00};
-    CHECK(isType(g2l, sizeof g2l, "Govee V2", v2l) && feq(v2l.temp,22.55f) && feq(v2l.hum,45.10f) && v2l.batt==90);
+    CHECK(isType(g2l, sizeof g2l, "Govee", v2l) && feq(v2l.temp,22.55f) && feq(v2l.hum,45.10f) && v2l.batt==90);
     // An 8-byte frame is V3 by length; V2-shaped bytes must not decode as anything
     SensorReading no; uint8_t g8[] = {0x09,0xff,0x88,0xec,0x00,0xcf,0x08,0x9e,0x11,0x5a};
     CHECK(decodeAdvertisement(g8, sizeof g8, nullptr, no) == nullptr);
     // V1 (company 0x0001), combined @4
     SensorReading v1; uint8_t g1[] = {0x09,0xff,0x01,0x00,0x00,0x00,0x03,0xd2,0x84,0x64};
-    CHECK(isType(g1, sizeof g1, "Govee V1", v1) && feq(v1.temp,25.0f) && feq(v1.hum,50.0f) && v1.batt==100);
+    CHECK(isType(g1, sizeof g1, "Govee", v1) && feq(v1.temp,25.0f) && feq(v1.hum,50.0f) && v1.batt==100);
 }
 
 // ── PVVX custom format (0x181A, 15 bytes, little-endian) ────────────────────

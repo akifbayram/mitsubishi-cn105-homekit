@@ -11,6 +11,12 @@ constexpr uint32_t WIFI_RECOVERY_TIMEOUT_NORMAL = 300000;  // 5 min (after norma
 // Delay before disabling AP after WiFi reconnects (lets recovery page confirm)
 constexpr uint32_t WIFI_AP_LINGER_MS = 6000;  // 6 seconds (recovery page polls every 3s)
 
+// Change-network window: the dial's WIFI_SETUP raises the AP while the STA is
+// still connected; if nobody reconfigures, self-close after this long. (A real
+// reprovision drops the STA, which cancels this and runs the normal recovery
+// flow.) Each WIFI_SETUP re-send re-arms the window.
+constexpr uint32_t WIFI_SETUP_WINDOW_MS = 600000;  // 10 minutes
+
 // Button long-press duration for WiFi reset
 constexpr uint32_t WIFI_RESET_BUTTON_HOLD_MS = 10000;  // 10 seconds
 // Button medium-press (release before 10s) opens Link pairing
@@ -26,6 +32,9 @@ public:
     bool isAPActive() const { return _apActive; }
     void setChangePending(bool pending); // Set/clear the NVS flag
     void activateNow();                  // Immediately enable fallback AP (no timeout)
+    void beginChangeWindow();            // Dial-initiated: AP now + bounded auto-close while STA stays up
+    void noteReprovision();              // Portal applied new credentials — the change window may now
+                                         // close on join success (see loop()'s level-based close)
     void getCachedSSID(char *buf, size_t bufLen) const; // Return cached SSID (no NVS I/O)
     uint32_t getWifiUptimeSeconds() const;
 
@@ -46,6 +55,12 @@ private:
     uint32_t _lastWifiCheck = 0;         // uptime_ms() of last 1 Hz WiFi/AP check
     uint32_t _buttonPressStart = 0;      // uptime_ms() when button was first pressed (0 = not pressed)
     bool     _buttonTriggered = false;   // Prevent repeat triggers
+    bool     _changeWindow = false;      // Dial-initiated change window open (AP up over a live STA).
+                                         // While open WITHOUT a reprovision, STA blips (the portal's
+                                         // scan, beacon loss) auto-rejoin the OLD network — those
+                                         // edges must not clear the pending flag, cancel the window
+                                         // deadline, or linger-close the AP (on-device round 2)
+    bool     _reprovisioned = false;     // noteReprovision() seen since the window opened
     char     _cachedSSID[33] = "";       // Cached SSID to avoid NVS reads on every status poll
 };
 

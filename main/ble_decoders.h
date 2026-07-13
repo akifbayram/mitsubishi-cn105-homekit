@@ -308,11 +308,11 @@ static DecodeResult tryDecode(uint8_t fieldType, const uint8_t* data, uint8_t le
         if (cid == 0xEC88) {
             // Each decoder gates on its own family's frame lengths (disjoint,
             // see the decoders), so trying both in order is unambiguous
-            if (decodeGoveeV3(data, len, out)) return {true, "Govee V3"};
-            if (decodeGoveeV2(data, len, out)) return {true, "Govee V2"};
+            if (decodeGoveeV3(data, len, out)) return {true, "Govee"};
+            if (decodeGoveeV2(data, len, out)) return {true, "Govee"};
         }
         if (cid == 0x0001 && len >= 8 && decodeGoveeV1(data, len, out))
-            return {true, "Govee V1"};
+            return {true, "Govee"};
         if (cid == 0x0969 && len >= 13 && isSwitchBotMeter(sbType) &&
             decodeSwitchBotMfr(data, len, out))
             return {true, "SwitchBot"};

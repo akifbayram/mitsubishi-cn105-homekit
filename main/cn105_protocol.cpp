@@ -173,6 +173,34 @@ void CN105Controller::loop() {
         return;
     }
 
+    // ── Orphaned-staging watchdog ─────────────────────────────────────────
+    // Every setX() must be followed by sendPendingChanges() on the same
+    // code path (contract in cn105_protocol.h). A producer that forgets
+    // leaves its fields sitting in _staged, silently unsent until an
+    // unrelated commit piggybacks them — the user-visible symptom is a
+    // command that appears to take, then reverts ~10s later when the
+    // anti-flicker grace window expires. Legitimate stage→commit gaps are
+    // microseconds, so anything past the threshold is a caller bug.
+    {
+        constexpr uint32_t ORPHAN_WARN_MS = 5000;
+        taskENTER_CRITICAL(&_mux);
+        const bool orphaned = !_sendRequested &&
+                              (_staged.flags1 != 0 || _staged.flags2 != 0);
+        const uint8_t oFlags1 = _staged.flags1, oFlags2 = _staged.flags2;
+        taskEXIT_CRITICAL(&_mux);
+        if (!orphaned) {
+            _stagedOrphanSince = 0;
+        } else if (_stagedOrphanSince == 0) {
+            _stagedOrphanSince = now;
+        } else if (now - _stagedOrphanSince >= ORPHAN_WARN_MS) {
+            LOG_WARN("Staged set command (flags=0x%02X flags2=0x%02X) not "
+                     "committed for %lus — caller is missing sendPendingChanges()",
+                     oFlags1, oFlags2,
+                     (unsigned long)((now - _stagedOrphanSince) / 1000));
+            _stagedOrphanSince = now;  // re-warn periodically, don't spam every tick
+        }
+    }
+
     // ── Cycle-based polling ─────────────────────────────────────────────────
     if (_cycleRunning) {
         if (now - _cycleStartMs > (2 * _updateInterval) + 1000) {

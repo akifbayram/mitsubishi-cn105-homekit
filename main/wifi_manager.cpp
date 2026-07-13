@@ -39,6 +39,17 @@ static int8_t s_haveCreds = -1;   // -1 unknown, 0 no, 1 yes (see hasCredentials
 // Health counter: established connections lost this boot (diagnostics)
 static uint32_t s_disconnects = 0;
 
+// connect() applied credentials and no GOT_IP has landed since. Lets the
+// recovery portal distinguish "joined with the NEW credentials" from the
+// standing connected level, which stays true for the OLD network throughout
+// a dial-initiated change window (on-device round 2, 2026-07-12).
+static bool s_pendingJoin = false;
+
+// connect() is about to drop a live association on purpose (new credentials
+// over an associated STA). The disconnect handler must consume this once:
+// no old-config auto-reconnect racing the new join, no diag drop count.
+static bool s_expectDisconnect = false;
+
 // Reconnect backoff: a handful of instant retries covers the common blip;
 // after that, waiting is kinder to the AP and the 2.4 GHz radio than
 // hammering esp_wifi_connect() on every DISCONNECTED event. Capped well
@@ -62,12 +73,14 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
                 break;
 
             case WIFI_EVENT_STA_DISCONNECTED: {
-                if (s_connected) s_disconnects++;   // count real drops, not failed retries
+                bool expected = s_expectDisconnect;   // deliberate drop from connect()
+                s_expectDisconnect = false;
+                if (s_connected && !expected) s_disconnects++;   // count real drops, not failed retries
                 s_connected = false;
                 if (s_wifiEventGroup) {
                     xEventGroupClearBits(s_wifiEventGroup, CONNECTED_BIT);
                 }
-                if (!s_wifiScanning) {
+                if (!s_wifiScanning && !expected) {
                     s_retryCount++;
                     uint32_t delayMs = 0;
                     if (s_retryCount > 3) {   // 2s, 4s, 8s, 16s, then 30s cap
@@ -97,6 +110,8 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
             LOG_INFO("Got IP: " IPSTR, IP2STR(&event->ip_info.ip));
             s_connected = true;
             s_retryCount = 0;
+            s_pendingJoin = false;
+            s_expectDisconnect = false;   // never let a lost event swallow a later real drop
             if (s_wifiEventGroup) {
                 xEventGroupSetBits(s_wifiEventGroup, CONNECTED_BIT);
             }
@@ -192,6 +207,16 @@ bool WifiManager::connect(const char* ssid, const char* password)
     s_retryCount = 0;
     if (s_reconnectTimer) esp_timer_stop(s_reconnectTimer);
 
+    // esp_wifi_connect() on an associated STA is NOT a network switch — the
+    // IDF requires esp_wifi_disconnect() first. During the dial's change
+    // window the STA is still up, and without this the new credentials were
+    // saved but silently never applied (on-device round 2, 2026-07-12).
+    s_pendingJoin = true;
+    if (s_connected) {
+        s_expectDisconnect = true;
+        esp_wifi_disconnect();
+    }
+
     esp_err_t err = esp_wifi_connect();
     if (err != ESP_OK) {
         LOG_ERROR("esp_wifi_connect() failed: %s", esp_err_to_name(err));
@@ -205,6 +230,11 @@ bool WifiManager::connect(const char* ssid, const char* password)
 bool WifiManager::isConnected()
 {
     return s_connected;
+}
+
+bool WifiManager::isJoinPending()
+{
+    return s_pendingJoin;
 }
 
 bool WifiManager::waitForConnection(uint32_t timeoutMs)

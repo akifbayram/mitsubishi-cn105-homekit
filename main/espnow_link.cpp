@@ -17,6 +17,7 @@
 
 #include <cstring>
 #include <cstdio>
+#include <cmath>
 #include <esp_now.h>
 #include <esp_wifi.h>
 #include <esp_console.h>
@@ -34,6 +35,7 @@
 #include "cn105_protocol.h"
 #include "cn105_strings.h"
 #include "wifi_manager.h"
+#include "wifi_recovery.h"
 #include "homekit_setup.h"
 #include "settings.h"
 #include "status_led.h"
@@ -283,6 +285,7 @@ static bool h_get_state(void *, sl2_hvac_state_t *out) {
     out->hvac_link        = s_ctrl->isConnected();
     out->wifi             = WifiManager::isConnected();
     out->wifi_provisioned = WifiManager::hasCredentials();
+    out->setup_ap         = wifiRecovery.isAPActive();
     out->use_f            = settings.get().useFahrenheit;
     out->mode   = mode_to_sl2(st.power, st.mode);
     out->action = action_of(st);
@@ -307,6 +310,14 @@ static bool h_get_state(void *, sl2_hvac_state_t *out) {
         if (b >= 0) {
             if (b <= 10)      s_battLatch = true;
             else if (b >= 15) s_battLatch = false;
+        }
+        /* Forward remote-sensor humidity (%RH) to the dial. NAN = sensor has no
+         * humidity channel, so leave room_hum_pct at SL2_HUM_NA. */
+        float rh = BleSensor::humidity();
+        if (!std::isnan(rh)) {
+            if (rh < 0.0f)        rh = 0.0f;
+            else if (rh > 100.0f) rh = 100.0f;
+            out->room_hum_pct = (uint8_t)lroundf(rh);
         }
     } else {
         s_battLatch = false;
@@ -335,6 +346,12 @@ static bool h_apply(void *, uint16_t mask, const struct sl2_cmd_pkt *cmd) {
     if (mask & SL2_CM_FAN)   s_ctrl->setFanSpeed(fan_from_pct(cmd->fan));
     if (mask & SL2_CM_VANEV) s_ctrl->setVane(vanev_from_sl2(cmd->vane_v));
     if (mask & SL2_CM_VANEH) s_ctrl->setWideVane(vaneh_from_sl2(cmd->vane_h));
+    /* setX() only stages fields into the cross-task mailbox — nothing
+     * reaches the heat pump until the batch is committed (threading
+     * contract in cn105_protocol.h). Safe no-op when the mode above was
+     * rejected and nothing got staged. */
+    if (mask & (SL2_CM_MODE | SL2_CM_TEMP | SL2_CM_FAN | SL2_CM_VANEV | SL2_CM_VANEH))
+        s_ctrl->sendPendingChanges();
     if (mask & SL2_CM_UNITS) {
         settings.get().useFahrenheit = (cmd->use_f != 0);
         settings.save();
@@ -370,9 +387,9 @@ static bool h_get_caps(void *, struct sl2_caps_pkt *out) {
     out->hum_step_pct = 0;
     uint16_t feat = SL2_FEAT_WIFI_INFO | SL2_FEAT_HOMEKIT | SL2_FEAT_OUTSIDE_T |
                     SL2_FEAT_COMPRESSOR | SL2_FEAT_FW_INFO | SL2_FEAT_RUNTIME |
-                    SL2_FEAT_LINK_OTA_CREDS;
+                    SL2_FEAT_LINK_OTA_CREDS | SL2_FEAT_WIFI_SETUP;
 #ifdef BLE_ENABLE
-    if (BleSensor::isEnabled()) feat |= SL2_FEAT_SENSOR_BATT;
+    if (BleSensor::isBleEnabled() && BleSensor::isEnabled()) feat |= SL2_FEAT_SENSOR_BATT;
 #endif
     out->features = feat;
     snprintf(out->name, sizeof out->name, "%s", settings.get().deviceName);
@@ -449,6 +466,14 @@ static size_t h_fill_info(void *, uint8_t *buf, size_t cap) {
 
 static bool h_wifi_creds(void *, char ssid[33], char psk[65]) {
     return WifiManager::loadCredentials(ssid, 33, psk, 65);
+}
+
+/* Dial pressed "Change network": raise the recovery hotspot now. Runs on the
+ * main task (espnowLink.loop() and wifiRecovery.loop() share it). */
+static bool h_wifi_setup(void *) {
+    LOG_INFO("Serin Link: dial requested the setup hotspot");
+    wifiRecovery.beginChangeWindow();
+    return true;
 }
 
 /* ── caps fingerprint ─────────────────────────────────────────────────── */
@@ -543,6 +568,7 @@ void EspnowLink::begin(CN105Controller *ctrl) {
     s_hvac.get_caps = h_get_caps;
     s_hvac.fill_info_tlvs = h_fill_info;
     s_hvac.wifi_creds = h_wifi_creds;
+    s_hvac.wifi_setup = h_wifi_setup;
 
     sl2_link_init(&s_link, &s_port, &s_crypto, &s_hvac);
     if (!sl2_link_start(&s_link)) { LOG_ERROR("sl2_link_start failed"); return; }

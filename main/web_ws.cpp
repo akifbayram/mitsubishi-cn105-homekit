@@ -652,7 +652,7 @@ void WebUI::pushState() {
         if (staleMs == UINT32_MAX) staleMs = 0;
 
         char bleTStr[8] = "null", bleHStr[8] = "null";
-        if (!std::isnan(bleT)) snprintf(bleTStr, sizeof(bleTStr), "%.1f", bleT);
+        if (!std::isnan(bleT)) snprintf(bleTStr, sizeof(bleTStr), "%.2f", bleT);
         if (!std::isnan(bleH)) snprintf(bleHStr, sizeof(bleHStr), "%.0f", bleH);
 
         const char* sType = BleSensor::sensorType();

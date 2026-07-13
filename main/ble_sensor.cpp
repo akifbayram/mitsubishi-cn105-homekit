@@ -464,13 +464,19 @@ float    BleSensor::humidity()     { return readLocked(s_humidity); }
 int8_t   BleSensor::battery()      { return readLocked(s_battery); }
 int      BleSensor::rssi()         { return readLocked(s_rssi); }
 
+// Master toggle off reports neither active nor stale: the last reading survives
+// in s_temperature/s_lastUpdate for a quick re-enable, but consumers (web badge,
+// Dial state, HomeKit) must see the sensor as absent — not as feeding for the
+// rest of the stale window, then "stale" forever.
 bool BleSensor::isActive() {
+    if (!s_bleEnabled.load()) return false;
     uint32_t lu = readLocked(s_lastUpdate);
     uint32_t staleMs = (uint32_t)settings.get().bleStaleTimeoutS * 1000;
     return lu > 0 && (uptime_ms() - lu) < staleMs;
 }
 
 bool BleSensor::isStale() {
+    if (!s_bleEnabled.load()) return false;
     uint32_t lu = readLocked(s_lastUpdate);
     uint32_t staleMs = (uint32_t)settings.get().bleStaleTimeoutS * 1000;
     return lu > 0 && (uptime_ms() - lu) >= staleMs;

@@ -179,11 +179,18 @@ esp_err_t WebUI::handleWifiStatus(httpd_req_t *req) {
     jsonEscape(ssid, escSSID, sizeof(escSSID));
     jsonEscape(cfg.deviceName, escName, sizeof(escName));
 
-    char buf[280];
+    // "joined" = connected on the credentials last applied. The bare
+    // connected level stays true for the OLD network throughout a
+    // dial-initiated change window — the page's join poll must not key
+    // success off it (on-device round 2, 2026-07-12).
+    bool joined = connected && !WifiManager::isJoinPending();
+
+    char buf[300];
     snprintf(buf, sizeof(buf),
         "{\"ssid\":\"%s\",\"deviceName\":\"%s\",\"connected\":%s"
-        ",\"hkSetupCode\":\"%s\"}",
+        ",\"joined\":%s,\"hkSetupCode\":\"%s\"}",
         escSSID, escName, connected ? "true" : "false",
+        joined ? "true" : "false",
         homekit_get_setup_code());
 
     httpd_resp_set_type(req, "application/json");
@@ -233,6 +240,9 @@ bool WebUI::applyWifiCredentials(const char *json, const char **outError) {
     // Mark change pending (shorter recovery timeout); also refreshes the
     // cached SSID from the just-saved credentials
     wifiRecovery.setChangePending(true);
+    // Let the change window close on join success (and stop treating STA
+    // reconnects as old-network blips)
+    wifiRecovery.noteReprovision();
     return true;
 }
 

@@ -599,7 +599,10 @@ input:focus-visible{outline-offset:0}
           return;
         }
         fetch('/wifi-status').then(function(r){return r.json()}).then(function(s){
-          if(s.connected){
+          /* "joined" = connected on the credentials just applied; the bare
+             connected level stays true for the OLD network during a
+             dial-initiated change window and must not read as success */
+          if(s.joined){
             clearInterval(poll);
             statusBox.className='status ok';
             statusBox.textContent='Connected! This hotspot will turn off shortly.';

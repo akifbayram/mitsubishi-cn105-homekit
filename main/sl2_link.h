@@ -24,6 +24,7 @@ typedef struct {
     bool     hvac_link;       /* controller <-> heat pump serial link up */
     bool     wifi;            /* controller STA associated */
     bool     wifi_provisioned;/* has stored STA creds */
+    bool     setup_ap;        /* recovery/setup hotspot active (SL2_SF_SETUP_AP) */
     bool     use_f;           /* display pref */
     bool     sensor_batt_low;
     uint8_t  mode;            /* enum sl2_mode */
@@ -65,6 +66,11 @@ typedef struct sl2_hvac_iface {
     /* Link OTA: STA creds. Return false (or NULL hook) when unavailable —
      * the core then answers ok=0 and CAPS should omit SL2_FEAT_LINK_OTA_CREDS. */
     bool (*wifi_creds)(void *ctx, char ssid[33], char psk[65]);
+    /* Dial asked for the setup hotspot (WIFI_SETUP): raise the recovery AP /
+     * change-network window now. Optional: NULL = unsupported — CAPS should
+     * then omit SL2_FEAT_WIFI_SETUP. Must be idempotent: dials re-send ~1 Hz
+     * until STATE shows SL2_SF_SETUP_AP. */
+    bool (*wifi_setup)(void *ctx);
 } sl2_hvac_iface_t;
 
 /* Per-dial runtime slot (private). */
@@ -78,6 +84,11 @@ typedef struct {
     bool     was_live;
     bool     pend_state;      /* STATE changed since this dial last got one */
     bool     wifi_req;        /* Link OTA creds request pending */
+    bool     wifi_setup_req;  /* setup-AP request pending */
+    char     model[24];       /* dial identity (DIAL_INFO); "" until received */
+    char     fw[16];
+    uint8_t  peer_caps_seq;   /* caps_seq the dial reports applied */
+    bool     have_info;       /* a DIAL_INFO has been received */
 } sl2_dial_rt_t;
 
 typedef enum { SL2_PAIR_OFF = 0, SL2_PAIR_WINDOW, SL2_PAIR_CONFIRM } sl2_pair_state_t;
@@ -153,6 +164,21 @@ void sl2_link_forget_all(sl2_link_t *l);
 /* Liveness. */
 bool sl2_link_dial_live(sl2_link_t *l, int idx);
 bool sl2_link_any_live(sl2_link_t *l);
+
+/* Read-only snapshot of one bonded dial for the platform UI. Computed with the
+ * port clock, so last_seen_ms is epoch-safe across adapter/core. */
+typedef struct {
+    uint8_t  mac[6];
+    bool     live;
+    int32_t  last_seen_ms;    /* now - last heard; -1 if never */
+    bool     have_info;
+    char     model[24];
+    char     fw[16];
+    uint8_t  caps_seq;        /* dial's applied caps_seq */
+} sl2_dial_view_t;
+
+bool sl2_link_dial_view(sl2_link_t *l, int idx, sl2_dial_view_t *out);
+uint8_t sl2_link_caps_seq(const sl2_link_t *l);
 
 /* Call when caps content (incl. zone name) changes: bumps + persists caps_seq
  * so dials re-pull. */

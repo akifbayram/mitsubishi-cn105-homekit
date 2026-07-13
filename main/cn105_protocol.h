@@ -308,6 +308,9 @@ private:
     };
     PendingCommand _staged;
     bool           _sendRequested = false;  // set by sendPendingChanges(), cleared by loop()
+    // Watchdog for a producer that stages fields but never commits them
+    // (a caller bug — see the contract above). CN105 task only, no lock.
+    uint32_t       _stagedOrphanSince = 0;  // 0 = nothing orphaned
 
     // ── Wanted settings (anti-flicker) ───────────────────────────────────────
     WantedSettings _wanted;

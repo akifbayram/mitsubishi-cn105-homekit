@@ -21,7 +21,7 @@
 extern "C" {
 #endif
 
-#define SL2_PROTO_VERSION    1
+#define SL2_PROTO_VERSION    2
 #define SL2_PROTO_MIN_COMPAT 1
 
 /* esp_now_set_pmk() input: a documented PUBLIC constant (16 bytes). It only
@@ -39,7 +39,9 @@ enum sl2_pkt_type {
     SL2_PKT_INFO      = 7,   /* ctrl -> dial, encrypted, pull (WANT_INFO) */
     SL2_PKT_WIFI_REQ  = 8,   /* dial -> ctrl, encrypted (Link OTA) */
     SL2_PKT_WIFI_RESP = 9,   /* ctrl -> dial, encrypted (Link OTA) */
-    /* 10..127 reserved for core growth; 128..255 experiments, never shipped */
+    SL2_PKT_WIFI_SETUP = 10, /* dial -> ctrl, encrypted (raise setup AP) */
+    SL2_PKT_DIAL_INFO  = 11, /* dial -> ctrl, encrypted (dial identity) */
+    /* 12..127 reserved for core growth; 128..255 experiments, never shipped */
 };
 
 /* ── semantic HVAC model ──────────────────────────────────────────────── */
@@ -87,7 +89,8 @@ enum {  /* sl2_state_pkt.flags */
     SL2_SF_WIFI_PROVISIONED = 1u << 3, /* controller has stored STA creds
                                         * (drives the dial's Wi-Fi setup face;
                                         * always-on for YAML-provisioned fw) */
-    /* bits 4-7 spare */
+    SL2_SF_SETUP_AP     = 1u << 4,   /* recovery/setup hotspot currently active */
+    /* bits 5-7 spare */
 };
 enum {  /* sl2_state_pkt.flags2 */
     SL2_SF2_SENSOR_BATT_LOW = 1u << 0,
@@ -248,7 +251,8 @@ enum {  /* sl2_caps_pkt.features — telemetry/services the controller offers */
     SL2_FEAT_RUNTIME        = 1u << 6,
     SL2_FEAT_LINK_OTA_CREDS = 1u << 7,
     SL2_FEAT_ENERGY         = 1u << 8,
-    /* bits 9-15 spare */
+    SL2_FEAT_WIFI_SETUP     = 1u << 9,  /* accepts WIFI_SETUP (on-demand setup AP) */
+    /* bits 10-15 spare */
 };
 
 /* vane axis descriptor byte: low nibble = n_pos (0 = axis absent),
@@ -346,6 +350,35 @@ struct __attribute__((packed)) sl2_wifi_resp_pkt {
 };
 #define SL2_WIFI_RESP_MIN_LEN 103
 
+/* ── dial-initiated Wi-Fi setup ───────────────────────────────────────── */
+
+/* Ask the controller to raise its recovery/setup hotspot NOW (the dial's
+ * change-network flow). No response packet — the controller reports the
+ * hotspot via SL2_SF_SETUP_AP in STATE, and a flag flip re-sends STATE within
+ * SL2_STATE_MIN_INTERVAL_MS. Senders re-fire ~1 Hz until they see the flag
+ * (ESP-NOW is lossy); receivers must treat it as idempotent. Gated on
+ * SL2_FEAT_WIFI_SETUP in CAPS. */
+struct __attribute__((packed)) sl2_wifi_setup_pkt {
+    uint8_t type;            /* SL2_PKT_WIFI_SETUP */
+    uint8_t version;         /* SL2_PROTO_VERSION */
+    uint8_t reserved[2];
+};
+#define SL2_WIFI_SETUP_MIN_LEN 4
+
+/* ── DIAL_INFO (dial -> ctrl, encrypted, push) ────────────────────────────
+ * The dial reports its own identity so the unit's UI can show which Link is
+ * paired. Sent on connect, on caps_seq change, and ~every 60 s. model/fw are
+ * dial-authored branded strings; caps_seq is the dial's currently-applied
+ * generation (unit compares against its own to show a "syncing" hint). */
+struct __attribute__((packed)) sl2_dial_info_pkt {
+    uint8_t type;            /* SL2_PKT_DIAL_INFO */
+    uint8_t version;         /* SL2_PROTO_VERSION */
+    uint8_t caps_seq;        /* the caps_seq the dial currently has applied */
+    char    model[24];       /* branded model, NUL-terminated */
+    char    fw[16];          /* firmware version, NUL-terminated */
+};
+#define SL2_DIAL_INFO_MIN_LEN 3   /* through caps_seq; model/fw may be absent */
+
 /* ── sizeof guards — every vendored copy must agree ───────────────────── */
 #define SL2_STATIC_ASSERT(c, m) typedef char sl2_sa_##m[(c) ? 1 : -1]
 SL2_STATIC_ASSERT(sizeof(struct sl2_state_pkt)     == 26,  state_size);
@@ -357,6 +390,9 @@ SL2_STATIC_ASSERT(sizeof(struct sl2_caps_pkt)      == 68,  caps_size);
 SL2_STATIC_ASSERT(sizeof(struct sl2_info_pkt)      == 4,   info_size);
 SL2_STATIC_ASSERT(sizeof(struct sl2_wifi_req_pkt)  == 4,   wifi_req_size);
 SL2_STATIC_ASSERT(sizeof(struct sl2_wifi_resp_pkt) == 103, wifi_resp_size);
+SL2_STATIC_ASSERT(sizeof(struct sl2_wifi_setup_pkt) == 4,  wifi_setup_size);
+SL2_STATIC_ASSERT(sizeof(struct sl2_dial_info_pkt) == 43,  dial_info_size);
+SL2_STATIC_ASSERT(SL2_DIAL_INFO_MIN_LEN <= (int)sizeof(struct sl2_dial_info_pkt), dial_info_minlen);
 SL2_STATIC_ASSERT(SL2_STATE_MIN_LEN <= (int)sizeof(struct sl2_state_pkt), state_minlen);
 SL2_STATIC_ASSERT(SL2_CMD_MIN_LEN   <= (int)sizeof(struct sl2_cmd_pkt),   cmd_minlen);
 SL2_STATIC_ASSERT(SL2_PROBE_MIN_LEN <= (int)sizeof(struct sl2_probe_pkt), probe_minlen);

@@ -152,11 +152,15 @@ input[type=range].slim::-moz-range-thumb{width:22px;height:22px;}
 .temp-display{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;}
 .temp-lbl{font-size:11.5px;font-weight:500;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;display:block;}
 .temp-setting{min-width:0;}
-.temp-num{display:flex;align-items:baseline;gap:1px;margin-top:3px;}
+/* Degrees hang from the cap height, not the baseline: align the tops of the
+   boxes and nudge by the ascender/cap-height gap of each size. */
+.temp-num{display:flex;align-items:flex-start;gap:2px;margin-top:3px;}
 .temp-val{font-size:62px;font-weight:400;letter-spacing:-2.5px;color:var(--text);line-height:.95;font-variant-numeric:tabular-nums;}
-.temp-deg{font-size:25px;font-weight:500;color:var(--text2);}
+.temp-deg{font-size:25px;font-weight:500;color:var(--text2);line-height:1;margin-top:2px;}
 .temp-reading{text-align:right;flex:none;}
-.temp-room{font-size:22px;font-weight:500;color:var(--text);margin-top:4px;display:block;font-variant-numeric:tabular-nums;}
+.temp-room-row{display:flex;align-items:flex-start;justify-content:flex-end;gap:1px;margin-top:4px;}
+.temp-room{font-size:22px;font-weight:500;color:var(--text);line-height:1;font-variant-numeric:tabular-nums;}
+.temp-room-deg{font-size:13px;font-weight:500;color:var(--text2);line-height:1;margin-top:1px;}
 .temp-source{font-size:11px;color:var(--text3);margin-top:2px;min-height:14px;}
 .temp-source.remote{color:var(--green);}
 .temp-source.stale{color:var(--orange);}
@@ -260,7 +264,15 @@ input[type=range].slim::-moz-range-thumb{width:22px;height:22px;}
 .hk-hero{display:flex;gap:16px;align-items:center;background:var(--surface2);border-radius:18px;padding:16px;}
 .hk-qr{flex:none;width:96px;height:96px;border-radius:14px;background:#fff;padding:9px;display:flex;align-items:center;justify-content:center;}
 .hk-qr canvas{width:100%;height:100%;image-rendering:pixelated;}
-.hk-code{font-size:25px;font-weight:600;color:var(--text);letter-spacing:1px;margin-top:5px;}
+.hk-code-row{display:flex;align-items:center;gap:2px;margin-top:5px;}
+.hk-code{font-size:25px;font-weight:600;color:var(--text);letter-spacing:1px;}
+.hk-copy{display:flex;align-items:center;justify-content:center;width:44px;height:44px;margin:-10px 0;border:none;border-radius:12px;
+  background:none;color:var(--accent);cursor:pointer;flex:none;padding:0;-webkit-tap-highlight-color:transparent;}
+.hk-copy:active{background:var(--surface2);}
+.hk-copy svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;}
+.hk-copy .ic-check{display:none;color:var(--green);}
+.hk-copy.copied .ic-copy{display:none;}
+.hk-copy.copied .ic-check{display:block;}
 .hk-hint{font-size:12px;color:var(--text2);margin-top:7px;line-height:1.4;}
 #hkPairedRow{display:none;align-items:center;gap:12px;}
 #hkPairedRow.on{display:flex;}
@@ -308,7 +320,7 @@ input[type=range].slim::-moz-range-thumb{width:22px;height:22px;}
 .save-btn.scanning{opacity:.7;cursor:default;}
 .btn-row{display:flex;gap:9px;}
 .btn-row>*{flex:1;min-width:0;}
-.btn-row .grow0{flex:0 0 auto;width:auto;padding-left:16px;padding-right:16px;}
+.grow0{flex:0 0 auto;width:auto;padding-left:16px;padding-right:16px;white-space:nowrap;}
 .file-btn{display:flex;align-items:center;justify-content:center;width:100%;border:1px dashed var(--surface3);
   cursor:pointer;font-size:13px;font-weight:500;color:var(--text2);background:transparent;border-radius:var(--radius-sm);padding:12px;}
 
@@ -442,7 +454,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
         </div>
         <div class="temp-reading">
           <span class="temp-lbl">Room</span>
-          <span class="temp-room" id="roomTemp">--</span>
+          <div class="temp-room-row"><span class="temp-room" id="roomTemp">--</span><span class="temp-room-deg" id="roomDeg" hidden>°</span></div>
           <div class="temp-source" id="tempSource"></div>
         </div>
       </div>
@@ -615,7 +627,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     <div id="hkPairedRow">
       <span class="icon-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/></svg></span>
       <div class="stack-tight" style="flex:1;min-width:0">
-        <div class="t">Paired with Apple Home</div>
+        <div class="t">Paired with HomeKit</div>
         <div class="b" id="hkControllers">--</div>
       </div>
       <button class="btn-secondary grow0" id="hkShowSetupBtn">Show Setup Code</button>
@@ -625,16 +637,21 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
         <div class="hk-qr"><canvas id="qrCanvas" width="200" height="200" role="img" aria-label="HomeKit pairing QR code"></canvas></div>
         <div style="flex:1;min-width:0">
           <span class="card-label">Setup Code</span>
-          <div class="hk-code mono" id="hkSetupCode">--</div>
+          <div class="hk-code-row">
+            <div class="hk-code mono" id="hkSetupCode">--</div>
+            <button class="hk-copy" id="hkCopyBtn" onclick="copySetupCode()" aria-label="Copy setup code" title="Copy setup code">
+              <svg class="ic-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+              <svg class="ic-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg>
+            </button>
+          </div>
           <div class="hk-hint">Scan in the Home app, or enter this code to pair.</div>
         </div>
       </div>
       <div class="btn-row" id="hkButtons" style="display:none;margin-top:14px">
         <a id="hkSetupLink" href="com.apple.home://" class="btn-primary" style="text-decoration:none">Open Home App</a>
-        <button id="hkCopyBtn" class="btn-secondary grow0" onclick="copySetupCode()">Copy</button>
       </div>
     </div>
-    <button class="btn-danger" id="hkResetBtn" style="margin-top:10px" onclick="resetHomeKit()">Reset HomeKit Pairing</button>
+    <button class="btn-danger" id="hkResetBtn" style="margin-top:10px;display:none" onclick="resetHomeKit()">Reset HomeKit Pairing</button>
   </div>
 
   <!-- ===== DISPLAY LINK ===== -->
@@ -1074,12 +1091,11 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     if(tempUnit==='F') return cToFTable(c).toString();
     return c.toFixed(1);
   }
+  // Readings (room/outside/BLE sensor): always one decimal. The Mitsubishi
+  // F-table stays setpoint-only (fmtTemp/fmtHandle) — readings convert directly.
   function fmtReadingTemp(c){
     if(c==null) return '--';
-    if(tempUnit==='F'){
-      if(c>=16.0&&c<=30.5) return cToFTable(c).toString();
-      return Math.round(c*9/5+32).toString();
-    }
+    if(tempUnit==='F') return (c*9/5+32).toFixed(1);
     return c.toFixed(1);
   }
 
@@ -1485,6 +1501,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     }
 
     roomTemp.textContent=fmtReadingTemp(s.room);
+    $('roomDeg').hidden=(s.room==null);
 
     // Temperature source indicator
     var srcEl=$('tempSource');
@@ -1558,14 +1575,16 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       var feedOff=!s.bleFeed;
 
       // Status dot + header label (visible when collapsed)
-      if(noMac){bleDot.className='status-dot idle';statusLbl.textContent='Not Configured';statusLbl.style.color='var(--text3)'}
+      if(!bleOn){bleDot.className='status-dot idle';statusLbl.textContent='Disabled';statusLbl.style.color='var(--text3)'}
+      else if(noMac){bleDot.className='status-dot idle';statusLbl.textContent='Not Configured';statusLbl.style.color='var(--text3)'}
       else if(stale){bleDot.className='status-dot error';statusLbl.textContent='Stale';statusLbl.style.color='var(--red)'}
       else if(s.bleActive&&feedOff){bleDot.className='status-dot warning';statusLbl.textContent='Feed Off';statusLbl.style.color='var(--orange)'}
       else if(s.bleActive){bleDot.className='status-dot active';statusLbl.textContent='Active';statusLbl.style.color='var(--green)'}
       else{bleDot.className='status-dot idle';statusLbl.textContent='Scanning\u2026';statusLbl.style.color='var(--text2)'}
 
       // Contextual banner (visible when expanded)
-      if(noMac){banner.className='ble-banner info';banner.textContent='Configure a sensor MAC address to begin';banner.style.display='flex'}
+      if(!bleOn){banner.style.display='none'}
+      else if(noMac){banner.className='ble-banner info';banner.textContent='Configure a sensor MAC address to begin';banner.style.display='flex'}
       else if(stale){
         var staleSec=Math.floor((s.bleStaleMs||0)/1000);
         banner.className='ble-banner warn';
@@ -1737,12 +1756,12 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       var nCtl=s.hkControllers;
       hkControllersEl.textContent=nCtl==null?'--':nCtl+(nCtl===1?' controller':' controllers');
       hkSetupCodeEl.textContent=s.hkSetupCode||'--';
-      $('hkResetBtn').disabled=!hkReady;
+      $('hkResetBtn').style.display=hkPairedNow?'':'none';
       if(s.hkSetupURI&&s.hkSetupURI!==lastQRURI){
         lastQRURI=s.hkSetupURI;
         renderQR(s.hkSetupURI,qrCanvas);
       }
-      $('hkButtons').style.display=lastQRURI?'flex':'none';
+      $('hkButtons').style.display=(lastQRURI&&hkAppleUA)?'flex':'none';
     }
 
     // ── ESP-NOW remote (Dial) status ──────────────────────────────────────
@@ -2598,10 +2617,9 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     hkSetupExpanded=!hkSetupExpanded;
     renderHkSetupToggle();
   });
-  // The com.apple.home:// deep link only resolves on Apple platforms
-  if(!/iPhone|iPad|iPod|Macintosh/.test(navigator.userAgent)){
-    $('hkSetupLink').style.display='none';
-  }
+  // The com.apple.home:// deep link only resolves on Apple platforms; the
+  // buttons row only holds that link, so it stays hidden everywhere else
+  var hkAppleUA=/iPhone|iPad|iPod|Macintosh/.test(navigator.userAgent);
 
   document.getElementById('forgetRemoteBtn').addEventListener('click',function(){
     if(confirm('Forget the paired Link? The device will restart.')){
@@ -2633,8 +2651,8 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     if(!code||code==='--')return;
     var btn=$('hkCopyBtn');
     copyText(code.replace(/-/g,''));  // Home app manual entry wants bare digits
-    btn.textContent='Copied!';
-    setTimeout(function(){btn.textContent='Copy'},1500);
+    btn.classList.add('copied');
+    setTimeout(function(){btn.classList.remove('copied')},1500);
   };
 
   window.copyLogs=function(){

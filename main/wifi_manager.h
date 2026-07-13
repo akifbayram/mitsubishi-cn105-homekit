@@ -16,6 +16,13 @@ namespace WifiManager {
     /// Connection state (set by event handler, non-blocking).
     bool isConnected();
 
+    /// True while connect() has applied credentials and no GOT_IP has landed
+    /// since. isConnected() && !isJoinPending() == "connected on the
+    /// credentials last applied" — the recovery portal's success signal
+    /// (the bare connected level stays true for the OLD network throughout
+    /// a dial-initiated change window).
+    bool isJoinPending();
+
     /// Wait for connection with timeout. Returns true if connected.
     bool waitForConnection(uint32_t timeoutMs);
 
