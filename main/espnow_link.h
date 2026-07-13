@@ -22,6 +22,18 @@ enum EspnowPairOutcome : uint8_t {
     ESPNOW_PAIR_FAIL,      // "timeout" / "full" / "pin-mismatch"
 };
 
+// Read-only detail for the primary bonded dial, for the web UI Link card.
+struct EspnowDialDetail {
+    bool    bonded;
+    bool    live;
+    int32_t lastSeenSec;   // seconds since last heard; -1 if unknown
+    int8_t  rssi;          // dBm; 0 if unknown
+    bool    haveInfo;      // DIAL_INFO received (model/fw valid)
+    char    model[24];
+    char    fw[16];
+    bool    syncing;       // dial's caps_seq != unit's
+};
+
 class EspnowLink {
 public:
     void begin(CN105Controller *ctrl);   // call AFTER WiFi started + esp_now usable
@@ -29,6 +41,7 @@ public:
     bool isBonded() const;               // >=1 dial in the bond table
     bool isPeerLive() const;             // any bonded dial probed recently
     void getPeerMac(uint8_t out[6]) const;   // first bonded dial (00.. if none)
+    bool getDialDetail(EspnowDialDetail &out) const;  // false if not bonded
     void startPairing();                 // 60 s signed-TOFU pairing window
     void cancelPairing();
     bool pairingActive() const;

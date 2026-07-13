@@ -661,6 +661,8 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       <span class="icon-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="12" cy="12" r="8"/><path d="M12 8v4" stroke-linecap="round"/></svg></span>
       <div class="stack-tight" style="flex:1;min-width:0">
         <div class="t">Link</div>
+        <div class="b" id="remoteModelLine"><span id="remoteModel">—</span><span id="remoteFwWrap" style="display:none"> · fw <span id="remoteFw"></span></span></div>
+        <div class="b" id="remoteLiveLine" style="display:none"><span id="remoteLastSeen"></span><span id="remoteRssiWrap" style="display:none"> · <span id="remoteRssi"></span></span><span id="remoteSyncWrap" style="display:none"> · syncing…</span></div>
         <div class="b"><span id="remoteStatus">—</span><span id="remoteMacWrap" style="display:none"> · <span id="remoteMac" class="mono">—</span></span></div>
       </div>
     </div>
@@ -1772,6 +1774,29 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       else{rs.textContent='Idle';rDot.className='status-dot idle';rSum.textContent='Idle';rSum.style.color='var(--text2)';}
       $('remoteMac').textContent=s.remoteMac||'—';
       $('remoteMacWrap').style.display=(s.remoteBonded&&s.remoteMac)?'':'none';
+      // model / fw
+      var model=$('remoteModel');
+      // Only show the model line when bonded — when not paired the status
+      // line already says "Not Paired", so a second "Not paired" is redundant.
+      if(s.remoteBonded){
+        model.textContent = s.remoteModel || 'Model unknown — update the Link';
+        $('remoteModelLine').style.display='';
+      } else { $('remoteModelLine').style.display='none'; }
+      var fwWrap=$('remoteFwWrap');
+      if(s.remoteBonded && s.remoteFw){ $('remoteFw').textContent=s.remoteFw; fwWrap.style.display=''; }
+      else { fwWrap.style.display='none'; }
+      // liveness line (last seen · rssi · syncing)
+      var liveLine=$('remoteLiveLine');
+      if(s.remoteBonded && s.remoteLastSeen!=null){
+        var ls=s.remoteLastSeen;
+        $('remoteLastSeen').textContent = ls<0 ? 'Not seen yet'
+          : ls<2 ? 'Last seen just now' : 'Last seen '+fmtAgo(ls);
+        var rw=$('remoteRssiWrap');
+        if(s.remoteRssi!=null){ $('remoteRssi').textContent=s.remoteRssi+' dBm'; rw.style.display=''; }
+        else { rw.style.display='none'; }
+        $('remoteSyncWrap').style.display = s.remoteSyncing ? '' : 'none';
+        liveLine.style.display='';
+      } else { liveLine.style.display='none'; }
 
       var pairing=s.remotePairing===true;
       $('pairRemoteBtn').style.display=(pairing||s.remoteBonded)?'none':'';
@@ -1810,6 +1835,11 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     c.className='container'+(mode?' mode-'+mode:'');
   }
 
+  function fmtAgo(sec){
+    if(sec<60) return sec+'s ago';
+    if(sec<3600) return Math.floor(sec/60)+'m ago';
+    return Math.floor(sec/3600)+'h ago';
+  }
   function fmtUptime(sec){
     var h=Math.floor(sec/3600);
     var m=Math.floor((sec%3600)/60);

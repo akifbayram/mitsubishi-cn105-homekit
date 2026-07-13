@@ -91,12 +91,46 @@ struct LinkStatus {
      * httpd/console reader tasks, unlike a byte-wise buffer copy. */
     const char *result = "idle";
     EspnowPairOutcome outcome = ESPNOW_PAIR_NONE;
+    int32_t lastSeenSec = -1;
+    int8_t  rssi = 0;
+    bool    haveInfo = false;
+    char    model[24] = {};
+    char    fw[16] = {};
+    bool    syncing = false;
 };
 static LinkStatus s_stat;
+
+/* RSSI is captured in the recv callback (WiFi task) and read on the main task
+ * during snapshot_status() — kept in the adapter, out of the portable core. */
+static portMUX_TYPE s_rssiMux = portMUX_INITIALIZER_UNLOCKED;
+static struct { uint8_t mac[6]; int8_t rssi; bool valid; } s_rssiTab[SL2_MAX_DIALS];
+
+static int8_t rssi_for(const uint8_t mac[6]) {
+    int8_t r = 0;
+    portENTER_CRITICAL(&s_rssiMux);
+    for (int i = 0; i < SL2_MAX_DIALS; i++)
+        if (s_rssiTab[i].valid && memcmp(s_rssiTab[i].mac, mac, 6) == 0) { r = s_rssiTab[i].rssi; break; }
+    portEXIT_CRITICAL(&s_rssiMux);
+    return r;
+}
 
 /* ── port: transport / clock / kv ─────────────────────────────────────── */
 
 static void on_recv(const esp_now_recv_info_t *info, const uint8_t *data, int len) {
+    if (info->rx_ctrl) {
+        int8_t rssi = (int8_t)info->rx_ctrl->rssi;
+        portENTER_CRITICAL(&s_rssiMux);
+        int slot = -1, freeSlot = -1;
+        for (int i = 0; i < SL2_MAX_DIALS; i++) {
+            if (s_rssiTab[i].valid && memcmp(s_rssiTab[i].mac, info->src_addr, 6) == 0) { slot = i; break; }
+            if (!s_rssiTab[i].valid && freeSlot < 0) freeSlot = i;
+        }
+        if (slot < 0) slot = (freeSlot >= 0) ? freeSlot : 0;  /* evict slot 0 when full */
+        memcpy(s_rssiTab[slot].mac, info->src_addr, 6);
+        s_rssiTab[slot].rssi = rssi;
+        s_rssiTab[slot].valid = true;
+        portEXIT_CRITICAL(&s_rssiMux);
+    }
     sl2_rxq_push(&s_rxq, info->src_addr, info->des_addr, data, len);
 }
 
@@ -529,6 +563,22 @@ static void snapshot_status(void) {
     s_stat.pairing  = sl2_link_pairing(&s_link);
     s_stat.secsLeft = sl2_link_pair_seconds_left(&s_link);
     if (!sl2_link_dial_mac(&s_link, 0, s_stat.mac0)) memset(s_stat.mac0, 0, 6);
+    sl2_dial_view_t dv;
+    if (sl2_link_dial_view(&s_link, 0, &dv)) {
+        s_stat.lastSeenSec = dv.last_seen_ms < 0 ? -1 : (dv.last_seen_ms / 1000);
+        s_stat.rssi = rssi_for(dv.mac);
+        s_stat.haveInfo = dv.have_info;
+        memcpy(s_stat.model, dv.model, sizeof s_stat.model);
+        memcpy(s_stat.fw, dv.fw, sizeof s_stat.fw);
+        s_stat.syncing = dv.have_info && (dv.caps_seq != sl2_link_caps_seq(&s_link));
+    } else {
+        s_stat.lastSeenSec = -1;
+        s_stat.rssi = 0;
+        s_stat.haveInfo = false;
+        s_stat.model[0] = 0;
+        s_stat.fw[0] = 0;
+        s_stat.syncing = false;
+    }
     const char *r = sl2_link_pair_result(&s_link);
     if (r != s_stat.result) {              /* interned — pointer compare works */
         s_stat.outcome = outcome_of(r);
@@ -644,6 +694,18 @@ void EspnowLink::loop() {
 bool EspnowLink::isBonded() const { return s_stat.bonded; }
 bool EspnowLink::isPeerLive() const { return s_stat.live; }
 void EspnowLink::getPeerMac(uint8_t out[6]) const { memcpy(out, s_stat.mac0, 6); }
+bool EspnowLink::getDialDetail(EspnowDialDetail &out) const {
+    out.bonded = s_stat.bonded;
+    if (!s_stat.bonded) return false;
+    out.live = s_stat.live;
+    out.lastSeenSec = s_stat.lastSeenSec;
+    out.rssi = s_stat.rssi;
+    out.haveInfo = s_stat.haveInfo;
+    memcpy(out.model, s_stat.model, sizeof out.model);
+    memcpy(out.fw, s_stat.fw, sizeof out.fw);
+    out.syncing = s_stat.syncing;
+    return true;
+}
 void EspnowLink::startPairing() { if (s_started) s_reqPairStart = true; }
 void EspnowLink::cancelPairing() { if (s_started) s_reqPairCancel = true; }
 bool EspnowLink::pairingActive() const { return s_stat.pairing; }
@@ -726,6 +788,7 @@ void EspnowLink::loop() {}
 bool EspnowLink::isBonded() const { return false; }
 bool EspnowLink::isPeerLive() const { return false; }
 void EspnowLink::getPeerMac(uint8_t out[6]) const { for (int i = 0; i < 6; i++) out[i] = 0; }
+bool EspnowLink::getDialDetail(EspnowDialDetail &out) const { out.bonded = false; return false; }
 void EspnowLink::startPairing() {}
 void EspnowLink::cancelPairing() {}
 bool EspnowLink::pairingActive() const { return false; }

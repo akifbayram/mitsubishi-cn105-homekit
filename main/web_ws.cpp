@@ -607,6 +607,22 @@ void WebUI::pushState() {
             espnowLink.pairingActive() ? "true" : "false",
             espnowLink.pairingSecondsLeft(),
             espnowLink.pairResult());
+
+        EspnowDialDetail dd;
+        if (espnowLink.getDialDetail(dd)) {
+            jsonAppend(buf, sizeof(buf), &n,
+                ",\"remoteLastSeen\":%ld,\"remoteSyncing\":%s",
+                (long)dd.lastSeenSec, dd.syncing ? "true" : "false");
+            if (dd.rssi != 0)
+                jsonAppend(buf, sizeof(buf), &n, ",\"remoteRssi\":%d", dd.rssi);
+            if (dd.haveInfo && dd.model[0]) {
+                char escModel[64], escFw[48];
+                jsonEscape(dd.model, escModel, sizeof(escModel));
+                jsonEscape(dd.fw, escFw, sizeof(escFw));
+                jsonAppend(buf, sizeof(buf), &n,
+                    ",\"remoteModel\":\"%s\",\"remoteFw\":\"%s\"", escModel, escFw);
+            }
+        }
     }
 
     // Before HomeKit has started, its fields are placeholders — neutralize
