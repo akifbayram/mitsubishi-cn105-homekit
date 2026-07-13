@@ -11,6 +11,8 @@
 #include <freertos/task.h>
 
 #include "logging.h"
+#include "event_log.h"
+#include "time_sync.h"
 #include "settings.h"
 #include "board_profile.h"
 #include "branding.h"
@@ -51,19 +53,7 @@ static constexpr uint32_t CRASH_MAGIC     = 0xDEAD0505;
 static constexpr uint32_t CRASH_THRESHOLD = 5;
 static bool safeMode = false;
 
-static const char *resetReasonStr(esp_reset_reason_t r) {
-    switch (r) {
-        case ESP_RST_POWERON:   return "POWER_ON";
-        case ESP_RST_SW:        return "SW_RESTART";
-        case ESP_RST_PANIC:     return "PANIC";
-        case ESP_RST_TASK_WDT:  return "TASK_WDT";
-        case ESP_RST_INT_WDT:   return "INT_WDT";
-        case ESP_RST_WDT:       return "WDT";
-        case ESP_RST_BROWNOUT:  return "BROWNOUT";
-        case ESP_RST_DEEPSLEEP: return "DEEPSLEEP";
-        default:                return "OTHER";
-    }
-}
+uint32_t appCrashCount(void) { return s_crashCount; }
 
 // ── State flags ─────────────────────────────────────────────────────────────
 // (HomeKit started-ness lives in homekit_is_started() — no parallel flag here)
@@ -92,15 +82,15 @@ extern "C" void app_main(void)
     ESP_ERROR_CHECK(err);
 
     // ── 2. Crash loop detection ────────────────────────────────────────
+    esp_reset_reason_t resetReason = esp_reset_reason();
+    bool wasCrash = (resetReason == ESP_RST_PANIC   || resetReason == ESP_RST_TASK_WDT ||
+                     resetReason == ESP_RST_INT_WDT || resetReason == ESP_RST_WDT);
     {
-        esp_reset_reason_t reason = esp_reset_reason();
         if (s_crashMagic != CRASH_MAGIC) {
             s_crashMagic = CRASH_MAGIC;
             s_crashCount = 0;
         }
-        bool isCrash = (reason == ESP_RST_PANIC  || reason == ESP_RST_TASK_WDT ||
-                        reason == ESP_RST_INT_WDT || reason == ESP_RST_WDT);
-        if (isCrash) {
+        if (wasCrash) {
             s_crashCount++;
         } else {
             s_crashCount = 0;
@@ -115,10 +105,13 @@ extern "C" void app_main(void)
     logging_init();
     logging_set_level(settings.get().logLevel);
 
+    // ── 5. Device event log (persistent boot/crash/fault history) ────────
+    eventlog_init(resetReason, wasCrash, safeMode);
+
     LOG_INFO("═══════════════════════════════════════");
     LOG_INFO("Mitsubishi CN105 HomeKit Controller");
     LOG_INFO("Board: %s  FW: %s", BOARD_NAME, FW_VERSION);
-    LOG_INFO("Reset: %s  Crashes: %lu", resetReasonStr(esp_reset_reason()), (unsigned long)s_crashCount);
+    LOG_INFO("Reset: %s  Crashes: %lu", reset_reason_str(resetReason), (unsigned long)s_crashCount);
     if (safeMode) LOG_WARN(">>> SAFE MODE — %lu consecutive crashes, skipping CN105/HomeKit/BLE <<<", (unsigned long)s_crashCount);
     LOG_INFO("═══════════════════════════════════════");
 
@@ -287,6 +280,51 @@ extern "C" void app_main(void)
         // ── WiFi recovery + button — every iter (~10 ms); WiFi checks are
         // rate-limited to 1 Hz inside loop()
         wifiRecovery.loop();
+
+        // ── Event log edges + SNTP one-shot — 1 Hz ───────────────────────
+        // All app-level event detection lives here (single place, no new
+        // coupling inside the protocol/wifi modules). 1 Hz is plenty for
+        // these transitions and keeps getState()'s lock + struct copy off
+        // the 10 ms path.
+        static uint32_t lastEventScan = 0;
+        if (now - lastEventScan >= 1000) {
+            lastEventScan = now;
+
+            static bool sntpStarted = false;
+            if (!sntpStarted && WifiManager::isConnected()) {
+                sntpStarted = true;
+                time_sync_start();
+            }
+
+            // Heat pump link lost/restored (only after the first successful
+            // connect — the initial handshake window isn't an outage).
+            static bool everConnected = false;
+            static bool lastCn105     = false;
+            bool cn105Now = cn105.isConnected();
+            if (cn105Now != lastCn105) {
+                if (cn105Now) {
+                    if (everConnected) eventlog_append(EV_CN105_RESTORED);
+                    everConnected = true;
+                } else if (everConnected) {
+                    eventlog_append(EV_CN105_LOST);
+                }
+                lastCn105 = cn105Now;
+            }
+
+            // Heat pump fault code appearing
+            static bool lastHasError = false;
+            const CN105State evSt = cn105.getState();
+            if (evSt.hasError != lastHasError) {
+                if (evSt.hasError) eventlog_append(EV_CN105_ERROR, evSt.errorCode);
+                lastHasError = evSt.hasError;
+            }
+
+            // WiFi recovery AP raised
+            static bool lastRecoveryAP = false;
+            bool apActive = wifiRecovery.isAPActive();
+            if (apActive && !lastRecoveryAP) eventlog_append(EV_RECOVERY_AP);
+            lastRecoveryAP = apActive;
+        }
 
         // ── Main-loop alive — 15s ────────────────────────────────────
         if (now - lastAliveLog >= 15000) {

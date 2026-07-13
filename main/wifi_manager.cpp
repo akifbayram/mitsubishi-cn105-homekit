@@ -2,9 +2,11 @@
 #include "logging.h"
 
 #include <cstring>
+#include <algorithm>
 #include <esp_wifi.h>
 #include <esp_netif.h>
 #include <esp_event.h>
+#include <esp_timer.h>
 #include <nvs_flash.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/event_groups.h>
@@ -34,6 +36,21 @@ static char s_apPassword[64] = {};
 // Credentials cache
 static int8_t s_haveCreds = -1;   // -1 unknown, 0 no, 1 yes (see hasCredentials)
 
+// Health counter: established connections lost this boot (diagnostics)
+static uint32_t s_disconnects = 0;
+
+// Reconnect backoff: a handful of instant retries covers the common blip;
+// after that, waiting is kinder to the AP and the 2.4 GHz radio than
+// hammering esp_wifi_connect() on every DISCONNECTED event. Capped well
+// below the WifiRecovery fallback timeouts (2/5 min), so the recovery AP
+// timing is unaffected. Counter resets on GOT_IP and on explicit connect().
+static uint32_t s_retryCount = 0;
+static esp_timer_handle_t s_reconnectTimer = nullptr;
+
+static void reconnect_timer_cb(void *) {
+    esp_wifi_connect();
+}
+
 // ── Event handler ───────────────────────────────────────────────────────────
 static void wifi_event_handler(void* arg, esp_event_base_t event_base,
                                int32_t event_id, void* event_data)
@@ -45,13 +62,28 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
                 break;
 
             case WIFI_EVENT_STA_DISCONNECTED: {
+                if (s_connected) s_disconnects++;   // count real drops, not failed retries
                 s_connected = false;
                 if (s_wifiEventGroup) {
                     xEventGroupClearBits(s_wifiEventGroup, CONNECTED_BIT);
                 }
                 if (!s_wifiScanning) {
-                    LOG_WARN("STA disconnected — reconnecting...");
-                    esp_wifi_connect();
+                    s_retryCount++;
+                    uint32_t delayMs = 0;
+                    if (s_retryCount > 3) {   // 2s, 4s, 8s, 16s, then 30s cap
+                        uint32_t shift = std::min<uint32_t>(s_retryCount - 4, 4);
+                        delayMs = std::min<uint32_t>(2000u << shift, 30000);
+                    }
+                    if (delayMs == 0) {
+                        LOG_WARN("STA disconnected — reconnecting...");
+                        esp_wifi_connect();
+                    } else if (s_reconnectTimer &&
+                               esp_timer_start_once(s_reconnectTimer, (uint64_t)delayMs * 1000) == ESP_OK) {
+                        LOG_WARN("STA disconnected — retry %lu in %lums",
+                                 (unsigned long)s_retryCount, (unsigned long)delayMs);
+                    } else {
+                        esp_wifi_connect();   // timer unavailable/already armed — retry now
+                    }
                 }
                 break;
             }
@@ -64,6 +96,7 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
             ip_event_got_ip_t* event = static_cast<ip_event_got_ip_t*>(event_data);
             LOG_INFO("Got IP: " IPSTR, IP2STR(&event->ip_info.ip));
             s_connected = true;
+            s_retryCount = 0;
             if (s_wifiEventGroup) {
                 xEventGroupSetBits(s_wifiEventGroup, CONNECTED_BIT);
             }
@@ -87,6 +120,16 @@ void WifiManager::init(const char* hostname, const char* apName, const char* apP
 
     // Create event group for waitForConnection()
     s_wifiEventGroup = xEventGroupCreate();
+
+    // Reconnect backoff timer (see the disconnect handler)
+    const esp_timer_create_args_t timerArgs = {
+        .callback = reconnect_timer_cb,
+        .arg = nullptr,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "wifi-retry",
+        .skip_unhandled_events = true,
+    };
+    esp_timer_create(&timerArgs, &s_reconnectTimer);
 
     // Initialize TCP/IP stack and default event loop
     ESP_ERROR_CHECK(esp_netif_init());
@@ -145,6 +188,10 @@ bool WifiManager::connect(const char* ssid, const char* password)
 
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
 
+    // Fresh credentials get a fresh retry budget (and no stale delayed retry)
+    s_retryCount = 0;
+    if (s_reconnectTimer) esp_timer_stop(s_reconnectTimer);
+
     esp_err_t err = esp_wifi_connect();
     if (err != ESP_OK) {
         LOG_ERROR("esp_wifi_connect() failed: %s", esp_err_to_name(err));
@@ -174,6 +221,16 @@ bool WifiManager::waitForConnection(uint32_t timeoutMs)
     );
 
     return (bits & CONNECTED_BIT) != 0;
+}
+
+uint32_t WifiManager::getDisconnectCount()
+{
+    return s_disconnects;
+}
+
+const char* WifiManager::getHostname()
+{
+    return s_apName;
 }
 
 int8_t WifiManager::getRSSI()

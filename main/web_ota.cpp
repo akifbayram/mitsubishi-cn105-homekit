@@ -1,4 +1,5 @@
 #include "web_server.h"
+#include "event_log.h"
 #include <esp_task_wdt.h>
 #include <mbedtls/sha256.h>
 #include "status_led.h"
@@ -171,6 +172,7 @@ esp_err_t WebUI::handleOtaUpload(httpd_req_t *req) {
     esp_task_wdt_reconfigure(&wdt_default);
 
     LOG_INFO("Firmware update successful (%u bytes). Restarting...", (unsigned)received);
+    eventlog_append(EV_OTA_INSTALLED);
 
     httpd_resp_set_type(req, "application/json");
     httpd_resp_sendstr(req, "{\"status\":\"success\"}");

@@ -1,6 +1,8 @@
 idf_component_register(
     SRCS "main.cpp"
          "logging.cpp"
+         "event_log.cpp"
+         "time_sync.cpp"
          "settings.cpp"
          "status_led.cpp"
          "cn105_protocol.cpp"
@@ -122,6 +124,11 @@ endif()
 if(NOT DEFINED BRAND_THEME_COLOR)
     set(BRAND_THEME_COLOR "#1a73e8")
 endif()
+# Footer "Help & Support" link in the web UI. Branded builds point this at
+# their own docs/support page; -DBRAND_SUPPORT_URL="" hides the link.
+if(NOT DEFINED BRAND_SUPPORT_URL)
+    set(BRAND_SUPPORT_URL "https://github.com/akifbayram/mitsubishi-cn105-homekit")
+endif()
 
 # Wire the brand strings into the C/C++ compiler too — not just the HTML codegen
 # below. Without this, branding.h's #ifndef fallbacks compile in (e.g. BRAND_NAME
@@ -149,6 +156,7 @@ add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/web_ui.html.gz
         --fw-version "${PROJECT_VER}"
         --board-fw-id "${BOARD_FW_ID}"
         --update-manifest-url "${UPDATE_MANIFEST_URL}"
+        --support-url "${BRAND_SUPPORT_URL}"
     DEPENDS ${PROJECT_DIR}/web/index.html ${PROJECT_DIR}/scripts/embed_html_idf.py
     COMMENT "Generating web_ui.html.gz"
     VERBATIM

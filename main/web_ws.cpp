@@ -1,13 +1,21 @@
 #include "web_server.h"
 #include "cn105_strings.h"
 #include "json_utils.h"
+#include "event_log.h"
+#include "time_sync.h"
 #include "wifi_manager.h"
 #include "wifi_recovery.h"
 #include "homekit_setup.h"
 #include "esp_utils.h"
+#include "board_profile.h"
 #include <esp_heap_caps.h>
+#include <esp_mac.h>
+#include <esp_app_desc.h>
+#include <nvs_flash.h>
 #include <lwip/sockets.h>
+#include <ctime>
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include "ble_config.h"
 #ifdef BLE_ENABLE
@@ -16,6 +24,16 @@
 #include "espnow_link.h"
 
 static const char *TAG = "web_ws";
+
+// Free-heap floor for the WS log stream (bytes). Sustained DEBUG streaming to
+// a connected client consumed ~45 KB/min and the WiFi driver dies silently
+// (no disconnect event) once free heap reaches ~40 KB — observed 2026-07-12 on
+// AtomS3 Lite. Shed log frames well above that line; resume with hysteresis so
+// the stream doesn't flap at the boundary. State pushes (1 Hz, ~1.4 KB) are
+// deliberately NOT gated — they keep the UI alive and are too small to matter.
+static constexpr uint32_t WS_LOG_SHED_HEAP   = 60 * 1024;
+static constexpr uint32_t WS_LOG_RESUME_HEAP = 70 * 1024;
+
 
 // ══════════════════════════════════════════════════════════════════════════════
 // WebSocket handler: GET /ws
@@ -36,6 +54,7 @@ esp_err_t WebUI::handleWebSocket(httpd_req_t *req) {
         LOG_INFO("WebSocket client connected (fd=%d)", fd);
         // Push initial state immediately (broadcast reaches this new client too)
         webUI.pushState();
+        webUI.sendDeviceInfo(fd);
         return ESP_OK;
     }
 
@@ -313,6 +332,43 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
         }
         sendWsText(httpd_req_to_sockfd(req), "{\"type\":\"wifiSaved\"}");
 
+    } else if (strcmp(cmd, "diag") == 0) {
+        // ── Device event history (About card / diagnostics copy) ────────
+        // 24 events × ~75 B + counters — too big for a stack frame here.
+        constexpr size_t DIAG_BUF = 2816;
+        char *out = (char *)malloc(DIAG_BUF);
+        if (!out) return;
+        int n = snprintf(out, DIAG_BUF, "{\"type\":\"events\",");
+        int m = eventlog_json(out + n, DIAG_BUF - n);
+        if (m > 0 && n + m + 1 < (int)DIAG_BUF) {
+            n += m;
+            out[n++] = '}';
+            out[n] = '\0';
+            sendWsText(httpd_req_to_sockfd(req), out);
+        }
+        free(out);
+
+    } else if (strcmp(cmd, "factoryReset") == 0) {
+        // ── Full factory reset — wipes EVERYTHING in NVS ─────────────────
+        // Settings, WiFi credentials, HomeKit pairings + setup code, dial
+        // bonds, event history: all namespaces live in the default "nvs"
+        // partition. Guarded by an explicit confirm string so a stray or
+        // malformed frame can't wipe a unit.
+        char confirmVal[8] = {0};
+        jsonGetString(msg, "confirm", confirmVal, sizeof(confirmVal));
+        if (strcmp(confirmVal, "ERASE") != 0) {
+            sendWsText(httpd_req_to_sockfd(req),
+                       "{\"type\":\"error\",\"msg\":\"Factory reset not confirmed\"}");
+            return;
+        }
+        LOG_WARN("FACTORY RESET — erasing all NVS and restarting");
+        sendWsText(httpd_req_to_sockfd(req),
+                   "{\"type\":\"info\",\"msg\":\"Factory reset — erasing all settings and restarting...\"}");
+        vTaskDelay(pdMS_TO_TICKS(300));   // let the frame flush
+        nvs_flash_deinit();               // close handles; stray writes now fail cleanly
+        nvs_flash_erase();
+        esp_restart();
+
     } else if (strcmp(cmd, "restart") == 0) {
         LOG_INFO("Restart requested");
         sendWsText(httpd_req_to_sockfd(req), "{\"type\":\"info\",\"msg\":\"Restarting...\"}");
@@ -321,6 +377,7 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
 
     } else if (strcmp(cmd, "hkReset") == 0) {
         LOG_WARN("HomeKit pairing reset requested");
+        eventlog_append(EV_HK_RESET);
         if (homekit_reset_pairings()) {
             // Success path reboots shortly after (SDK behavior)
             sendWsText(httpd_req_to_sockfd(req), "{\"type\":\"info\",\"msg\":\"Removing HomeKit pairings...\"}");
@@ -358,19 +415,30 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
 void WebUI::sendWsText(int fd, const char *text) {
     if (fd < 0 || !_server) return;
 
+    // Serialize all frame writes: httpd_ws_send_frame_async() sends on the
+    // CALLER'S task, and senders live on many tasks (log hook on whatever task
+    // logged, state push on main + httpd). Two unserialized sends interleave
+    // mid-frame on the wire and the browser kills the socket (1007 invalid
+    // data). Bounded take: a wedged client can hold a send for the full 5s
+    // SO_SNDTIMEO — drop the frame rather than stall logging tasks behind it
+    // (logs are best-effort; state re-pushes at 1 Hz).
+    if (!_wsSendMux || xSemaphoreTake(_wsSendMux, pdMS_TO_TICKS(100)) != pdTRUE) return;
+
+    esp_err_t ret = ESP_OK;
     // Skip fds that are no longer live WebSocket sessions (closed / plain HTTP).
-    if (httpd_ws_get_fd_info(_server, fd) != HTTPD_WS_CLIENT_WEBSOCKET) return;
+    if (httpd_ws_get_fd_info(_server, fd) == HTTPD_WS_CLIENT_WEBSOCKET) {
+        httpd_ws_frame_t frame;
+        memset(&frame, 0, sizeof(frame));
+        frame.type    = HTTPD_WS_TYPE_TEXT;
+        frame.payload = (uint8_t *)text;
+        frame.len     = strlen(text);
+        ret = httpd_ws_send_frame_async(_server, fd, &frame);
+    }
+    xSemaphoreGive(_wsSendMux);
 
-    httpd_ws_frame_t frame;
-    memset(&frame, 0, sizeof(frame));
-    frame.type    = HTTPD_WS_TYPE_TEXT;
-    frame.payload = (uint8_t *)text;
-    frame.len     = strlen(text);
-
-    esp_err_t ret = httpd_ws_send_frame_async(_server, fd, &frame);
     if (ret != ESP_OK) {
-        // httpd reaps the dead socket on its own; this LOG_WARN is reentrancy-
-        // guarded in logging.cpp so it can't cascade through broadcastLog.
+        // The warn is queued to the log ring (no re-entry into this send
+        // path); httpd reaps the dead socket on its own.
         LOG_WARN("WS send to fd=%d failed: %d", fd, ret);
     }
 }
@@ -431,7 +499,7 @@ void WebUI::pushState() {
     char escSsid[65];
     jsonEscape(ssid, escSsid, sizeof(escSsid));
 
-    char buf[1400];
+    char buf[1536];
     int n = snprintf(buf, sizeof(buf),
         "{\"type\":\"state\""
         ",\"power\":%s"
@@ -492,14 +560,28 @@ void WebUI::pushState() {
         jsonAppend(buf, sizeof(buf), &n, ",\"runtime\":null");
     }
 
-    // Heap diagnostics
+    // Heap + reboot/connectivity health. resetReason/crashCount make a silent
+    // field reboot classifiable over the network (the boot banner scrolls out
+    // of the 12-line log ring before a client can reconnect); wifiDrops/
+    // cn105Drops/epoch add connectivity health (epoch 0 = wall clock not
+    // SNTP-synced yet).
     jsonAppend(buf, sizeof(buf), &n,
         ",\"heapFree\":%lu"
         ",\"heapMin\":%lu"
-        ",\"heapBlock\":%lu",
+        ",\"heapBlock\":%lu"
+        ",\"resetReason\":\"%s\""
+        ",\"crashCount\":%lu"
+        ",\"wifiDrops\":%lu"
+        ",\"cn105Drops\":%lu"
+        ",\"epoch\":%lu",
         (unsigned long)esp_get_free_heap_size(),
         (unsigned long)heap_caps_get_minimum_free_size(MALLOC_CAP_DEFAULT),
-        (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT)
+        (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT),
+        resetReasonStr(esp_reset_reason()),
+        (unsigned long)appCrashCount(),
+        (unsigned long)WifiManager::getDisconnectCount(),
+        (unsigned long)eventlog_session_count(EV_CN105_LOST),
+        (unsigned long)time_sync_epoch()
     );
 
     // Dual setpoint thresholds
@@ -630,15 +712,74 @@ void WebUI::pushState() {
 void WebUI::broadcastLog(const char *msg, size_t len) {
     if (!_server) return;
 
-    // Static buffers — safe because this is only called from the vprintf hook
-    // which runs under the ESP-IDF log lock (one task at a time).  Avoids
-    // ~600 bytes of stack pressure on constrained tasks like the WiFi task.
+    // Heap-floor shed (thresholds + rationale above). CONFIG_LOG_VERSION_1
+    // calls the vprintf hook UNLOCKED, so concurrent loggers can race this
+    // gate: the atomic keeps the flag un-torn, and the worst case is one
+    // frame shed or sent late — the threshold check self-corrects on the
+    // next log line.
+    static std::atomic<bool> shedding{false};
+    uint32_t freeHeap = esp_get_free_heap_size();
+    if (!shedding && freeHeap < WS_LOG_SHED_HEAP) {
+        shedding = true;
+        // Queued into the log ring like any line and drained next tick; safe
+        // because it fires only on the off->on shed transition, and while
+        // shedding is on the drained copy is dropped right here — no loop.
+        LOG_WARN("WS log stream paused: heapFree=%lu below %u",
+                 (unsigned long)freeHeap, (unsigned)WS_LOG_SHED_HEAP);
+    } else if (shedding && freeHeap > WS_LOG_RESUME_HEAP) {
+        shedding = false;
+    }
+    if (shedding) return;
+
+    // Static buffers — safe by design: broadcastLog's only caller is the
+    // main-task drain in WebUI::loop() (single consumer of the log ring),
+    // so no two invocations can overlap. Static keeps ~600 B off the stack.
     static char escaped[280];
     jsonEscape(msg, escaped, sizeof(escaped));
 
     static char buf[320];
     snprintf(buf, sizeof(buf), "{\"type\":\"log\",\"msg\":\"%s\"}", escaped);
     broadcastWs(buf);
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Device info frame — one-shot on WebSocket connect
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Everything here is constant for the life of the connection (or changes only
+// with a reboot), so it rides a single frame at connect instead of bloating
+// the 1 Hz state push. The UI keeps it for the About card + diagnostics copy.
+void WebUI::sendDeviceInfo(int fd) {
+    uint8_t mac[6];
+    esp_read_mac(mac, ESP_MAC_WIFI_STA);
+    char ip[16] = "";
+    WifiManager::getIP(ip, sizeof(ip));
+    const esp_app_desc_t *app = esp_app_get_description();
+
+    char buf[512];
+    snprintf(buf, sizeof(buf),
+        "{\"type\":\"deviceInfo\""
+        ",\"board\":\"%s\""
+        ",\"fw\":\"%s\""
+        ",\"idf\":\"%s\""
+        ",\"mac\":\"%02X:%02X:%02X:%02X:%02X:%02X\""
+        ",\"ip\":\"%s\""
+        ",\"hostname\":\"%s\""
+        ",\"resetReason\":\"%s\""
+        ",\"bootCount\":%lu"
+        ",\"crashTotal\":%lu"
+        ",\"safeMode\":%s}",
+        BOARD_NAME,
+        app->version,
+        esp_get_idf_version(),
+        mac[0], mac[1], mac[2], mac[3], mac[4], mac[5],
+        ip,
+        WifiManager::getHostname(),
+        reset_reason_str(esp_reset_reason()),
+        (unsigned long)eventlog_boot_count(),
+        (unsigned long)eventlog_crash_total(),
+        eventlog_safe_mode() ? "true" : "false");
+    sendWsText(fd, buf);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -700,6 +841,17 @@ void WebUI::loop() {
     // Liveness: the 1s push exercises each socket; a dead/half-open socket fails
     // on send (SO_SNDTIMEO) and esp_http_server reaps it, so the next
     // collectWsClients() simply omits it. No separate ping loop needed.
+
+    // Drain queued log lines to WS clients — bounded per 10 ms tick so one
+    // slow client send (SO_SNDTIMEO allows up to 5 s) can't monopolize the
+    // main loop. Producers never touch sockets (threading contract in
+    // logging.cpp); this is the single consumer.
+    char logLine[256];
+    for (int i = 0; i < 4; i++) {
+        size_t len = logging_drain(logLine, sizeof(logLine));
+        if (len == 0) break;
+        broadcastLog(logLine, len);
+    }
 
 #ifdef BLE_ENABLE
     if (BleSensor::pollDiscoveryComplete()) {

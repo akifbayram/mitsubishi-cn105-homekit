@@ -3,6 +3,8 @@
 #include <atomic>
 #include <esp_http_server.h>
 #include <esp_ota_ops.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 #include "cn105_protocol.h"
 #include "settings.h"
 
@@ -19,6 +21,7 @@ private:
     CN105Controller *_ctrl   = nullptr;
     uint32_t _lastStatePush  = 0;
     bool _apMode = false;               // True when fallback AP is active
+    SemaphoreHandle_t _wsSendMux = nullptr;  // Serializes all WS frame writes (see sendWsText)
 
     void applyCaptivePortalHandler();   // (Un)install the AP-mode captive 404 handler
 
@@ -38,6 +41,7 @@ private:
 
     // ── WebSocket message handling ──────────────────────────────────────────
     void handleWsMessage(httpd_req_t *req, const char *msg);
+    void sendDeviceInfo(int fd);        // one-shot identity/diagnostics frame on WS connect
     void pushState();
     void pushDiscoveryResults(bool done);
     void sendWsText(int fd, const char *text);

@@ -22,6 +22,13 @@ namespace WifiManager {
     /// WiFi signal strength (returns 0 if not connected).
     int8_t getRSSI();
 
+    /// Times an established connection was lost this boot (reconnect attempts
+    /// that fail again don't count — only connected→disconnected transitions).
+    uint32_t getDisconnectCount();
+
+    /// The hostname passed to init() (also the mDNS name and AP SSID).
+    const char* getHostname();
+
     /// Current STA SSID into out (NUL-terminated; empty if unknown).
     void getSSID(char* out, size_t len);
     /// Current STA IPv4 as a dotted string into out (empty if no IP).

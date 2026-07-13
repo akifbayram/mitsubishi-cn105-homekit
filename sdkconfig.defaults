@@ -34,3 +34,11 @@ CONFIG_BOOTLOADER_LOG_LEVEL_WARN=y
 # Serin Link v2 pairing (libsodium Ed25519/X25519) runs on the main task via
 # espnowLink.loop(); the 3.5KB IDF default overflows (debug-exception panic).
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384
+
+# Any task that logs runs vsnprintf in the log hook on its own stack — worst
+# case ~1.5KB, marginal on the IDF-default small stacks. The FreeRTOS timer
+# task (2048; a closed-blob WiFi timer logs there) panicked with a stack
+# canary during DEBUG-level soak testing; the event task (2304) logs on every
+# WiFi/HomeKit event and is the same class.
+CONFIG_FREERTOS_TIMER_TASK_STACK_DEPTH=4096
+CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=4096

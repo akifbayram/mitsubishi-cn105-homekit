@@ -1,5 +1,6 @@
 #include "web_server.h"
 #include "json_utils.h"
+#include "event_log.h"
 #include "branding.h"
 #include "wifi_manager.h"
 #include "wifi_recovery.h"
@@ -226,6 +227,7 @@ bool WebUI::applyWifiCredentials(const char *json, const char **outError) {
     // Password is optional (open networks send empty password)
     jsonGetString(json, "password", password, sizeof(password));
     LOG_INFO("Saving WiFi credentials (SSID: %s)", ssid);
+    eventlog_append(EV_WIFI_CREDS_CHANGED);
     // Connect via WifiManager (saves to NVS and initiates connection)
     WifiManager::connect(ssid, password);
     // Mark change pending (shorter recovery timeout); also refreshes the
@@ -341,6 +343,9 @@ esp_err_t WebUI::handleFavicon(httpd_req_t *req) {
 
 void WebUI::begin(CN105Controller *ctrl) {
     _ctrl = ctrl;
+
+    if (!_wsSendMux) _wsSendMux = xSemaphoreCreateMutex();
+    if (!_wsSendMux) LOG_ERROR("WS send mutex alloc failed — WS output disabled");
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port      = 80;
@@ -465,7 +470,4 @@ void WebUI::begin(CN105Controller *ctrl) {
     applyCaptivePortalHandler();
 
     LOG_INFO("HTTP server started, WebSocket endpoint at /ws");
-
-    // Register log hook to stream logs to WebSocket client
-    logHook = [](const char *msg, size_t len) { webUI.broadcastLog(msg, len); };
 }

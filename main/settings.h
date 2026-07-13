@@ -8,6 +8,14 @@
 #include "ble_config.h"
 #include "mode_caps.h"
 
+// Bump when a stored key's meaning or encoding changes, and add a
+// `if (storedVer < N) { ...migrate... }` branch in SettingsStore::begin().
+// The version has been written since it was introduced, so a device that
+// reports 0 predates it (treat as "oldest known layout"). Adding a NEW key
+// with a sane default does NOT need a bump — absent keys already fall back
+// to defaults on load.
+inline constexpr uint8_t SETTINGS_SCHEMA_VERSION = 1;
+
 struct DeviceSettings {
     LogLevel logLevel    = LOG_LEVEL_INFO;
     uint32_t pollMs      = 2000;

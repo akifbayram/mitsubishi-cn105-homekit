@@ -326,6 +326,12 @@ input[type=range].slim::-moz-range-thumb{width:22px;height:22px;}
 .ota-bar{width:0;height:100%;background:var(--accent);border-radius:5px;transition:width .25s;}
 .ota-status{font-size:12px;color:var(--text2);margin-top:8px;}
 .setting-caption{font-size:12px;color:var(--text2);margin:8px 0 0;line-height:1.4;}
+.advanced{margin-top:14px;border-top:1px solid var(--sep);padding-top:12px;}
+.advanced summary{font-size:12.5px;color:var(--text2);cursor:pointer;list-style:none;display:flex;align-items:center;gap:5px;
+  -webkit-tap-highlight-color:transparent;}
+.advanced summary::-webkit-details-marker{display:none;}
+.advanced summary::before{content:"\203A";display:inline-block;transition:transform .15s;font-size:15px;}
+.advanced[open] summary::before{transform:rotate(90deg);}
 .setting-value{font-size:14px;color:var(--text);font-weight:500;}
 
 /* ===== Logs ===== */
@@ -341,6 +347,7 @@ input[type=range].slim::-moz-range-thumb{width:22px;height:22px;}
 .log-box .lI{color:var(--green);}
 .log-box .lW{color:var(--orange);}
 .log-box .lE{color:var(--red);}
+#evBox:empty::before{content:"No events recorded yet";}
 
 /* ===== Icon badge (dial / wifi / pairing) ===== */
 .icon-badge{width:40px;height:40px;border-radius:11px;background:var(--surface2);display:flex;align-items:center;justify-content:center;flex:none;color:var(--text);}
@@ -350,6 +357,7 @@ input[type=range].slim::-moz-range-thumb{width:22px;height:22px;}
 
 /* ===== Footer ===== */
 .footer{text-align:center;padding:22px 16px 26px;font-size:11.5px;color:var(--text3);}
+.footer a{color:var(--accent);text-decoration:none;}
 
 /* ===== Toast ===== */
 .toast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,12px);
@@ -749,6 +757,17 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     </div>
     <div style="padding:14px 18px 18px;border-top:1px solid var(--sep)">
       <button class="save-btn" onclick="saveConfig()">Save Settings</button>
+      <div class="btn-row" style="margin-top:9px">
+        <button class="btn-secondary" onclick="exportSettings()">Export Settings</button>
+        <label class="btn-secondary" style="cursor:pointer">Import Settings<input type="file" accept=".json,application/json" hidden onchange="importSettings(this)"></label>
+      </div>
+      <details class="advanced">
+        <summary>Advanced</summary>
+        <p class="setting-caption" style="margin:8px 0 10px">
+          Factory reset erases everything — Wi-Fi credentials, HomeKit pairing, paired Link, and all settings — and restarts the device into setup mode. This cannot be undone.
+        </p>
+        <button class="btn-danger" onclick="factoryReset()">Factory Reset&hellip;</button>
+      </details>
       <div id="capBanner" class="ble-banner muted" style="display:none;margin-top:12px;flex-direction:column;align-items:stretch;gap:10px;text-align:center">
         Mode changes saved. Restart to apply them to HomeKit.
         <button class="btn-danger" onclick="restartDevice()">Reboot Now</button>
@@ -757,7 +776,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   </div>
 
   <!-- ===== FIRMWARE ===== -->
-  <h2 class="group-label">Firmware</h2>
+  <h2 class="group-label">Firmware<span class="section-summary" id="fwBadge" style="display:none"><span class="status-dot warning"></span><span class="summary-text" style="color:var(--orange)">Update available</span></span></h2>
   <div class="card" id="firmwareBody">
     <div class="fw-row">
       <div><div class="card-title">Installed</div><div class="fw-installed-ver" id="fwInstalled">{{FW_VERSION}}</div></div>
@@ -786,6 +805,36 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     </div>
   </div>
 
+  <!-- ===== ABOUT / DEVICE INFO ===== -->
+  <h2 class="group-label">About</h2>
+  <div class="card" id="aboutBody">
+    <div id="safeModeBanner" class="ble-banner warn" style="display:none;margin-bottom:14px">
+      Safe mode — the device crashed repeatedly, so heat pump, HomeKit, and Bluetooth are disabled. Update the firmware below, then restart.
+    </div>
+    <div class="status-grid">
+      <div class="status-item"><span class="status-label">Board</span><span id="abBoard">--</span></div>
+      <div class="status-item"><span class="status-label">Firmware</span><span id="abFw">{{FW_VERSION}}</span></div>
+      <div class="status-item"><span class="status-label">IP Address</span><span id="abIp" class="mono">--</span></div>
+      <div class="status-item"><span class="status-label">mDNS Name</span><span id="abMdns" class="mono">--</span></div>
+      <div class="status-item"><span class="status-label">MAC</span><span id="abMac" class="mono">--</span></div>
+      <div class="status-item"><span class="status-label">Last Reset</span><span id="abReset">--</span></div>
+      <div class="status-item"><span class="status-label">Boots</span><span id="abBoots">--</span></div>
+      <div class="status-item"><span class="status-label">Crashes</span><span id="abCrashes">--</span></div>
+      <div class="status-item"><span class="status-label">Free Heap</span><span id="abHeap">--</span></div>
+      <div class="status-item"><span class="status-label">Lowest Heap</span><span id="abHeapMin">--</span></div>
+      <div class="status-item"><span class="status-label">Wi-Fi Drops</span><span id="abWifiDrops">--</span></div>
+      <div class="status-item"><span class="status-label">Pump Link Drops</span><span id="abCnDrops">--</span></div>
+    </div>
+    <button class="btn-secondary" style="margin-top:14px" onclick="copyDiagnostics()">Copy Diagnostics</button>
+    <div class="log-toolbar" style="margin-top:16px">
+      <span class="ttl">Device Events</span>
+      <div class="log-actions">
+        <button class="log-btn" onclick="refreshEvents()">Refresh</button>
+      </div>
+    </div>
+    <div class="log-box" id="evBox"></div>
+  </div>
+
   <!-- ===== LOGS ===== -->
   <h2 class="group-label">Diagnostics · Logs</h2>
   <div class="card" id="logsBody">
@@ -799,7 +848,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     <div class="log-box" id="logBox"></div>
   </div>
 
-  <div class="footer">Mitsubishi CN105 Controller</div>
+  <div class="footer">{{BRAND_NAME}} · <span id="footerFw">{{FW_VERSION}}</span> · <a id="supportLink" href="{{SUPPORT_URL}}" target="_blank" rel="noopener">Help &amp; Support</a></div>
 
 </div>
 </main>
@@ -1243,6 +1292,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       setConnState('connected');
       if(reconnTimer){clearTimeout(reconnTimer);reconnTimer=null}
       reconnDelay=0;
+      try{ws.send('{"cmd":"diag"}')}catch(e){}   // populate the device events list
       lastMsgTime=Date.now();
       if(hbTimer) clearInterval(hbTimer);
       hbTimer=setInterval(function(){
@@ -1270,6 +1320,8 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
         var msg=JSON.parse(ev.data);
         if(msg.type==='state') onState(msg);
         else if(msg.type==='log') onLog(msg.msg);
+        else if(msg.type==='deviceInfo') onDeviceInfo(msg);
+        else if(msg.type==='events') onEvents(msg);
         else if(msg.type==='ota') onOta(msg);
         else if(msg.type==='bleScanResults') onBleScanResults(msg);
         else if(msg.type==='wifiSaved') onWifiSaved();
@@ -1398,6 +1450,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
 
   // ── State handler ──────────────────────────────────────────────────────────
   function onState(s){
+    lastState=s;   // retained for diagnostics copy + event timestamps
     var locked = lastCmdTime > 0 && (Date.now() - lastCmdTime) < 2000;
 
     if(!locked){
@@ -1468,7 +1521,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     }
 
     if(s.errorCode!=null){
-      $('errorCode').textContent='E'+s.errorCode.toString(16).toUpperCase();
+      $('errorCode').textContent=fmtErr(s.errorCode);
       $('errorCode').style.color='var(--red)';
     } else {
       $('errorCode').textContent='None';
@@ -1587,7 +1640,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     if(s.errorCode!=null){
       cn105Dot.className='status-dot error';
       cn105Lbl.textContent='Error';cn105Lbl.style.color='var(--red)';
-      cn105Bnr.className='ble-banner warn';cn105Bnr.textContent='Error code E'+s.errorCode.toString(16).toUpperCase()+' reported by heat pump';cn105Bnr.style.display='flex';
+      cn105Bnr.className='ble-banner warn';cn105Bnr.textContent='Error code '+fmtErr(s.errorCode)+' reported by heat pump';cn105Bnr.style.display='flex';
     }else if(s.connected){
       cn105Dot.className='status-dot active';
       cn105Lbl.textContent='Connected';cn105Lbl.style.color='var(--green)';
@@ -1604,6 +1657,12 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     rssiVal.textContent=(s.rssi!=null?s.rssi:'--')+' dBm';
     wifiUptimeVal.textContent=s.wifiUptime?fmtUptime(s.wifiUptime):'--:--:--';
     uptimeVal.textContent=s.uptime!=null?fmtUptime(s.uptime):'--:--:--';
+
+    // About card — live health fields (identity fields come from deviceInfo)
+    if(s.heapFree!=null) $('abHeap').textContent=Math.round(s.heapFree/1024)+' KB';
+    if(s.heapMin!=null) $('abHeapMin').textContent=Math.round(s.heapMin/1024)+' KB';
+    if(s.wifiDrops!=null) $('abWifiDrops').textContent=s.wifiDrops;
+    if(s.cn105Drops!=null) $('abCnDrops').textContent=s.cn105Drops;
 
     // WiFi header: dot + status label
     var wifiLbl=$('wifiStatusLabel'),wifiDot=$('wifiDot');
@@ -2303,17 +2362,25 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   // Show the managed-update controls only on builds with a manifest baked in.
   // The indexOf guard keeps it hidden when viewing the raw unsubstituted file.
   // (Manual .bin upload is always visible, so no else-branch is needed.)
+  // Also runs a silent daily auto-check (browser-side, so the device itself
+  // still does no GitHub I/O): only a found update surfaces in the UI.
   if(BOARD_FW_ID&&UPDATE_MANIFEST_URL&&BOARD_FW_ID.indexOf('{{')<0){
     $('fwUpdateCheck').style.display='block';
+    if(Date.now()-(+localStorage.getItem('fwAutoCheckAt')||0)>86400e3){
+      localStorage.setItem('fwAutoCheckAt',String(Date.now()));
+      setTimeout(function(){checkForUpdate(true)},3000);
+    }
   }
 
-  window.checkForUpdate=function(){
+  window.checkForUpdate=function(silent){
     var btn=$('fwCheckBtn'),res=$('fwCheckResult'),row=$('fwInstallRow');
     btn.disabled=true;
-    res.style.display='block';
-    res.classList.remove('avail');
-    res.textContent='Checking…';
-    row.style.display='none';
+    if(!silent){
+      res.style.display='block';
+      res.classList.remove('avail');
+      res.textContent='Checking…';
+      row.style.display='none';
+    }
     fwLatest=null;
     fetch(UPDATE_MANIFEST_URL+'?t='+Date.now()).then(function(r){
       if(!r.ok) throw new Error('HTTP '+r.status);
@@ -2329,19 +2396,22 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       // Only declare "up to date" when we can compare a clean running version.
       // Dev builds fall through so a detected release can still be installed.
       if(!devBuild&&cmpVer(latest,cur)<=0){
-        res.textContent='Up to date · v'+cur;
+        if(!silent) res.textContent='Up to date · v'+cur;
         return;
       }
       var part=null;
       (build.parts||[]).forEach(function(p){if(p.path&&p.path.indexOf('firmware.bin')>=0)part=p});
       if(!part||!build.sha256){
+        res.style.display='block';
         res.textContent='v'+latest+' available — manifest missing install data, install manually below.';
         return;
       }
       var base=UPDATE_MANIFEST_URL.slice(0,UPDATE_MANIFEST_URL.lastIndexOf('/')+1);
       fwLatest={version:latest,binUrl:base+part.path,sha256:String(build.sha256).toLowerCase()};
+      res.style.display='block';
       res.textContent=devBuild?('Release v'+latest+' available (running dev build)'):('Version '+latest+' available');
       res.classList.add('avail');
+      $('fwBadge').style.display='';
       $('fwInstallBtn').textContent='Install v'+latest;
       $('fwInstallBtn').disabled=false;
       var notes=$('fwNotesLink');
@@ -2350,9 +2420,16 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       btn.style.display='none';
       row.style.display='block';
     }).catch(function(e){
-      res.textContent='Check failed: '+e.message;
+      if(!silent) res.textContent='Check failed: '+e.message;
     }).then(function(){btn.disabled=false});
   };
+
+  // Hide the footer support link when the build doesn't provide a URL
+  (function(){
+    var a=$('supportLink');
+    var h=a&&a.getAttribute('href');
+    if(a&&(!h||h.indexOf('{{')>=0)) a.style.display='none';
+  })();
 
   window.installUpdate=function(){
     if(!fwLatest) return;
@@ -2377,6 +2454,134 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       res.textContent='Install failed: '+e.message;
       btn.disabled=false;
     });
+  };
+
+  // ── About card: device info, events, diagnostics ───────────────────────────
+  var deviceInfo=null, lastEvents=null, lastState=null;
+
+  function onDeviceInfo(d){
+    deviceInfo=d;
+    $('abBoard').textContent=d.board||'--';
+    $('abFw').textContent=d.fw||'--';
+    $('abIp').textContent=d.ip||'--';
+    $('abMdns').textContent=d.hostname?(d.hostname+'.local'):'--';
+    $('abMac').textContent=d.mac||'--';
+    $('abReset').textContent=d.resetReason||'--';
+    $('abBoots').textContent=d.bootCount!=null?d.bootCount:'--';
+    $('abCrashes').textContent=d.crashTotal!=null?d.crashTotal:'--';
+    $('safeModeBanner').style.display=d.safeMode?'flex':'none';
+  }
+
+  function fmtErr(code){return 'E'+Number(code).toString(16).toUpperCase()}
+
+  // One line per event. Wall time comes from the event's own epoch when SNTP
+  // was synced at record time; otherwise, for current-boot events, it is
+  // derived from the device's live epoch minus how long ago the event was.
+  function fmtEvent(e){
+    var when=null;
+    if(e.e) when=new Date(e.e*1000);
+    else if(lastState&&lastState.epoch&&deviceInfo&&e.b===deviceInfo.bootCount)
+      when=new Date((lastState.epoch-(lastState.uptime-e.u))*1000);
+    var ts=when?when.toLocaleString():('boot #'+e.b+' +'+fmtUptime(e.u));
+    var what=e.t;
+    if(e.r) what+=' ('+e.r+')';                       // BOOT/CRASH reset reason (named device-side)
+    else if(e.t==='CN105_ERROR') what+=' ('+fmtErr(e.c)+')';
+    return ts+'  '+what;
+  }
+
+  function onEvents(m){
+    lastEvents=m;
+    var box=$('evBox');
+    box.textContent='';
+    (m.events||[]).forEach(function(e){
+      var div=document.createElement('div');
+      div.textContent=fmtEvent(e);
+      box.appendChild(div);
+    });
+  }
+
+  window.refreshEvents=function(){
+    if(ensureConnected()) send({cmd:'diag'});
+  };
+
+  window.copyDiagnostics=function(){
+    var d=deviceInfo||{}, s=lastState||{};
+    var L=['=== '+(s.deviceName||'Device')+' diagnostics ===',
+      'Generated: '+new Date().toISOString(),
+      'Board: '+(d.board||'?')+'  FW: '+(d.fw||'?')+'  IDF: '+(d.idf||'?'),
+      'MAC: '+(d.mac||'?')+'  IP: '+(d.ip||'?')+'  mDNS: '+(d.hostname?d.hostname+'.local':'?'),
+      'Uptime: '+(s.uptime!=null?fmtUptime(s.uptime):'?')+'  Wi-Fi: '+(s.ssid||'?')+' @ '+(s.rssi!=null?s.rssi:'?')+' dBm  drops: '+(s.wifiDrops!=null?s.wifiDrops:'?'),
+      'Heap: free '+(s.heapFree||'?')+'  min '+(s.heapMin||'?')+'  largest block '+(s.heapBlock||'?'),
+      'Reset: '+(d.resetReason||'?')+'  boots: '+(d.bootCount!=null?d.bootCount:'?')+'  crashes: '+(d.crashTotal!=null?d.crashTotal:'?')+(d.safeMode?'  ** SAFE MODE **':''),
+      'Heat pump: '+(s.connected?'connected':'DISCONNECTED')+'  drops: '+(s.cn105Drops!=null?s.cn105Drops:'?')+'  error: '+(s.errorCode!=null?fmtErr(s.errorCode):'none'),
+      'HomeKit: '+(s.hkPaired?('paired ('+s.hkControllers+' controller'+(s.hkControllers===1?'':'s')+')'):'not paired')];
+    if(lastEvents&&lastEvents.events&&lastEvents.events.length){
+      L.push('--- events (newest first) ---');
+      lastEvents.events.forEach(function(e){L.push(fmtEvent(e))});
+    }
+    copyText(L.join('\n'));
+    showToast('Diagnostics copied');
+  };
+
+  // ── Settings backup — 100% client-side ─────────────────────────────────────
+  // Every field already rides the state push, and import just replays the
+  // existing 'config' + 'set' commands, so the firmware needs no export/import
+  // protocol at all. Wi-Fi credentials and the HomeKit setup code are
+  // deliberately NOT exported (secrets / per-device identity).
+  window.exportSettings=function(){
+    var s=lastState;
+    if(!s){showToast('Not connected — nothing to export',true);return}
+    var out={app:'cn105-homekit-settings',v:1,fw:RUNNING_FW_VER,exported:new Date().toISOString(),
+      settings:{deviceName:s.deviceName,tempUnit:s.tempUnit,pollInterval:s.pollInterval,logLevel:s.logLevel,
+        vaneConfig:s.vaneConfig,modeMask:s.modeMask,heatThresh:s.heatThresh,coolThresh:s.coolThresh}};
+    if(s.bleEnabled!=null) out.settings.ble={enabled:s.bleEnabled,addr:s.bleAddr||'',feed:!!s.bleFeed,timeout:s.bleTimeout};
+    var blob=new Blob([JSON.stringify(out,null,2)],{type:'application/json'});
+    var a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download=(s.deviceName||'device').replace(/[^\w-]+/g,'-').toLowerCase()+'-settings.json';
+    document.body.appendChild(a);a.click();a.remove();
+    setTimeout(function(){URL.revokeObjectURL(a.href)},2000);
+  };
+
+  window.importSettings=function(input){
+    var file=input.files&&input.files[0];
+    input.value='';
+    if(!file) return;
+    if(!ensureConnected()) return;
+    file.text().then(function(txt){
+      var j=JSON.parse(txt);
+      if(j.app!=='cn105-homekit-settings'||!j.settings) throw new Error('not a settings file');
+      var st=j.settings;
+      var cfg={cmd:'config'};
+      if(typeof st.deviceName==='string') cfg.deviceName=st.deviceName;
+      if(st.tempUnit==='C'||st.tempUnit==='F') cfg.tempUnit=st.tempUnit;
+      if(typeof st.pollInterval==='number') cfg.pollInterval=st.pollInterval;
+      if(typeof st.logLevel==='number') cfg.logLevel=st.logLevel;
+      if(typeof st.vaneConfig==='number') cfg.vaneConfig=st.vaneConfig;
+      if(typeof st.modeMask==='number') cfg.modeMask=st.modeMask;
+      if(st.ble){
+        if(typeof st.ble.enabled==='boolean') cfg.bleEnabled=st.ble.enabled;
+        if(typeof st.ble.addr==='string'&&st.ble.addr) cfg.bleAddr=st.ble.addr;
+        if(typeof st.ble.feed==='boolean') cfg.bleFeed=st.ble.feed;
+        if(typeof st.ble.timeout==='number') cfg.bleTimeout=st.ble.timeout;
+      }
+      send(cfg);
+      if(typeof st.heatThresh==='number'||typeof st.coolThresh==='number'){
+        var t={cmd:'set'};
+        if(typeof st.heatThresh==='number') t.heatThresh=st.heatThresh;
+        if(typeof st.coolThresh==='number') t.coolThresh=st.coolThresh;
+        send(t);
+      }
+      showToast('Settings imported — device values applied');
+    }).catch(function(e){showToast('Import failed: '+(e.message||e),true)});
+  };
+
+  window.factoryReset=function(){
+    if(!ensureConnected()) return;
+    var v=prompt('This erases ALL settings, Wi-Fi credentials, and HomeKit pairing, then restarts the device into setup mode.\n\nType ERASE to confirm:');
+    if(v===null) return;
+    if(v.trim().toUpperCase()!=='ERASE'){showToast('Factory reset cancelled',true);return}
+    send({cmd:'factoryReset',confirm:'ERASE'});
   };
 
   window.restartDevice=function(){

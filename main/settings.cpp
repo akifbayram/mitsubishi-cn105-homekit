@@ -14,10 +14,26 @@ void SettingsStore::begin() {
         return;
     }
 
-    // logLevel — uint8_t
+    // Schema version — no migrations exist yet; read it so future versions
+    // can branch on what layout this device last wrote (see settings.h).
+    {
+        uint8_t storedVer = 0;
+        nvs_get_u8(_handle, "schemaVer", &storedVer);
+        if (storedVer > SETTINGS_SCHEMA_VERSION) {
+            LOG_WARN("[Settings] stored schema v%u is newer than firmware's v%u (downgrade?)",
+                     storedVer, SETTINGS_SCHEMA_VERSION);
+        }
+    }
+
+    // logLevel — uint8_t. DEBUG is session-only: a debug session that ends
+    // badly (crash, WiFi loss) must not leave the device booting into the
+    // firehose — DEBUG + a WS client can starve WiFi within a minute (see
+    // WS_LOG_SHED_HEAP in web_ws.cpp). Same sanitize-on-load pattern as
+    // modeMask below.
     {
         uint8_t val = LOG_LEVEL_INFO;
         nvs_get_u8(_handle, "logLevel", &val);
+        if (val > LOG_LEVEL_INFO) val = LOG_LEVEL_INFO;
         _settings.logLevel = (LogLevel)val;
     }
 
@@ -148,6 +164,7 @@ void SettingsStore::begin() {
 }
 
 void SettingsStore::save() {
+    nvs_set_u8(_handle, "schemaVer", SETTINGS_SCHEMA_VERSION);
     nvs_set_u8(_handle, "logLevel", _settings.logLevel);
     nvs_set_u32(_handle, "pollMs", _settings.pollMs);
     nvs_set_str(_handle, "deviceName", _settings.deviceName);

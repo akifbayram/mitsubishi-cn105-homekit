@@ -16,10 +16,12 @@ enum LogLevel : uint8_t {
 // Runtime-configurable log level (default: INFO)
 extern LogLevel currentLogLevel;
 
-// ── Log Hook (for WebSocket streaming) ────────────────────────────────────────
-// Called by the custom vprintf handler with each formatted log line.
-typedef void (*LogHookFn)(const char *msg, size_t len);
-extern LogHookFn logHook;
+// Pop one queued log line for WebSocket streaming (oldest first). When the
+// ring overflowed since the last report, returns a "[log ring: N line(s)
+// dropped]" marker instead of a line. Returns the copied length (NUL always
+// written), 0 when nothing is queued. Single consumer: the main task
+// (WebUI::loop) — see the threading contract in logging.cpp.
+size_t logging_drain(char *out, size_t cap);
 
 // ── Initialisation ───────────────────────────────────────────────────────────
 // Install the custom vprintf handler that forwards logs to the WebSocket hook.
