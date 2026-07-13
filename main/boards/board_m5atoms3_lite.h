@@ -15,7 +15,6 @@
 // Status LED (onboard WS2812)
 #define PIN_LED_DATA            35
 #define PIN_LED_ENABLE          -1
-#define HAS_NEOPIXEL            1
 
 // Button
 #define PIN_BUTTON              41

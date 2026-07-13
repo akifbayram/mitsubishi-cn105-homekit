@@ -47,9 +47,6 @@ namespace WifiManager {
     /// Disable AP mode (back to STA only).
     void disableAP();
 
-    /// Returns true if AP mode is currently active.
-    bool isAPActive();
-
     /// Load WiFi credentials from NVS namespace "wifi-creds".
     /// Returns true if credentials were found and loaded.
     bool loadCredentials(char* ssid, size_t ssidLen, char* password, size_t passLen);

@@ -60,9 +60,6 @@
 #ifndef PIN_LED_ENABLE
 #define PIN_LED_ENABLE          -1
 #endif
-#ifndef HAS_NEOPIXEL
-#define HAS_NEOPIXEL            0
-#endif
 #ifndef PIN_BLUE_LED
 #define PIN_BLUE_LED            -1
 #endif

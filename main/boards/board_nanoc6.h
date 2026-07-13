@@ -16,7 +16,6 @@
 // Status LEDs
 #define PIN_LED_DATA            20      // WS2812 RGB data
 #define PIN_LED_ENABLE          19      // WS2812 power enable
-#define HAS_NEOPIXEL            1
 #define PIN_BLUE_LED            7       // Simple blue indicator LED
 
 // Button (WiFi reset)

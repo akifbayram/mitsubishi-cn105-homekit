@@ -156,9 +156,17 @@ struct __attribute__((packed)) sl2_cmd_pkt {
 /* ── PROBE (dial -> ctrl) ─────────────────────────────────────────────── */
 
 enum {  /* sl2_probe_pkt.want */
-    SL2_WANT_INFO = 1u << 0,
-    SL2_WANT_CAPS = 1u << 1,
-    /* bits 2-7 spare */
+    SL2_WANT_INFO  = 1u << 0,
+    SL2_WANT_CAPS  = 1u << 1,
+    SL2_WANT_STATE = 1u << 2,  /* dial lacks a fresh STATE (zone switch/resync).
+                                * Without this bit a controller that already
+                                * considers the dial live (kept so by background
+                                * keepalive probes) has no reason to send STATE
+                                * before its 10 s heartbeat — the dial's sync
+                                * watchdog then misreads the wait as link loss.
+                                * Unknown bits are ignored, so mixed versions
+                                * degrade to the old heartbeat-paced behavior. */
+    /* bits 3-7 spare */
 };
 
 struct __attribute__((packed)) sl2_probe_pkt {

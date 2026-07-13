@@ -15,7 +15,6 @@
 
 // ── CN105 Packet Constants ──────────────────────────────────────────────────
 constexpr uint8_t CN105_SYNC           = 0xFC;
-constexpr uint8_t CN105_PKT_CONNECT    = 0x5A;
 constexpr uint8_t CN105_PKT_CONNECT_OK = 0x7A;
 constexpr uint8_t CN105_PKT_SET        = 0x41;
 constexpr uint8_t CN105_PKT_SET_ACK    = 0x61;
@@ -104,7 +103,6 @@ constexpr float CN105_TEMP_MAX         = 30.5f;
 // ── Timing ──────────────────────────────────────────────────────────────────
 // Follows MitsubishiCN105ESPHome reference project timing
 constexpr uint32_t CN105_BAUD_RATE         = 2400;
-constexpr uint32_t CN105_CONNECT_TIMEOUT   = 2000;   // ms
 constexpr uint32_t CN105_RESPONSE_TIMEOUT  = 1000;   // ms
 constexpr uint32_t CN105_UPDATE_INTERVAL   = 2000;    // ms — matches reference default (2s)
 constexpr uint32_t CN105_CONNECT_INTERVAL  = 3000;    // ms between connect retries
@@ -197,10 +195,6 @@ public:
     /// Use this from HomeKit services to decide whether to report "Not Responding".
     bool isHealthy() const;
 
-    /// Returns milliseconds since the last valid CN105 response, or UINT32_MAX if
-    /// no response has ever been received.
-    uint32_t getLastResponseAge() const;
-
     /// Get the current state (actual heat pump values, no grace-window
     /// masking). Locked snapshot; safe to call from any task. Use
     /// getEffectiveState() for anything user-facing.
@@ -256,7 +250,6 @@ public:
 
     /// Runtime-configurable update interval (poll period)
     void setUpdateInterval(uint32_t ms) { _updateInterval = ms; }
-    uint32_t getUpdateInterval() const { return _updateInterval; }
 
 #ifndef UNIT_TEST
     /// Start a dedicated FreeRTOS task for UART I/O and protocol management.
@@ -274,7 +267,6 @@ private:
     CN105State      _state;
 
     // ── Connection state ────────────────────────────────────────────────────
-    bool     _initialConnectDone = false;
     uint8_t  _connectRetries     = 0;
     uint32_t _lastConnectAttempt = 0;
 

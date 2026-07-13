@@ -42,7 +42,6 @@ void CN105Controller::begin(UartInterface *uart) {
     _uart = uart;
     _uart->flush();
     _state.connected = false;
-    _initialConnectDone = false;
     _connectRetries = 0;
     _lastSuccessfulResponse = 0;
     LOG_INFO("Controller initialized, waiting for connection...");
@@ -77,14 +76,6 @@ bool CN105Controller::isHealthy() const {
     uint32_t last = _lastSuccessfulResponse;
     taskEXIT_CRITICAL(&_mux);
     return connected && last > 0 && (uptime_ms() - last) < CN105_COMMS_TIMEOUT;
-}
-
-uint32_t CN105Controller::getLastResponseAge() const {
-    taskENTER_CRITICAL(&_mux);
-    uint32_t last = _lastSuccessfulResponse;
-    taskEXIT_CRITICAL(&_mux);
-    if (last == 0) return UINT32_MAX;
-    return uptime_ms() - last;
 }
 
 CN105State CN105Controller::getState() const {
@@ -246,7 +237,6 @@ void CN105Controller::loop() {
         taskENTER_CRITICAL(&_mux);
         _state.connected = false;
         taskEXIT_CRITICAL(&_mux);
-        _initialConnectDone = false;
         _connectRetries = 0;
         _cycleRunning = false;
         _awaitingResponse = false;
@@ -627,7 +617,6 @@ void CN105Controller::processPacket(const uint8_t *pkt, uint8_t len) {
             _state.lastUpdate = uptime_ms();
             _lastSuccessfulResponse = _state.lastUpdate;
             taskEXIT_CRITICAL(&_mux);
-            _initialConnectDone = true;
             _connectRetries = 0;
             break;
 

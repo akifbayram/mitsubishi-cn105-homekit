@@ -74,6 +74,7 @@ static void send_state_to(sl2_link_t *l, sl2_dial_rt_t *d,
     l->port->send(l->port->ctx, d->bond.mac, p, sizeof *p);
     d->last_state_tx_ms = now;
     d->pend_state = false;
+    d->want &= (uint8_t)~SL2_WANT_STATE;   /* any STATE satisfies a pull */
 }
 
 /* Immediate fan-out (post-CMD echo, post-pair sync). */
@@ -409,8 +410,14 @@ void sl2_link_loop(sl2_link_t *l) {
         if (!live) { d->was_live = false; continue; }
         bool first = !d->was_live;
         d->was_live = true;
+        /* WANT_STATE is a dial-initiated pull (zone switch / resync): serve
+         * it at the same rate floor as change-driven sends. The bit stays
+         * set until a STATE actually goes out (send_state clears it), so a
+         * pull landing inside the floor is served right after it passes;
+         * loss retry is the dial re-probing with the bit still set. */
+        bool pulled = (d->want & SL2_WANT_STATE) != 0;
         if (first ||
-            (d->pend_state &&
+            ((d->pend_state || pulled) &&
              (uint32_t)(now - d->last_state_tx_ms) >= SL2_STATE_MIN_INTERVAL_MS) ||
             (uint32_t)(now - d->last_state_tx_ms) >= SL2_STATE_HEARTBEAT_MS) {
             send_state_to(l, d, &p, now);

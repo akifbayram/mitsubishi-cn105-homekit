@@ -28,7 +28,6 @@ private:
     // ── HTTP handlers (static, access global webUI instance) ────────────────
     static esp_err_t handleRoot(httpd_req_t *req);
     static esp_err_t handleRecoveryPage(httpd_req_t *req);
-    static esp_err_t handleRedirect80(httpd_req_t *req);
     static esp_err_t handleWifiStatus(httpd_req_t *req);
     static esp_err_t handleWifiSetup(httpd_req_t *req);
     static esp_err_t handleWifiScan(httpd_req_t *req);

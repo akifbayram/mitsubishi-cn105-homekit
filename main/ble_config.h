@@ -9,8 +9,3 @@
 #if defined(CONFIG_BT_ENABLED) && !defined(BLE_DISABLE)
 #define BLE_ENABLE
 #endif
-
-// Legacy support: if BLE_SENSOR_TYPE was defined, enable BLE
-#if defined(BLE_SENSOR_TYPE) && !defined(BLE_ENABLE)
-#define BLE_ENABLE
-#endif

@@ -336,11 +336,6 @@ void WifiManager::disableAP()
     LOG_INFO("AP disabled");
 }
 
-bool WifiManager::isAPActive()
-{
-    return s_apActive;
-}
-
 // ── NVS credential management ──────────────────────────────────────────────
 
 bool WifiManager::loadCredentials(char* ssid, size_t ssidLen, char* password, size_t passLen)

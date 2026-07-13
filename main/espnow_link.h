@@ -24,8 +24,6 @@ enum EspnowPairOutcome : uint8_t {
 
 // Read-only detail for the primary bonded dial, for the web UI Link card.
 struct EspnowDialDetail {
-    bool    bonded;
-    bool    live;
     int32_t lastSeenSec;   // seconds since last heard; -1 if unknown
     int8_t  rssi;          // dBm; 0 if unknown
     bool    haveInfo;      // DIAL_INFO received (model/fw valid)

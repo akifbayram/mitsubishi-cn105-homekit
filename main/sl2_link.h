@@ -132,8 +132,15 @@ typedef struct sl2_link {
 #ifndef SL2_PULL_THROTTLE_MS
 #define SL2_PULL_THROTTLE_MS      2000
 #endif
+/* Dial-liveness window: STATE flows only to dials that probed within this.
+ * Must survive ONE lost probe at the dial's slowest keepalive cadence —
+ * the dial fw probes background zones every 4 s + up to 1.8 s of per-zone
+ * stagger (BG_PROBE_MS in espnow_client.c), so two worst-case periods are
+ * 11.6 s. Cutting the stream on a single lost probe let background zones go
+ * stale and turned later zone switches into cold resyncs. Cost of the wider
+ * window is only a few extra ~50 B heartbeats after a dial truly vanishes. */
 #ifndef SL2_DIAL_LIVE_MS
-#define SL2_DIAL_LIVE_MS          6000
+#define SL2_DIAL_LIVE_MS          12500
 #endif
 #ifndef SL2_PAIR_CONFIRM_MS
 #define SL2_PAIR_CONFIRM_MS       15000

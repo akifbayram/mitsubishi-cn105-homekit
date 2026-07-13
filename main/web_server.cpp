@@ -145,11 +145,6 @@ static void serveCNAPage(httpd_req_t *req) {
     httpd_resp_sendstr(req, CNA_PAGE);
 }
 
-esp_err_t WebUI::handleRedirect80(httpd_req_t *req) {
-    serveCNAPage(req);
-    return ESP_OK;
-}
-
 // Catch-all 404 handler installed only while the fallback AP is active. Serves
 // the captive-portal page to AP-subnet clients (triggers the OS popup); any
 // other client gets a normal 404 so the main UI behaves normally.

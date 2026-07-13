@@ -46,7 +46,7 @@ public:
         return len;
     }
 
-    size_t   count() const   { return _count; }
+    size_t   count() const   { return _count; }    // used by host tests (test/log_ring)
     uint32_t dropped() const { return _dropped; }  // cumulative evictions
 
 private:

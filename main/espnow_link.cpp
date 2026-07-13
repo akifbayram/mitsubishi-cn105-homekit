@@ -695,9 +695,7 @@ bool EspnowLink::isBonded() const { return s_stat.bonded; }
 bool EspnowLink::isPeerLive() const { return s_stat.live; }
 void EspnowLink::getPeerMac(uint8_t out[6]) const { memcpy(out, s_stat.mac0, 6); }
 bool EspnowLink::getDialDetail(EspnowDialDetail &out) const {
-    out.bonded = s_stat.bonded;
     if (!s_stat.bonded) return false;
-    out.live = s_stat.live;
     out.lastSeenSec = s_stat.lastSeenSec;
     out.rssi = s_stat.rssi;
     out.haveInfo = s_stat.haveInfo;
@@ -788,7 +786,7 @@ void EspnowLink::loop() {}
 bool EspnowLink::isBonded() const { return false; }
 bool EspnowLink::isPeerLive() const { return false; }
 void EspnowLink::getPeerMac(uint8_t out[6]) const { for (int i = 0; i < 6; i++) out[i] = 0; }
-bool EspnowLink::getDialDetail(EspnowDialDetail &out) const { out.bonded = false; return false; }
+bool EspnowLink::getDialDetail(EspnowDialDetail &out) const { (void)out; return false; }
 void EspnowLink::startPairing() {}
 void EspnowLink::cancelPairing() {}
 bool EspnowLink::pairingActive() const { return false; }

@@ -15,7 +15,6 @@
 // No onboard NeoPixel
 #define PIN_LED_DATA            -1
 #define PIN_LED_ENABLE          -1
-#define HAS_NEOPIXEL            0
 
 // Button
 #define PIN_BUTTON              0
