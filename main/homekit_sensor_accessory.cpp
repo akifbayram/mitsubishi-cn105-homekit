@@ -7,6 +7,7 @@
 #include "homekit_setup.h"
 #include "logging.h"
 #include "esp_utils.h"
+#include "settings.h"
 
 #include <cmath>
 #include <cstdio>
@@ -86,9 +87,17 @@ static void update_char_b(hap_char_t *c, bool v)
 // across a live toggle and avoiding a free of an accessory the HAP task may be
 // traversing. It is only (re)created at boot when BLE is enabled, so a unit left with
 // BLE disabled does not carry the accessory across a reboot.
+//
+// Both fields come from the settings store, not BleSensor's runtime mirrors: this is
+// called once before hap_start() (to build the initial bridge DB) and BleSensor::begin()
+// does not run until later in app_main, so isBleEnabled() would still read its `false`
+// default there. Reading settings makes the pre-start answer the true one, which keeps
+// the accessory in the initial DB and stops the service shape flip-flopping 0x8F -> 0x0F
+// -> 0x8F (two config-number bumps) on every boot. setBleEnabled() writes settings in the
+// same breath as the mirror, so the runtime answer is unchanged.
 static bool sensor_configured()
 {
-    return BleSensor::isBleEnabled() && BleSensor::getAddr()[0] != '\0';
+    return settings.get().bleEnabled && BleSensor::getAddr()[0] != '\0';
 }
 
 // StatusActive: enabled + configured (both implied by sensor_configured) and we have
