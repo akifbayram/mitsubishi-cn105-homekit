@@ -1,5 +1,5 @@
 /*
- * sl2_link.h — Serin Link v2 controller-role core.
+ * sl2_link.h — Serin Link controller-role core.
  *
  * Owns: signed pairing + TOFU pinning, multi-dial bond table, LMK derivation,
  * STATE fan-out (change/heartbeat), CAPS/INFO pull gates, CMD apply + echo to
@@ -25,6 +25,7 @@ typedef struct {
     bool     wifi;            /* controller STA associated */
     bool     wifi_provisioned;/* has stored STA creds */
     bool     setup_ap;        /* recovery/setup hotspot active (SL2_SF_SETUP_AP) */
+    bool     wifi_err;        /* last credential change failed (SL2_SF_WIFI_ERR) */
     bool     use_f;           /* display pref */
     bool     sensor_batt_low;
     uint8_t  mode;            /* enum sl2_mode */
@@ -119,6 +120,8 @@ typedef struct sl2_link {
     uint8_t  cand_id_pub[32];
     const char *pair_result;
     uint8_t  caps_seq;
+    uint16_t epoch;           /* random nonzero per boot; 0 = rand failed
+                               * (replay guard off, fail open) */
     bool     started;
 } sl2_link_t;
 

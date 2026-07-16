@@ -19,8 +19,14 @@ typedef struct __attribute__((packed)) {
     uint8_t mac[6];
     uint8_t lmk[16];
     uint8_t id_pub[32];     /* pinned dial Ed25519 identity */
-    uint8_t reserved[8];    /* zero-fill on write, ignore on read */
+    uint8_t flags;          /* SL2_BOND_F_*; pre-flag blobs decode as 0 */
+    uint8_t reserved[7];    /* zero-fill on write, ignore on read */
 } sl2_dial_bond_t;
+
+/* This dial has echoed a correct STATE.epoch at least once — it understands
+ * the replay guard, so zero/stale epochs from it are now rejected. Ratchets
+ * on (persisted); re-pairing the dial resets it with the rest of the bond. */
+#define SL2_BOND_F_EPOCH 0x01
 
 #define SL2_BOND_REC_SIZE 62
 #define SL2_BONDS_BLOB_MAX (2 + SL2_MAX_DIALS * SL2_BOND_REC_SIZE)

@@ -1,12 +1,12 @@
 /*
- * sl2_proto.h — Serin Link protocol v2 wire format.
+ * sl2_proto.h — Serin Link protocol wire format.
  *
  * Dependency-free C (stdint/stdbool/string/math only): shared byte-identical
  * between every controller adapter and the Dial firmware. Little-endian packed
  * structs ARE the wire format (encode/decode == memcpy). Spec:
- * serin-dial docs/superpowers/specs/2026-07-09-serin-link-v2-wire-spec.md.
+ * docs/serin-link-wire-spec.md (this repo).
  *
- * Growth discipline (inherited from v1 espnow_proto.h): additive changes only —
+ * Growth discipline: additive changes only —
  * claim a spare flag bit, then a reserved[] byte, then append after reserved[].
  * Receivers gate on floor-era *_MIN_LEN (never sizeof) and decode tolerantly
  * with sl2_decode_pkt(). Never insert or resize an existing field.
@@ -90,7 +90,10 @@ enum {  /* sl2_state_pkt.flags */
                                         * (drives the dial's Wi-Fi setup face;
                                         * always-on for YAML-provisioned fw) */
     SL2_SF_SETUP_AP     = 1u << 4,   /* recovery/setup hotspot currently active */
-    /* bits 5-7 spare */
+    SL2_SF_WIFI_ERR     = 1u << 5,   /* last credential change failed to join;
+                                      * latched until the next successful join
+                                      * or the next setup window (see spec 10b) */
+    /* bits 6-7 spare */
 };
 enum {  /* sl2_state_pkt.flags2 */
     SL2_SF2_SENSOR_BATT_LOW = 1u << 0,
@@ -116,7 +119,10 @@ struct __attribute__((packed)) sl2_state_pkt {
     uint8_t  room_hum_pct;  /* 0..100; SL2_HUM_NA = not reported */
     uint8_t  hum_set_pct;   /* 0..100; SL2_HUM_NA = n/a */
     uint8_t  flags2;        /* SL2_SF2_* */
-    uint8_t  reserved[3];   /* senders zero-fill, receivers ignore */
+    uint8_t  reserved[1];   /* senders zero-fill, receivers ignore */
+    uint16_t epoch;         /* random per-boot replay token; 0 = sender has no
+                             * epoch support. Dials echo the latest value in
+                             * CMD/WIFI_SETUP (spec 3b). */
 };
 #define SL2_STATE_MIN_LEN 26
 
@@ -149,7 +155,9 @@ struct __attribute__((packed)) sl2_cmd_pkt {
     int16_t  set_high_dc;
     uint8_t  hum_set_pct;
     uint8_t  use_f;         /* SL2_CM_UNITS: 0/1 display pref */
-    uint8_t  reserved[2];   /* senders zero-fill, receivers ignore */
+    uint16_t epoch;         /* echo of the latest STATE.epoch; 0 = legacy dial.
+                             * Odd wire offset (17) — packed access / memcpy
+                             * only, like every field here. */
 };
 #define SL2_CMD_MIN_LEN 19
 
@@ -367,9 +375,9 @@ struct __attribute__((packed)) sl2_wifi_resp_pkt {
  * (ESP-NOW is lossy); receivers must treat it as idempotent. Gated on
  * SL2_FEAT_WIFI_SETUP in CAPS. */
 struct __attribute__((packed)) sl2_wifi_setup_pkt {
-    uint8_t type;            /* SL2_PKT_WIFI_SETUP */
-    uint8_t version;         /* SL2_PROTO_VERSION */
-    uint8_t reserved[2];
+    uint8_t  type;           /* SL2_PKT_WIFI_SETUP */
+    uint8_t  version;        /* SL2_PROTO_VERSION */
+    uint16_t epoch;          /* echo of the latest STATE.epoch; 0 = legacy dial */
 };
 #define SL2_WIFI_SETUP_MIN_LEN 4
 

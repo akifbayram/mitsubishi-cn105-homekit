@@ -35,6 +35,9 @@ public:
     void beginChangeWindow();            // Dial-initiated: AP now + bounded auto-close while STA stays up
     void noteReprovision();              // Portal applied new credentials — the change window may now
                                          // close on join success (see loop()'s level-based close)
+    bool wifiChangeFailed() const;       // SL2 wifi_err: last credential change failed —
+                                         // trial-connect reverted (WifiManager latch) or the
+                                         // change-recovery clock expired without a join
     void getCachedSSID(char *buf, size_t bufLen) const; // Return cached SSID (no NVS I/O)
     uint32_t getWifiUptimeSeconds() const;
 
@@ -61,6 +64,11 @@ private:
                                          // edges must not clear the pending flag, cancel the window
                                          // deadline, or linger-close the AP (on-device round 2)
     bool     _reprovisioned = false;     // noteReprovision() seen since the window opened
+    uint32_t _changeAt = 0;              // uptime_ms() when the current credential change began
+                                         // (0 = none active); every change funnels through
+                                         // setChangePending(true), which stamps this
+    bool     _changeFailed = false;      // latched once a change exceeds WIFI_RECOVERY_TIMEOUT_CHANGE
+                                         // without joining; cleared on join or the next change
     char     _cachedSSID[33] = "";       // Cached SSID to avoid NVS reads on every status poll
 };
 

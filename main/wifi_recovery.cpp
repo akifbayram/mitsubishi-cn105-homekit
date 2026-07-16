@@ -37,6 +37,11 @@ void WifiRecovery::begin(const char *apName, const char *displayName) {
 
     refreshCachedSSID();
 
+    // A change left pending across a reboot is still an unconfirmed change:
+    // start the failure clock at boot so wifi_err asserts if the (new) creds
+    // keep failing to join, instead of silently reading clean until the next set.
+    if (settings.get().wifiChangePending) _changeAt = safeUptimeMs();
+
     LOG_INFO("[WiFiRecovery] Initialized (changePending=%s)",
              settings.get().wifiChangePending ? "true" : "false");
 }
@@ -100,6 +105,20 @@ void WifiRecovery::loop() {
     }
 
     _wasConnected = connected;
+
+    // ── Credential-change failure latch (SL2 wifi_err) ──────────────────────
+    // A change that never joins. _changeAt was stamped by setChangePending
+    // (true); if the STA still isn't up after the change-recovery timeout, the
+    // new credentials didn't take. Latch it (fires the AP fallback too, on its
+    // own path) so the dial can surface the failure. A successful join calls
+    // setChangePending(false) on the connect edge above, clearing the latch.
+    if (_changeAt != 0 && !connected &&
+        uptime_ms() - _changeAt >= WIFI_RECOVERY_TIMEOUT_CHANGE) {
+        if (!_changeFailed)
+            LOG_WARN("[WiFiRecovery] Credential change failed to join within %lus",
+                     (unsigned long)(WIFI_RECOVERY_TIMEOUT_CHANGE / 1000));
+        _changeFailed = true;
+    }
 
     // ── Reprovision completed (change window) ───────────────────────────────
     // Level, not edge: the 1 Hz poll can miss the deliberate drop entirely
@@ -186,7 +205,24 @@ void WifiRecovery::disableFallbackAP() {
 void WifiRecovery::setChangePending(bool pending) {
     settings.get().wifiChangePending = pending;
     settings.save();
+    // Single choke point for every credential change (dial WIFI_SETUP,
+    // portal /wifi-setup, Improv). (Re)start the failure clock on a new
+    // attempt; clear the latch when the change is confirmed by a join, which
+    // is the only caller that passes false (the connect edge in loop()).
+    _changeAt = pending ? safeUptimeMs() : 0;
+    _changeFailed = false;
     refreshCachedSSID();
+}
+
+bool WifiRecovery::wifiChangeFailed() const {
+    // Two detectors, one answer: WifiManager's trial latch covers the common
+    // runtime failure (new creds rejected at the 30 s deadline, device
+    // reverted — the rejoin edge clears _changeAt long before the clock below
+    // could fire); the _changeFailed clock covers what the trial can't see, a
+    // change left pending across a reboot that never joins (trial state
+    // resets at boot).
+    return _changeFailed ||
+           WifiManager::getTrialState() == WifiManager::WIFI_TRIAL_FAILED;
 }
 
 void WifiRecovery::activateNow() {

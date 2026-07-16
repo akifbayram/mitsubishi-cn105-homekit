@@ -1,5 +1,5 @@
 /*
- * sl2_link.c — Serin Link v2 controller-role core. Platform-free; see
+ * sl2_link.c — Serin Link controller-role core. Platform-free; see
  * sl2_port.h / sl2_crypto.h / sl2_link.h for the contracts.
  */
 #include "sl2_link.h"
@@ -38,6 +38,31 @@ static void mark_all_state_pending(sl2_link_t *l) {
     for (int i = 0; i < l->n_dials; i++) l->dial[i].pend_state = true;
 }
 
+/* Replay guard: dials echo STATE.epoch in CMD/WIFI_SETUP. The radio's CCMP
+ * packet-number window lives in RAM, so a captured ciphertext replayed after
+ * a controller reboot decrypts cleanly — the per-boot epoch is what kills it
+ * here. Enforcement ratchets on per dial (persisted bond flag) the first time
+ * a correct echo arrives, so pre-epoch dial firmware keeps working until it
+ * upgrades. Returns true if the packet may be acted on. */
+static bool epoch_ok(sl2_link_t *l, sl2_dial_rt_t *d, uint16_t e) {
+    if (l->epoch == 0) return true;        /* rand failed at boot: guard off */
+    if (e == l->epoch) {
+        if (!(d->bond.flags & SL2_BOND_F_EPOCH)) {
+            d->bond.flags |= SL2_BOND_F_EPOCH;
+            persist_bonds(l);
+            lg(l, 2, "sl2: dial echoes epochs — replay guard latched");
+        }
+        return true;
+    }
+    if (!(d->bond.flags & SL2_BOND_F_EPOCH)) return true;   /* legacy dial */
+    /* Stale echo from a latched dial: replay, or the dial missed the STATE
+     * after our reboot. Drop it, but resync the dial promptly so a live one
+     * learns the fresh epoch instead of wedging. */
+    d->pend_state = true;
+    lg(l, 1, "sl2: stale epoch, packet dropped");
+    return false;
+}
+
 /* ── STATE build + send ───────────────────────────────────────────────── */
 
 static void build_state(sl2_link_t *l, struct sl2_state_pkt *p) {
@@ -45,6 +70,7 @@ static void build_state(sl2_link_t *l, struct sl2_state_pkt *p) {
     p->type = SL2_PKT_STATE;
     p->version = SL2_PROTO_VERSION;
     p->caps_seq = l->caps_seq;
+    p->epoch = l->epoch;
     sl2_hvac_state_t s;
     memset(&s, 0, sizeof s);
     s.set_low_dc = SL2_DC_NA; s.set_high_dc = SL2_DC_NA;
@@ -60,6 +86,7 @@ static void build_state(sl2_link_t *l, struct sl2_state_pkt *p) {
     if (s.use_f)            p->flags |= SL2_SF_USE_F;
     if (s.wifi_provisioned) p->flags |= SL2_SF_WIFI_PROVISIONED;
     if (s.setup_ap)         p->flags |= SL2_SF_SETUP_AP;
+    if (s.wifi_err)         p->flags |= SL2_SF_WIFI_ERR;
     if (s.sensor_batt_low) p->flags2 |= SL2_SF2_SENSOR_BATT_LOW;
     p->mode = s.mode; p->action = s.action; p->fan = s.fan;
     p->vane_v = s.vane_v; p->vane_h = s.vane_h; p->preset = s.preset;
@@ -286,6 +313,7 @@ void sl2_link_on_recv(sl2_link_t *l, const uint8_t src[6], const uint8_t dst[6],
         if (len >= SL2_CMD_MIN_LEN) {
             struct sl2_cmd_pkt c;
             sl2_decode_pkt(&c, sizeof c, data, len);
+            if (!epoch_ok(l, d, c.epoch)) break;   /* replays don't prove liveness */
             d->last_probe_ms = now;         /* a command proves liveness too */
             if (l->hvac->apply(l->hvac->ctx, c.mask, &c))
                 echo_state_all(l);          /* converge every head fast */
@@ -299,6 +327,9 @@ void sl2_link_on_recv(sl2_link_t *l, const uint8_t src[6], const uint8_t dst[6],
         break;
     case SL2_PKT_WIFI_SETUP:
         if (len >= SL2_WIFI_SETUP_MIN_LEN) {
+            struct sl2_wifi_setup_pkt w;
+            sl2_decode_pkt(&w, sizeof w, data, len);
+            if (!epoch_ok(l, d, w.epoch)) break;
             d->wifi_setup_req = true;
             d->last_probe_ms = now;
         }
@@ -476,6 +507,17 @@ bool sl2_link_start(sl2_link_t *l) {
     uint8_t seq = 0;
     if (l->port->kv_get(l->port->ctx, SL2_KV_CAPS_SEQ, &seq, &len) && len == 1)
         l->caps_seq = seq;
+
+    /* Per-boot replay epoch (see epoch_ok). 0 is reserved for "no epoch", so
+     * a rand failure honestly disables the guard rather than blocking dials. */
+    uint8_t eb[2];
+    if (l->crypto->rand_bytes(l->crypto->ctx, eb, 2) == 0) {
+        l->epoch = (uint16_t)(eb[0] | ((uint16_t)eb[1] << 8));
+        if (l->epoch == 0) l->epoch = 1;
+    } else {
+        l->epoch = 0;
+        lg(l, 0, "sl2: epoch rand failed — replay guard off this boot");
+    }
 
     l->started = true;
     return true;

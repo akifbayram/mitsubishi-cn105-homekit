@@ -320,6 +320,7 @@ static bool h_get_state(void *, sl2_hvac_state_t *out) {
     out->wifi             = WifiManager::isConnected();
     out->wifi_provisioned = WifiManager::hasCredentials();
     out->setup_ap         = wifiRecovery.isAPActive();
+    out->wifi_err         = wifiRecovery.wifiChangeFailed();
     out->use_f            = settings.get().useFahrenheit;
     out->mode   = mode_to_sl2(st.power, st.mode);
     out->action = action_of(st);
