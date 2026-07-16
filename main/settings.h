@@ -14,6 +14,12 @@
 // reports 0 predates it (treat as "oldest known layout"). Adding a NEW key
 // with a sane default does NOT need a bump — absent keys already fall back
 // to defaults on load.
+//
+// RENAMING a key needs neither a bump nor a branch: add {"oldKey","newKey"}
+// to KEY_MIGRATIONS in settings.cpp (RevK `.old=` pattern). On the next boot
+// the stored value moves to the new key (type-generic copy) and the old key
+// is erased — existing devices keep the setting instead of silently
+// resetting to the default.
 inline constexpr uint8_t SETTINGS_SCHEMA_VERSION = 1;
 
 struct DeviceSettings {
@@ -45,6 +51,7 @@ public:
     // with one integer compare instead of per-field compares each loop tick.
     uint32_t generation() const { return _generation; }
 private:
+    void runKeyMigrations();
     nvs_handle_t _handle = 0;
     DeviceSettings _settings;
     uint32_t _generation = 0;

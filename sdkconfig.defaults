@@ -40,5 +40,10 @@ CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384
 # task (2048; a closed-blob WiFi timer logs there) panicked with a stack
 # canary during DEBUG-level soak testing; the event task (2304) logs on every
 # WiFi/HomeKit event and is the same class.
-CONFIG_FREERTOS_TIMER_TASK_STACK_DEPTH=4096
+#
+# 2026-07-13: a WiFi/coex blob timer callback overflowed the 4096 depth too,
+# reproducibly at ~600s uptime (Tmr Svc stack-canary panic) on a WiFi+BLE-coex
+# AtomS3 Lite — the 10-min period matches a router GTK rekey, whose EAPOL
+# group handshake runs in that closed blob and can't be shrunk. Raised to 8192.
+CONFIG_FREERTOS_TIMER_TASK_STACK_DEPTH=8192
 CONFIG_ESP_SYSTEM_EVENT_TASK_STACK_SIZE=4096

@@ -7,12 +7,62 @@ static const char *TAG = "settings";
 
 SettingsStore settings;
 
+// Key renames (RevK `.old=` pattern): on boot, if newKey is absent and oldKey
+// holds a value, the value is copied (type read from NVS, so entries need no
+// type column) and the old key erased. Sentinel-terminated — a zero-length
+// array is ill-formed C++. Example entry:
+//   { "useFahr", "useFahrenheit" },
+struct KeyMigration { const char *oldKey; const char *newKey; };
+static const KeyMigration KEY_MIGRATIONS[] = {
+    { nullptr, nullptr },  // sentinel
+};
+
+void SettingsStore::runKeyMigrations() {
+    bool migrated = false;
+    for (const KeyMigration *m = KEY_MIGRATIONS; m->oldKey; m++) {
+        nvs_type_t type;
+        if (nvs_find_key(_handle, m->newKey, &type) == ESP_OK) continue;  // already migrated
+        if (nvs_find_key(_handle, m->oldKey, &type) != ESP_OK) continue;  // nothing stored
+        esp_err_t err = ESP_FAIL;
+        switch (type) {
+            case NVS_TYPE_U8:  { uint8_t v;  if (nvs_get_u8(_handle, m->oldKey, &v) == ESP_OK)  err = nvs_set_u8(_handle, m->newKey, v);  break; }
+            case NVS_TYPE_U16: { uint16_t v; if (nvs_get_u16(_handle, m->oldKey, &v) == ESP_OK) err = nvs_set_u16(_handle, m->newKey, v); break; }
+            case NVS_TYPE_U32: { uint32_t v; if (nvs_get_u32(_handle, m->oldKey, &v) == ESP_OK) err = nvs_set_u32(_handle, m->newKey, v); break; }
+            case NVS_TYPE_STR: {
+                char v[64]; size_t len = sizeof(v);
+                if (nvs_get_str(_handle, m->oldKey, v, &len) == ESP_OK)
+                    err = nvs_set_str(_handle, m->newKey, v);
+                break;
+            }
+            case NVS_TYPE_BLOB: {
+                uint8_t v[16]; size_t len = sizeof(v);  // largest blob today: 4-byte float
+                if (nvs_get_blob(_handle, m->oldKey, v, &len) == ESP_OK)
+                    err = nvs_set_blob(_handle, m->newKey, v, len);
+                break;
+            }
+            default:
+                LOG_WARN("[Settings] key migration %s->%s: unhandled NVS type %d",
+                         m->oldKey, m->newKey, (int)type);
+                break;
+        }
+        if (err == ESP_OK) {
+            nvs_erase_key(_handle, m->oldKey);
+            migrated = true;
+            LOG_INFO("[Settings] migrated NVS key %s -> %s", m->oldKey, m->newKey);
+        }
+    }
+    if (migrated) nvs_commit(_handle);
+}
+
 void SettingsStore::begin() {
     esp_err_t err = nvs_open("ac-settings", NVS_READWRITE, &_handle);
     if (err != ESP_OK) {
         LOG_ERROR("[Settings] nvs_open failed: %s", esp_err_to_name(err));
         return;
     }
+
+    // Key renames move stored values to their new names before any field load
+    runKeyMigrations();
 
     // Schema version — no migrations exist yet; read it so future versions
     // can branch on what layout this device last wrote (see settings.h).

@@ -7,6 +7,7 @@
 #include <esp_task_wdt.h>
 #include <esp_heap_caps.h>
 #include <esp_system.h>
+#include <esp_console.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
@@ -66,6 +67,36 @@ static uint32_t webUIStartTime = 0;
 static bool lastWifiState     = true;   // force initial setWifi() call
 static const char *lastPairResult = nullptr;   // interned literal from EspnowLink
 #endif
+
+// ── Diagnostic console commands ─────────────────────────────────────────────
+// `wdt-test`: deliberately trip the task watchdog to exercise the whole
+// crash → panic → reset-reason → event-log CRASH path end-to-end. Without a
+// way to inject this fault, that recovery machinery is only ever tested by
+// real bugs. Runs on the console task: subscribe it to the WDT, never feed.
+static int cmdWdtTest(int argc, char **argv) {
+    LOG_WARN("wdt-test: hanging this task — expect a task-WDT panic + reset in ~10s");
+    // CONFIG_ESP_TASK_WDT_PANIC may be off; make the test deterministic.
+    esp_task_wdt_config_t cfg = { .timeout_ms = 10000, .idle_core_mask = 1, .trigger_panic = true };
+    esp_task_wdt_reconfigure(&cfg);
+    esp_task_wdt_add(NULL);
+    for (;;) vTaskDelay(pdMS_TO_TICKS(100));   // subscribed, never fed
+    return 0;
+}
+
+static void registerDiagConsole(void) {
+    const esp_console_cmd_t cmd = {
+        .command = "wdt-test",
+        .help = "Trip the task watchdog (panic + reset) to test crash handling",
+        .hint = nullptr,
+        .func = &cmdWdtTest,
+        .argtable = nullptr,
+        .func_w_context = nullptr,
+        .context = nullptr,
+    };
+    // Tolerate a missing REPL (ESP-NOW compiled out → no console was started)
+    if (esp_console_cmd_register(&cmd) != ESP_OK)
+        LOG_DEBUG("wdt-test console cmd not registered (no REPL)");
+}
 
 // ════════════════════════════════════════════════════════════════════════════
 // app_main — initialization + main loop
@@ -262,6 +293,7 @@ extern "C" void app_main(void)
             WifiManager::isConnected() && !wifiRecovery.isAPActive()) {
             espnowConsoleInit = true;   // attempt once (no-op stub when ESP-NOW off)
             espnow_register_console();
+            registerDiagConsole();      // piggybacks on the REPL the line above started
         }
 
         // ── Push state to HomeKit (throttled internally) ─────────────────
@@ -325,6 +357,26 @@ extern "C" void app_main(void)
             bool apActive = wifiRecovery.isAPActive();
             if (apActive && !lastRecoveryAP) eventlog_append(EV_RECOVERY_AP);
             lastRecoveryAP = apActive;
+
+            // Free-heap low-water warning (10 KB buckets): WARN the moment
+            // the session floor drops into a new bucket, so a leak announces
+            // itself in the live log stream instead of hiding in the 60s
+            // INFO cadence. The floor is the SDK's own lifetime minimum (same
+            // source as the 60s heap INFO), so transient dips between checks
+            // count too. First check sets the boot baseline silently; drops
+            // that follow are wanted — they make boot-to-boot comparisons
+            // meaningful.
+            static uint32_t lowestHeapBucket = UINT32_MAX;
+            uint32_t heapLow = heap_caps_get_minimum_free_size(MALLOC_CAP_DEFAULT);
+            uint32_t heapBucket = heapLow / 10240;
+            if (heapBucket < lowestHeapBucket) {
+                if (lowestHeapBucket != UINT32_MAX) {
+                    LOG_WARN("Free heap new low: %lu bytes (largest block %lu)",
+                             (unsigned long)heapLow,
+                             (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT));
+                }
+                lowestHeapBucket = heapBucket;
+            }
         }
 
         // ── Main-loop alive — 15s ────────────────────────────────────
