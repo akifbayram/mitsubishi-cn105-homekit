@@ -2,10 +2,24 @@
 #include "event_log.h"
 #include <esp_task_wdt.h>
 #include <mbedtls/sha256.h>
+#include <esp_app_desc.h>
+#include <esp_partition.h>
 #include "status_led.h"
 #include "board_profile.h"
+#include "ota_guard.h"
 
 static const char *TAG = "web_ota";
+
+// chip_id of the RUNNING image — self-maintaining: no per-chip constant table
+// to keep in sync with new board profiles.
+// 0xFFFF = unknown → ota_guard_check skips the chip comparison (fail open).
+static uint16_t runningChipId() {
+    const esp_partition_t *run = esp_ota_get_running_partition();
+    uint8_t hdr[14];
+    if (run && esp_partition_read(run, 0, hdr, sizeof(hdr)) == ESP_OK)
+        return ota_guard_chip_id(hdr);
+    return 0xFFFF;
+}
 
 // ══════════════════════════════════════════════════════════════════════════════
 // OTA firmware upload: POST /upload  (raw binary body, not multipart)
@@ -80,8 +94,16 @@ esp_err_t WebUI::handleOtaUpload(httpd_req_t *req) {
         return ESP_FAIL;
     }
 
+    // Identity guard state: accumulate the first 288 bytes (image header +
+    // app descriptor) across recv() calls, then verify chip_id/project_name
+    // before accepting the rest. Replaces the old single-byte 0xE9 check.
+    uint8_t hdrBuf[OTA_GUARD_HDR_LEN];
+    size_t hdrFill = 0;
+    bool guardPassed = false;
+    const uint16_t expChip = runningChipId();
+    const char *expProject = esp_app_get_description()->project_name;
+
     size_t received = 0;
-    bool firstChunk = true;
     while (received < totalLen) {
         int ret = httpd_req_recv(req, buf, 4096);
         if (ret <= 0) {
@@ -94,18 +116,27 @@ esp_err_t WebUI::handleOtaUpload(httpd_req_t *req) {
             return ESP_FAIL;
         }
 
-        // Validate magic byte on first chunk
-        if (firstChunk) {
-            if ((uint8_t)buf[0] != 0xE9) {
-                LOG_ERROR("Invalid firmware magic byte: 0x%02X (expected 0xE9)",
-                          (uint8_t)buf[0]);
-                mbedtls_sha256_free(&sha256_ctx);
-                free(buf);
-                esp_ota_abort(otaHandle);
-                httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid firmware file");
-                return ESP_FAIL;
+        // Identity guard on the first 288 bytes (magic byte, chip_id,
+        // project_name) — rejects wrong-chip and wrong-app images (e.g. Dial
+        // firmware onto a unit: same esp32s3 chip, different project).
+        if (!guardPassed) {
+            size_t need = sizeof(hdrBuf) - hdrFill;
+            size_t take = ((size_t)ret < need) ? (size_t)ret : need;
+            memcpy(hdrBuf + hdrFill, buf, take);
+            hdrFill += take;
+            if (hdrFill == sizeof(hdrBuf)) {
+                OtaGuardVerdict v = ota_guard_check(hdrBuf, hdrFill, expChip, expProject);
+                if (v != OTA_GUARD_OK) {
+                    LOG_ERROR("Firmware rejected (%d): %s", (int)v, ota_guard_message(v));
+                    mbedtls_sha256_free(&sha256_ctx);
+                    free(buf);
+                    esp_ota_abort(otaHandle);
+                    httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, ota_guard_message(v));
+                    return ESP_FAIL;
+                }
+                guardPassed = true;
+                LOG_INFO("Firmware identity OK (chip 0x%04X, project '%s')", expChip, expProject);
             }
-            firstChunk = false;
         }
 
         err = esp_ota_write(otaHandle, buf, ret);
@@ -130,6 +161,14 @@ esp_err_t WebUI::handleOtaUpload(httpd_req_t *req) {
     }
 
     free(buf);
+
+    // Upload ended before the identity header completed — not a real image.
+    if (!guardPassed) {
+        mbedtls_sha256_free(&sha256_ctx);
+        esp_ota_abort(otaHandle);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, ota_guard_message(OTA_GUARD_SHORT));
+        return ESP_FAIL;
+    }
 
     // Finalize SHA256
     unsigned char hash[32];
