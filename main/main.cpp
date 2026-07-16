@@ -280,6 +280,7 @@ extern "C" void app_main(void)
         // ── WiFi recovery + button — every iter (~10 ms); WiFi checks are
         // rate-limited to 1 Hz inside loop()
         wifiRecovery.loop();
+        WifiManager::loop();   // trial-connect commit/revert (must run on main task)
 
         // ── Event log edges + SNTP one-shot — 1 Hz ───────────────────────
         // All app-level event detection lives here (single place, no new

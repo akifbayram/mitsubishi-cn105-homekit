@@ -1,5 +1,6 @@
 #include "wifi_manager.h"
 #include "logging.h"
+#include "esp_utils.h"
 
 #include <cstring>
 #include <algorithm>
@@ -58,6 +59,23 @@ static bool s_expectDisconnect = false;
 static uint32_t s_retryCount = 0;
 static esp_timer_handle_t s_reconnectTimer = nullptr;
 
+// ── Trial-connect (test-then-commit) ────────────────────────────────────────
+// New credentials are held here and only written to NVS once GOT_IP lands.
+// On deadline, the previous credentials (still untouched in NVS) are re-applied.
+// Written by connect() (httpd/main task) and the event handler; drained by
+// loop() on the main task. Spinlock-guarded like the other cross-task state.
+static constexpr uint32_t TRIAL_TIMEOUT_MS = 30000;
+static portMUX_TYPE s_trialMux = portMUX_INITIALIZER_UNLOCKED;
+static struct {
+    bool active = false;
+    bool commitPending = false;          // GOT_IP landed — loop() must persist
+    char newSsid[33] = {}, newPass[65] = {};
+    char oldSsid[33] = {}, oldPass[65] = {};
+    bool haveOld = false;
+    int64_t deadlineMs = 0;
+    WifiManager::WifiTrialState result = WifiManager::WIFI_TRIAL_IDLE;
+} s_trial;
+
 static void reconnect_timer_cb(void *) {
     esp_wifi_connect();
 }
@@ -112,6 +130,9 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
             s_retryCount = 0;
             s_pendingJoin = false;
             s_expectDisconnect = false;   // never let a lost event swallow a later real drop
+            portENTER_CRITICAL(&s_trialMux);
+            if (s_trial.active) s_trial.commitPending = true;  // loop() persists on the main task
+            portEXIT_CRITICAL(&s_trialMux);
             if (s_wifiEventGroup) {
                 xEventGroupSetBits(s_wifiEventGroup, CONNECTED_BIT);
             }
@@ -177,6 +198,27 @@ void WifiManager::init(const char* hostname, const char* apName, const char* apP
     LOG_INFO("Initialized (hostname=%s, AP=%s)", hostname ? hostname : "?", s_apName);
 }
 
+// Build + apply the STA config for the given credentials and reset the retry
+// budget — shared by connect() and the trial-revert path in loop() so the
+// auth/PMF policy lives in one place.
+static void applyStaConfig(const char *ssid, const char *password)
+{
+    wifi_config_t cfg = {};
+    // memcpy with explicit strnlen (not strncpy): the revert caller passes
+    // fixed-size arrays, which trips -Werror=stringop-truncation when inlined
+    memcpy(cfg.sta.ssid, ssid, strnlen(ssid, sizeof(cfg.sta.ssid) - 1));
+    if (password && password[0] != '\0') {
+        memcpy(cfg.sta.password, password, strnlen(password, sizeof(cfg.sta.password) - 1));
+        cfg.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
+    } else {
+        cfg.sta.threshold.authmode = WIFI_AUTH_OPEN;
+    }
+    cfg.sta.pmf_cfg.capable  = true;
+    cfg.sta.pmf_cfg.required = false;
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &cfg));
+    s_retryCount = 0;
+}
+
 bool WifiManager::connect(const char* ssid, const char* password)
 {
     if (!ssid || ssid[0] == '\0') {
@@ -184,27 +226,40 @@ bool WifiManager::connect(const char* ssid, const char* password)
         return false;
     }
 
-    // Save credentials to NVS
-    saveCredentials(ssid, password);
-
-    // Configure STA
-    wifi_config_t wifi_config = {};
-    strncpy(reinterpret_cast<char*>(wifi_config.sta.ssid), ssid,
-            sizeof(wifi_config.sta.ssid) - 1);
-    if (password && password[0] != '\0') {
-        strncpy(reinterpret_cast<char*>(wifi_config.sta.password), password,
-                sizeof(wifi_config.sta.password) - 1);
-        wifi_config.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
-    } else {
-        wifi_config.sta.threshold.authmode = WIFI_AUTH_OPEN;
+    // Test-then-commit: don't persist yet. If these credentials fail to join,
+    // the previous (working) ones must survive in NVS — a typo in the recovery
+    // portal used to orphan the device until the fallback AP reopened.
+    // loop() commits after GOT_IP or reverts at the deadline.
+    {
+        char curSsid[33] = {0}, curPass[65] = {0};
+        bool haveCur = loadCredentials(curSsid, sizeof(curSsid), curPass, sizeof(curPass));
+        const char *pw = password ? password : "";
+        bool sameAsStored = haveCur && strcmp(curSsid, ssid) == 0 && strcmp(curPass, pw) == 0;
+        portENTER_CRITICAL(&s_trialMux);
+        if (sameAsStored) {
+            // Boot path / re-apply of current network: nothing to commit or revert.
+            s_trial.active = false;
+            s_trial.commitPending = false;
+            s_trial.result = WIFI_TRIAL_IDLE;
+        } else {
+            s_trial.active = true;
+            s_trial.commitPending = false;
+            strncpy(s_trial.newSsid, ssid, sizeof(s_trial.newSsid) - 1);
+            s_trial.newSsid[sizeof(s_trial.newSsid) - 1] = '\0';
+            strncpy(s_trial.newPass, pw, sizeof(s_trial.newPass) - 1);
+            s_trial.newPass[sizeof(s_trial.newPass) - 1] = '\0';
+            s_trial.haveOld = haveCur;
+            memcpy(s_trial.oldSsid, curSsid, sizeof(s_trial.oldSsid));
+            memcpy(s_trial.oldPass, curPass, sizeof(s_trial.oldPass));
+            s_trial.deadlineMs = (int64_t)uptime_ms() + TRIAL_TIMEOUT_MS;
+            s_trial.result = WIFI_TRIAL_TESTING;
+        }
+        portEXIT_CRITICAL(&s_trialMux);
     }
-    wifi_config.sta.pmf_cfg.capable    = true;
-    wifi_config.sta.pmf_cfg.required   = false;
 
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
+    applyStaConfig(ssid, password);
 
-    // Fresh credentials get a fresh retry budget (and no stale delayed retry)
-    s_retryCount = 0;
+    // Fresh credentials get a fresh retry budget — no stale delayed retry
     if (s_reconnectTimer) esp_timer_stop(s_reconnectTimer);
 
     // esp_wifi_connect() on an associated STA is NOT a network switch — the
@@ -230,6 +285,61 @@ bool WifiManager::connect(const char* ssid, const char* password)
 bool WifiManager::isConnected()
 {
     return s_connected;
+}
+
+WifiManager::WifiTrialState WifiManager::getTrialState()
+{
+    portENTER_CRITICAL(&s_trialMux);
+    WifiTrialState r = s_trial.result;
+    portEXIT_CRITICAL(&s_trialMux);
+    return r;
+}
+
+void WifiManager::loop()
+{
+    // Trials are rare and their deadline is 30 s — a 250 ms gate keeps the
+    // spinlock (interrupts-off window) off the ~10 ms main-loop tick that
+    // runs for the device's whole life.
+    uint32_t nowMs = uptime_ms();
+    static uint32_t s_lastTrialCheck = 0;
+    if (nowMs - s_lastTrialCheck < 250) return;
+    s_lastTrialCheck = nowMs;
+
+    // Snapshot under the lock; NVS/esp_wifi work happens outside it.
+    portENTER_CRITICAL(&s_trialMux);
+    bool active = s_trial.active;
+    bool commit = s_trial.commitPending;
+    bool expired = active && !commit && (int64_t)nowMs >= s_trial.deadlineMs;
+    portEXIT_CRITICAL(&s_trialMux);
+    if (!active) return;
+
+    if (commit) {
+        saveCredentials(s_trial.newSsid, s_trial.newPass);
+        portENTER_CRITICAL(&s_trialMux);
+        s_trial.active = false;
+        s_trial.commitPending = false;
+        s_trial.result = WIFI_TRIAL_SUCCESS;
+        portEXIT_CRITICAL(&s_trialMux);
+        LOG_INFO("Trial join succeeded — credentials committed (SSID: %s)", s_trial.newSsid);
+        return;
+    }
+
+    if (expired) {
+        portENTER_CRITICAL(&s_trialMux);
+        s_trial.active = false;
+        s_trial.result = WIFI_TRIAL_FAILED;  // latched until the next connect()
+        portEXIT_CRITICAL(&s_trialMux);
+        s_pendingJoin = false;
+        if (s_trial.haveOld) {
+            LOG_WARN("Trial join to '%s' failed — restoring previous network '%s'",
+                     s_trial.newSsid, s_trial.oldSsid);
+            applyStaConfig(s_trial.oldSsid, s_trial.oldPass);
+            esp_wifi_connect();
+        } else {
+            LOG_WARN("Trial join to '%s' failed — no previous credentials to restore",
+                     s_trial.newSsid);
+        }
+    }
 }
 
 bool WifiManager::isJoinPending()

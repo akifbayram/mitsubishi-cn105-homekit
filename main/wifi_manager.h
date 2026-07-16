@@ -23,6 +23,21 @@ namespace WifiManager {
     /// a dial-initiated change window).
     bool isJoinPending();
 
+    /// Trial-connect state. connect() with credentials that differ from NVS
+    /// enters a trial: nothing is persisted until GOT_IP lands (SUCCESS);
+    /// if the join hasn't landed after 30s, the previous credentials are
+    /// restored and the STA reconnects to the old network (FAILED, latched
+    /// until the next connect()). Same-as-stored credentials skip the trial.
+    enum WifiTrialState : uint8_t {
+        WIFI_TRIAL_IDLE, WIFI_TRIAL_TESTING, WIFI_TRIAL_SUCCESS, WIFI_TRIAL_FAILED
+    };
+    WifiTrialState getTrialState();
+
+    /// Main-task tick: commits trial credentials after a successful join,
+    /// reverts to the previous network on trial deadline. Call from the
+    /// app_main() loop (NVS writes must stay off the 4KB event task).
+    void loop();
+
     /// Wait for connection with timeout. Returns true if connected.
     bool waitForConnection(uint32_t timeoutMs);
 

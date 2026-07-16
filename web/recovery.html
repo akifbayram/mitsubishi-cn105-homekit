@@ -599,10 +599,20 @@ input:focus-visible{outline-offset:0}
           return;
         }
         fetch('/wifi-status').then(function(r){return r.json()}).then(function(s){
+          if(s.trial==='fail'){
+            clearInterval(poll);
+            statusBox.className='status err';
+            statusBox.textContent='Couldn’t join '+ssid+' — wrong password? The previous WiFi settings were restored.';
+            showPicker();
+            return;
+          }
           /* "joined" = connected on the credentials just applied; the bare
              connected level stays true for the OLD network during a
-             dial-initiated change window and must not read as success */
-          if(s.joined){
+             dial-initiated change window and must not read as success.
+             Success is reported only after the device has committed the new
+             credentials (trial 'ok'), or immediately when no trial ran
+             (re-applying the already-stored network, trial 'idle'). */
+          if(s.joined && (s.trial==='ok' || s.trial==='idle')){
             clearInterval(poll);
             statusBox.className='status ok';
             statusBox.textContent='Connected! This hotspot will turn off shortly.';

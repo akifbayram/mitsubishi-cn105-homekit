@@ -180,12 +180,22 @@ esp_err_t WebUI::handleWifiStatus(httpd_req_t *req) {
     // success off it (on-device round 2, 2026-07-12).
     bool joined = connected && !WifiManager::isJoinPending();
 
-    char buf[300];
+    // Trial-connect state: "ok" only after the new credentials are committed
+    // to NVS, "fail" after the 30s deadline reverted to the previous network.
+    const char *trial = "idle";
+    switch (WifiManager::getTrialState()) {
+        case WifiManager::WIFI_TRIAL_TESTING: trial = "testing"; break;
+        case WifiManager::WIFI_TRIAL_SUCCESS: trial = "ok"; break;
+        case WifiManager::WIFI_TRIAL_FAILED:  trial = "fail"; break;
+        default: break;
+    }
+
+    char buf[340];
     snprintf(buf, sizeof(buf),
         "{\"ssid\":\"%s\",\"deviceName\":\"%s\",\"connected\":%s"
-        ",\"joined\":%s,\"hkSetupCode\":\"%s\"}",
+        ",\"joined\":%s,\"trial\":\"%s\",\"hkSetupCode\":\"%s\"}",
         escSSID, escName, connected ? "true" : "false",
-        joined ? "true" : "false",
+        joined ? "true" : "false", trial,
         homekit_get_setup_code());
 
     httpd_resp_set_type(req, "application/json");
@@ -228,9 +238,12 @@ bool WebUI::applyWifiCredentials(const char *json, const char **outError) {
     }
     // Password is optional (open networks send empty password)
     jsonGetString(json, "password", password, sizeof(password));
-    LOG_INFO("Saving WiFi credentials (SSID: %s)", ssid);
+    LOG_INFO("Applying WiFi credentials (SSID: %s)", ssid);
+    // Logs the ATTEMPT — the credentials themselves are only committed to NVS
+    // by WifiManager::loop() after the trial join succeeds.
     eventlog_append(EV_WIFI_CREDS_CHANGED);
-    // Connect via WifiManager (saves to NVS and initiates connection)
+    // Trial-connect via WifiManager: NVS commit is deferred until GOT_IP;
+    // on failure the previous credentials are restored (see wifi_manager.cpp)
     WifiManager::connect(ssid, password);
     // Mark change pending (shorter recovery timeout); also refreshes the
     // cached SSID from the just-saved credentials
