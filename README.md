@@ -173,7 +173,7 @@ On the NanoC6, a separate blue LED tracks WiFi (on = disconnected, off = connect
 
 ## Remote Temperature Sensor (BLE)
 
-Wall-mounted units measure temperature at ceiling height near the return air intake, which usually reads warmer than the living space. A BLE sensor placed lower in the room gives the heat pump a better reading to work with.
+Wall-mounted mini split units measure temperature at ceiling height near the return air intake, which usually reads warmer than the living space. A BLE sensor placed lower in the room gives the heat pump a better reading to work with.
 
 The firmware listens for BLE advertisements from a configured sensor. No Bluetooth pairing needed, just power on the sensor. Temperature is forwarded to the heat pump every 20 seconds. If no BLE data arrives before the stale timeout (default 10 minutes, adjustable from 30 seconds to 1 hour via the Remote Sensor card), the heat pump reverts to its internal thermistor.
 
@@ -201,9 +201,11 @@ A **Remote Sensor** card appears in the web UI on boards with Bluetooth:
 - **Status** — live temperature, humidity, battery level, signal strength, and last update time
 - **Indicators** — green (active), orange (feed disabled), red (stale data), gray (scanning/not configured)
 
-## Link Remote
+## Serin Link
 
-An optional physical dial that mirrors the unit's live state and controls power, mode, setpoint, fan, and vanes over an encrypted wireless link. All HVAC logic stays on the unit, and the link stays idle until a remote is paired, so a unit with no remote behaves exactly as before. Pair by holding the unit's button, then pairing from the dial; "Forget remote" in the web UI clears the bond.
+An accessory physical display with a rotary controls that mirrors the unit's live state and controls power, mode, setpoint, fan, and vanes over an encrypted wireless link (Serin Link). All HVAC logic stays on the unit.
+
+To pair, open a 60-second pairing window on the unit — via the web UI **Pair** button or a 2–9 second hold of the unit's button — then start pairing from the dial. "Forget remote" in the web UI clears the bond.
 
 ## OTA Updates
 
@@ -238,19 +240,16 @@ The web UI includes:
 - **Remote Sensor** — BLE sensor temperature, humidity, battery, signal strength, MAC config, feed toggle, stale timeout (only visible when built with BLE support)
 - **Diagnostics** — compressor frequency, outside temp, runtime hours, error codes, sub mode/stage
 - **HomeKit** — pairing status, controller count, setup code with copy button, QR code for pairing, reset pairing button
-- **Settings** — device name, poll interval (ms), log level, °C/°F toggle
+- **Settings** — device name, poll interval (ms), log level, °C/°F toggle, Unit Capabilities (filter which HVAC modes are exposed), and settings export/import (client-side JSON backup)
+- **About** — device identity and health, a persistent device event log, one-tap Copy Diagnostics for support, a safe-mode banner, and factory reset (behind an "Advanced" disclosure, type-`ERASE` confirmation — wipes all settings including HomeKit pairing)
 - **Logs** — real-time log streaming via WebSocket
 - **OTA** — firmware upload with integrity verification, plus a "Check for Updates" button for one-click upgrades (see [OTA Updates](#ota-updates))
 
 ## HomeKit Details
 
-The device pairs as a HomeKit bridge (the bridge runs on the ESP32 itself, no separate hardware). The air conditioner and the BLE remote sensor appear as two distinct accessories behind a single pairing. Every service reports a connection state, so the Home app marks an accessory "Not Responding" when the CN105 link or BLE sensor drops.
+The device pairs as a HomeKit bridge. The thermostat and the remote sensor appear as two distinct accessories behind a bridge. Every service reports a connection state, so the Home app marks an accessory "Not Responding" when the CN105 link or BLE sensor drops.
 
 Thermostat mode mappings, FAN/DRY mode switches, fan speed percentages, dual setpoints, vane control, and diagnostics are documented in [HomeKit Details](docs/homekit.md). For an overview of HomeKit features and setup, see the [Serin Labs HomeKit page](https://serin-labs.github.io/homekit/features).
-
-## Project Structure
-
-See [Project Structure](docs/project-structure.md) for the full source tree with descriptions of each file.
 
 ## CN105 Protocol
 

@@ -1,5 +1,5 @@
 /*
- * sl2_port.h — platform port for the Serin Link v2 core.
+ * sl2_port.h — platform port for the Serin Link core.
  *
  * The core assumes only: a datagram transport with ≤250 B MTU and 6-byte peer
  * addresses (ESP-NOW today), a millisecond clock, and a small key/value store.

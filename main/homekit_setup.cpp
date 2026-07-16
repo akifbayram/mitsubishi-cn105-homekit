@@ -245,7 +245,7 @@ bool homekit_init(const char* name, const char* manufacturer,
         char acSerial[24];
         snprintf(acSerial, sizeof(acSerial), "%s-ac", serialNumber);
         hap_acc_cfg_t acCfg = {
-            .name             = const_cast<char*>("Air Conditioner"),
+            .name             = const_cast<char*>("Heat Pump"),
             .model            = const_cast<char*>(model),
             .manufacturer     = const_cast<char*>(manufacturer),
             .serial_num       = acSerial,

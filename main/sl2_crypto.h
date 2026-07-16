@@ -1,5 +1,5 @@
 /*
- * sl2_crypto.h — crypto hooks for the Serin Link v2 core.
+ * sl2_crypto.h — crypto hooks for the Serin Link core.
  *
  * The core never calls a crypto library directly; adopters supply these hooks.
  * Reference bindings: libsodium (espressif/libsodium managed component — the

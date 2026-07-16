@@ -21,16 +21,25 @@ html{-webkit-text-size-adjust:100%;}
   --canvas:#0b0b0c; --bg:#000000; --surface:#1C1C1E; --surface2:#2C2C2E; --surface3:#3A3A3C;
   --border:#2A2A2C; --sep:rgba(120,120,128,0.28); --seg:rgba(120,120,128,0.24); --segthumb:#5B5B60;
   --text:#FFFFFF; --text2:#9A9AA0; --text3:#636366;
+  /* Dark uses the vivid accents below unchanged; a light tint glows on the near-black card. */
+  --glow-a:17%;
 }
 :root[data-theme="light"]{
   --canvas:#E6E5E1; --bg:#F2F2F7; --surface:#FFFFFF; --surface2:#EDEDF2; --surface3:#DCDCE2;
   --border:#D6D6DB; --sep:rgba(60,60,67,0.16); --seg:rgba(120,120,128,0.12); --segthumb:#FFFFFF;
   --text:#000000; --text2:#86868B; --text3:#AEAEB4;
+  /* Apple's *light* system accents: deeper than the dark set, so they read on white
+     instead of washing out. Overrides the vivid defaults below for light mode only. */
+  --accent:#007AFF; --orange:#FF9500; --purple:#AF52DE; --teal:#00A9C7; --fan:#1FA2E0;
+  /* A light-tinted accent has little luminance headroom over white, so the glow needs
+     more strength than on the dark card. */
+  --glow-a:26%;
 }
-/* Semantic accents (constant across themes) */
+/* Semantic accents (dark/vivid defaults; light theme overrides the mode accents above) */
 :root{
   --accent:#0A84FF; --orange:#FF9F0A; --green:#30D158; --red:#FF453A;
   --purple:#BF5AF2; --teal:#64D2FF; --fan:#5AC8FA; --gray:#8E8E93;
+  --glow-a:17%;
   --radius-card:24px; --radius-sm:12px;
 }
 
@@ -66,9 +75,10 @@ body{
 /* ===== Header ===== */
 .header{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;padding:22px 22px 14px;}
 .header-left{min-width:0;}
-.device-name{overflow:hidden;text-overflow:ellipsis;}
-.device-name{font-size:26px;font-weight:600;letter-spacing:-.5px;margin:0;color:var(--text);line-height:1.05;}
-.header-sub{font-size:13px;color:var(--text2);margin-top:3px;}
+.device-name{font-size:26px;font-weight:600;letter-spacing:-.5px;margin:0;color:var(--text);line-height:1.25;
+  overflow:hidden;text-overflow:ellipsis;}
+.header-sub{font-size:13px;color:var(--text2);margin-top:1px;}
+.header-sub:empty{display:none;}
 .header-right{display:flex;align-items:center;gap:8px;flex:none;}
 .theme-toggle{width:34px;height:34px;border-radius:50%;border:1px solid var(--border);background:var(--surface2);
   color:var(--text);cursor:pointer;display:flex;align-items:center;justify-content:center;flex:none;padding:0;}
@@ -147,7 +157,7 @@ input[type=range].slim::-moz-range-thumb{width:22px;height:22px;}
 /* ===== Temperature panel ===== */
 .temp-card{position:relative;overflow:hidden;padding:20px;}
 .temp-glow{position:absolute;inset:0;pointer-events:none;
-  background:linear-gradient(180deg,color-mix(in srgb,var(--mode-accent) 17%,transparent),transparent 58%);}
+  background:linear-gradient(180deg,color-mix(in oklab,var(--mode-accent) var(--glow-a),transparent),transparent 58%);}
 .temp-inner{position:relative;}
 .temp-display{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;}
 .temp-lbl{font-size:11.5px;font-weight:500;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;display:block;}
@@ -414,7 +424,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   <header class="header">
     <div class="header-left">
       <h1 class="device-name" id="devName">{{BRAND_NAME}}</h1>
-      <div class="header-sub" id="headerSub">Mitsubishi · CN105</div>
+      <div class="header-sub" id="headerSub"></div>
     </div>
     <div class="header-right">
       <button class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="Toggle theme" aria-label="Toggle theme">
@@ -618,6 +628,42 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     </div>
   </div>
 
+  <!-- ===== NETWORK ===== -->
+  <h2 class="group-label">Network · Wi-Fi<span class="section-summary"><span class="status-dot idle" id="wifiDot"></span><span class="summary-text" id="wifiStatusLabel">--</span></span></h2>
+  <div class="card" id="wifiBody">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:11px;padding-bottom:14px;border-bottom:1px solid var(--sep)">
+      <div style="display:flex;align-items:center;gap:11px;min-width:0">
+        <span class="icon-badge" style="color:var(--accent)"><svg viewBox="0 0 17 12" fill="currentColor"><path d="M8.5 2C5.6 2 3 3.1 1 5l1.5 1.6C4 5.2 6.1 4.3 8.5 4.3s4.5.9 6 2.3L16 5C14 3.1 11.4 2 8.5 2z"/><path d="M8.5 6.2c-1.6 0-3.1.6-4.2 1.6l1.6 1.6c.7-.6 1.6-1 2.6-1s1.9.4 2.6 1l1.6-1.6C11.6 6.8 10.1 6.2 8.5 6.2z"/><circle cx="8.5" cy="10.4" r="1.4"/></svg></span>
+        <div class="stack-tight" style="min-width:0">
+          <div class="t" id="wifiSsid">Wi-Fi</div>
+          <div class="b">Connected · <span id="wifiUptimeVal">--:--:--</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="wifi-scan-hdr">
+      <span class="card-label">Networks</span>
+      <button class="refresh-btn" id="wifiRefreshBtn" onclick="doWifiScan()" title="Scan for networks" aria-label="Scan for networks">
+        <svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.2-5.9"/><path d="M21 3v5h-5"/></svg>
+      </button>
+    </div>
+    <div id="wifiNetList"><div class="scan-msg">Tap refresh to scan for networks</div></div>
+    <div class="wifi-stack">
+      <input type="text" class="field" id="cfgSSID" placeholder="SSID" maxlength="32" aria-label="Wi-Fi network name">
+      <div class="pw-wrap">
+        <input type="text" id="cfgPass" class="pw-field" placeholder="Password" maxlength="64" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" aria-label="Wi-Fi password">
+        <button type="button" class="pw-toggle" onmousedown="event.preventDefault()" onclick="togglePw('cfgPass',this)" aria-label="Show password">
+          <svg class="icon-eye" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
+          <svg class="icon-eye-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3l18 18"/><path d="M10.6 10.6a3 3 0 0 0 4.2 4.2"/><path d="M9.5 5.2A9.6 9.6 0 0 1 12 5c6.5 0 10 7 10 7a13.3 13.3 0 0 1-2.2 2.9"/><path d="M6.2 6.2A13.2 13.2 0 0 0 2 12s3.5 7 10 7a9.5 9.5 0 0 0 3-.5"/></svg>
+        </button>
+      </div>
+    </div>
+    <button class="save-btn" id="wifiSaveBtn" onclick="saveWifi()" style="margin-top:12px" disabled>Save Wi-Fi</button>
+    <div id="wifiBanner" class="ble-banner muted" style="display:none;margin-top:12px;flex-direction:column;align-items:stretch;gap:10px;text-align:center">
+      Testing new Wi-Fi credentials — the device switches over automatically if they work, and reverts to the current network if they don't. No reboot needed; if the address changes, reconnect at the new IP.
+    </div>
+    <span id="rssiVal" class="hidden"></span>
+  </div>
+
   <!-- ===== HOMEKIT ===== -->
   <h2 class="group-label">HomeKit<span class="section-summary"><span class="status-dot idle" id="hkDot"></span><span class="summary-text" id="hkStatusLabel">—</span></span></h2>
   <div class="card" id="homekitBody">
@@ -672,43 +718,6 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       <button id="forgetRemoteBtn" class="btn-danger" style="display:none">Forget</button>
     </div>
     <div id="pairStatus" style="font-size:12.5px;color:var(--text2);margin-top:8px"></div>
-  </div>
-
-  <!-- ===== NETWORK ===== -->
-  <h2 class="group-label">Network · Wi-Fi<span class="section-summary"><span class="status-dot idle" id="wifiDot"></span><span class="summary-text" id="wifiStatusLabel">--</span></span></h2>
-  <div class="card" id="wifiBody">
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:11px;padding-bottom:14px;border-bottom:1px solid var(--sep)">
-      <div style="display:flex;align-items:center;gap:11px;min-width:0">
-        <span class="icon-badge" style="color:var(--accent)"><svg viewBox="0 0 17 12" fill="currentColor"><path d="M8.5 2C5.6 2 3 3.1 1 5l1.5 1.6C4 5.2 6.1 4.3 8.5 4.3s4.5.9 6 2.3L16 5C14 3.1 11.4 2 8.5 2z"/><path d="M8.5 6.2c-1.6 0-3.1.6-4.2 1.6l1.6 1.6c.7-.6 1.6-1 2.6-1s1.9.4 2.6 1l1.6-1.6C11.6 6.8 10.1 6.2 8.5 6.2z"/><circle cx="8.5" cy="10.4" r="1.4"/></svg></span>
-        <div class="stack-tight" style="min-width:0">
-          <div class="t" id="wifiSsid">Wi-Fi</div>
-          <div class="b">Connected · <span id="wifiUptimeVal">--:--:--</span></div>
-        </div>
-      </div>
-    </div>
-    <div class="wifi-scan-hdr">
-      <span class="card-label">Networks</span>
-      <button class="refresh-btn" id="wifiRefreshBtn" onclick="doWifiScan()" title="Scan for networks" aria-label="Scan for networks">
-        <svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.2-5.9"/><path d="M21 3v5h-5"/></svg>
-      </button>
-    </div>
-    <div id="wifiNetList"><div class="scan-msg">Tap refresh to scan for networks</div></div>
-    <div class="wifi-stack">
-      <input type="text" class="field" id="cfgSSID" placeholder="SSID" maxlength="32" aria-label="Wi-Fi network name">
-      <div class="pw-wrap">
-        <input type="text" id="cfgPass" class="pw-field" placeholder="Password" maxlength="64" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" aria-label="Wi-Fi password">
-        <button type="button" class="pw-toggle" onmousedown="event.preventDefault()" onclick="togglePw('cfgPass',this)" aria-label="Show password">
-          <svg class="icon-eye" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></svg>
-          <svg class="icon-eye-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3l18 18"/><path d="M10.6 10.6a3 3 0 0 0 4.2 4.2"/><path d="M9.5 5.2A9.6 9.6 0 0 1 12 5c6.5 0 10 7 10 7a13.3 13.3 0 0 1-2.2 2.9"/><path d="M6.2 6.2A13.2 13.2 0 0 0 2 12s3.5 7 10 7a9.5 9.5 0 0 0 3-.5"/></svg>
-        </button>
-      </div>
-    </div>
-    <button class="save-btn" id="wifiSaveBtn" onclick="saveWifi()" style="margin-top:12px" disabled>Save Wi-Fi</button>
-    <div id="wifiBanner" class="ble-banner muted" style="display:none;margin-top:12px;flex-direction:column;align-items:stretch;gap:10px;text-align:center">
-      Wi-Fi credentials saved. Reboot to connect to the new network.
-      <button class="btn-danger" onclick="restartDevice()">Reboot Now</button>
-    </div>
-    <span id="rssiVal" class="hidden"></span>
   </div>
 
   <!-- ===== DEVICE ===== -->
@@ -968,6 +977,11 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   var CHEVRON_SVG='<svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>';
   var collapsibleUID=0;
 
+  // Persist each section's open/closed state, keyed by a stable slug of its label
+  // (so it survives reorders/rebuilds — unlike a positional index).
+  function loadSectionOpen(key){try{return localStorage.getItem('sec:'+key)==='1';}catch(e){return false;}}
+  function saveSectionOpen(key,open){try{localStorage.setItem('sec:'+key,open?'1':'0');}catch(e){}}
+
   function CollapsibleSection(header){
     this.header=header;
     this.open=false;
@@ -1000,6 +1014,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     var summary=header.querySelector('.section-summary');
     if(summary)summary.parentNode.removeChild(summary);
     var label=header.textContent.trim();
+    this.storeKey=label.replace(/[^a-z0-9]+/gi,'-').replace(/^-+|-+$/g,'').toLowerCase();
     header.textContent='';
     header.classList.add('collapsible');
     var btn=document.createElement('button');
@@ -1020,12 +1035,14 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     btn.addEventListener('click',function(){self.toggle();});
   }
   CollapsibleSection.prototype.toggle=function(){this.setOpen(!this.open);};
-  CollapsibleSection.prototype.setOpen=function(open){
+  CollapsibleSection.prototype.setOpen=function(open,instant){
     this.open=!!open;
     this.body.classList.toggle('collapsed',!this.open);
     this.header.classList.toggle('is-open',this.open);
     this.button.setAttribute('aria-expanded',this.open?'true':'false');
+    if(instant)return; // load-time restore: no persist, no onOpen (layout isn't ready to measure)
     if(this.open&&this.onOpen)this.onOpen(this);
+    saveSectionOpen(this.storeKey,this.open);
   };
 
   function initCollapsibleSections(){
@@ -1039,6 +1056,9 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
         var segs=s.inner.querySelectorAll('.seg[id]');
         for(var j=0;j<segs.length;j++)updateSegBg(segs[j].id);
       };
+      // Restore a previously-opened section instantly (no slide animation,
+      // no onOpen — the global seg-init pass below repositions any thumbs).
+      if(loadSectionOpen(sec.storeKey))sec.setOpen(true,true);
     }
   }
 
@@ -1049,7 +1069,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     pill.classList.remove('is-reconnecting','is-offline');
     if(st==='connected'){
       dot.className='conn-dot ok'; lbl.textContent='Connected'; pill.title='Connected';
-      if(sub) sub.textContent='Mitsubishi · CN105';
+      if(sub) sub.textContent='';
     }else if(st==='offline'){
       pill.classList.add('is-offline'); dot.className='conn-dot err'; lbl.textContent='Offline'; pill.title='Offline';
       if(sub&&lastConnectedAt){var m=Math.floor((Date.now()-lastConnectedAt)/60000);sub.textContent='Last seen '+(m<1?'just now':m+' min ago');}
