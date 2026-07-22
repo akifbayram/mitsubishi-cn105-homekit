@@ -278,6 +278,27 @@ static void pair_commit(sl2_link_t *l) {
 
 /* ── RX ───────────────────────────────────────────────────────────────── */
 
+/* Assess a device cert from DIAL_INFO's TLV tail (wire spec §10c). The raw
+ * bytes are kept even when INVALID so tooling can inspect a rejected cert.
+ * Unpinned bench bonds (all-zero id_pub) can never reach OK — intended. */
+static void dial_cert_apply(sl2_link_t *l, sl2_dial_rt_t *d,
+                            const uint8_t *v, uint8_t vl) {
+    sl2_dial_cert_t c;
+    if (!sl2_dial_cert_decode(v, vl, &c)) {
+        d->cert_state = SL2_CERT_INVALID;
+        return;
+    }
+    memcpy(d->cert, v, SL2_DIAL_CERT_LEN);
+    if (!l->root_pub) {
+        d->cert_state = SL2_CERT_PRESENT;
+        return;
+    }
+    bool ok = l->crypto->ed25519_verify(l->crypto->ctx, l->root_pub, v,
+                                        SL2_DIAL_CERT_SIGNED_LEN, c.sig) == 0 &&
+              memcmp(c.device_pub, d->bond.id_pub, 32) == 0;
+    d->cert_state = ok ? SL2_CERT_OK : SL2_CERT_INVALID;
+}
+
 void sl2_link_on_recv(sl2_link_t *l, const uint8_t src[6], const uint8_t dst[6],
                       const uint8_t *data, int len) {
     if (!l->started || len < 2) return;
@@ -345,6 +366,15 @@ void sl2_link_on_recv(sl2_link_t *l, const uint8_t src[6], const uint8_t dst[6],
             d->fw[sizeof d->fw - 1] = 0;
             d->have_info = true;
             d->last_probe_ms = now;
+            /* Optional TLV tail past the fixed struct (proto §10c). */
+            if (len > (int)sizeof di) {
+                const uint8_t *tail = data + sizeof di;
+                size_t tlen = (size_t)len - sizeof di, off = 0;
+                uint8_t t, tl;
+                const uint8_t *v;
+                while (sl2_tlv_next(tail, tlen, &off, &t, &tl, &v))
+                    if (t == SL2_TLV_DIAL_CERT) dial_cert_apply(l, d, v, tl);
+            }
         }
         break;
     default:
@@ -574,6 +604,19 @@ bool sl2_link_dial_view(sl2_link_t *l, int idx, sl2_dial_view_t *out) {
     memcpy(out->model, d->model, sizeof out->model);
     memcpy(out->fw, d->fw, sizeof out->fw);
     out->caps_seq = d->peer_caps_seq;
+    out->cert_state = d->cert_state;
+    return true;
+}
+
+void sl2_link_set_root_pub(sl2_link_t *l, const uint8_t pub[32]) {
+    l->root_pub = pub;
+}
+
+bool sl2_link_dial_cert(const sl2_link_t *l, int idx,
+                        uint8_t out[SL2_DIAL_CERT_LEN]) {
+    if (idx < 0 || idx >= l->n_dials) return false;
+    if (l->dial[idx].cert_state == SL2_CERT_NONE) return false;
+    memcpy(out, l->dial[idx].cert, SL2_DIAL_CERT_LEN);
     return true;
 }
 

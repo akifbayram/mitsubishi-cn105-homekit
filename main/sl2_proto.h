@@ -323,6 +323,9 @@ enum sl2_tlv_type {          /* 0x01..0x7F core; 0x80..0xFF vendor-specific */
     SL2_TLV_RUNTIME     = 0x07,  /* u32 hours */
     SL2_TLV_SYS         = 0x08,  /* u32 uptime_s; u8 reset_reason */
     SL2_TLV_ENERGY      = 0x09,  /* u16 input_w (0xFFFF n/a); u32 wh_total (0xFFFFFFFF n/a) */
+    SL2_TLV_DIAL_CERT   = 0x0A,  /* DIAL_INFO tail only: raw 112 B link_cert
+                                  * (Serin-signed device identity); absent on
+                                  * unprovisioned dials */
 };
 
 /* Append one TLV. Returns false (and writes nothing) if it doesn't fit. */
@@ -385,7 +388,12 @@ struct __attribute__((packed)) sl2_wifi_setup_pkt {
  * The dial reports its own identity so the unit's UI can show which Link is
  * paired. Sent on connect, on caps_seq change, and ~every 60 s. model/fw are
  * dial-authored branded strings; caps_seq is the dial's currently-applied
- * generation (unit compares against its own to show a "syncing" hint). */
+ * generation (unit compares against its own to show a "syncing" hint).
+ *
+ * Bytes past the fixed struct are an optional TLV tail (same framing as
+ * INFO). SL2's tolerant decode copies min(len, sizeof) — floor-era
+ * receivers drop the tail unread, so appending TLVs is compatible by
+ * construction. Today: SL2_TLV_DIAL_CERT. */
 struct __attribute__((packed)) sl2_dial_info_pkt {
     uint8_t type;            /* SL2_PKT_DIAL_INFO */
     uint8_t version;         /* SL2_PROTO_VERSION */
@@ -414,6 +422,8 @@ SL2_STATIC_ASSERT(SL2_CMD_MIN_LEN   <= (int)sizeof(struct sl2_cmd_pkt),   cmd_mi
 SL2_STATIC_ASSERT(SL2_PROBE_MIN_LEN <= (int)sizeof(struct sl2_probe_pkt), probe_minlen);
 SL2_STATIC_ASSERT(SL2_CAPS_MIN_LEN  <= (int)sizeof(struct sl2_caps_pkt),  caps_minlen);
 SL2_STATIC_ASSERT(SL2_PAIR_MIN_LEN  <= (int)sizeof(struct sl2_pair_req_pkt), pair_minlen);
+SL2_STATIC_ASSERT(sizeof(struct sl2_dial_info_pkt) + 2 + 112 <= 250,
+                  dial_info_cert_fits);   /* ESP-NOW payload ceiling */
 
 /* ── tolerant decode ──────────────────────────────────────────────────── */
 

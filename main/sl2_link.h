@@ -14,6 +14,7 @@
 #include "sl2_port.h"
 #include "sl2_crypto.h"
 #include "sl2_bond.h"
+#include "sl2_dial_cert.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -74,6 +75,19 @@ typedef struct sl2_hvac_iface {
     bool (*wifi_setup)(void *ctx);
 } sl2_hvac_iface_t;
 
+/* Assessment of the device cert a dial pushes in DIAL_INFO's TLV tail.
+ * PRESENT = cert received but no Serin root configured (verification off,
+ * the default). OK additionally requires the cert's device_pub to equal the
+ * bond's TOFU-pinned identity, so a valid cert lifted from a different dial
+ * still reads INVALID. Re-assessed on every DIAL_INFO (~60 s), so a root
+ * configured after pairing upgrades PRESENT->OK without a re-pair. */
+typedef enum {
+    SL2_CERT_NONE = 0,        /* no cert TLV seen (unprovisioned dial) */
+    SL2_CERT_PRESENT,         /* cert seen; no root to verify against */
+    SL2_CERT_INVALID,         /* malformed, bad signature, or pin mismatch */
+    SL2_CERT_OK,              /* Serin-signed AND bound to the pinned identity */
+} sl2_cert_state_t;
+
 /* Per-dial runtime slot (private). */
 typedef struct {
     sl2_dial_bond_t bond;
@@ -90,6 +104,10 @@ typedef struct {
     char     fw[16];
     uint8_t  peer_caps_seq;   /* caps_seq the dial reports applied */
     bool     have_info;       /* a DIAL_INFO has been received */
+    uint8_t  cert[SL2_DIAL_CERT_LEN]; /* raw cert TLV, kept even when INVALID
+                                       * (diagnostics); meaningful iff
+                                       * cert_state != SL2_CERT_NONE */
+    uint8_t  cert_state;      /* sl2_cert_state_t */
 } sl2_dial_rt_t;
 
 typedef enum { SL2_PAIR_OFF = 0, SL2_PAIR_WINDOW, SL2_PAIR_CONFIRM } sl2_pair_state_t;
@@ -122,6 +140,8 @@ typedef struct sl2_link {
     uint8_t  caps_seq;
     uint16_t epoch;           /* random nonzero per boot; 0 = rand failed
                                * (replay guard off, fail open) */
+    const uint8_t *root_pub;  /* Serin root Ed25519 pubkey (adopter-owned
+                               * storage), or NULL = cert verification off */
     bool     started;
 } sl2_link_t;
 
@@ -185,9 +205,19 @@ typedef struct {
     char     model[24];
     char     fw[16];
     uint8_t  caps_seq;        /* dial's applied caps_seq */
+    uint8_t  cert_state;      /* sl2_cert_state_t */
 } sl2_dial_view_t;
 
 bool sl2_link_dial_view(sl2_link_t *l, int idx, sl2_dial_view_t *out);
+
+/* Serin device-cert verification (wire spec §10c). Point the core at the
+ * public Serin root (32 B, adopter keeps the storage alive) to have DIAL_INFO
+ * cert TLVs verified; NULL (the default) leaves certs unverified (PRESENT).
+ * Copy of the raw 112 B cert for tooling/diagnostics: false unless a cert
+ * TLV has been received (any state but NONE). */
+void sl2_link_set_root_pub(sl2_link_t *l, const uint8_t pub[32]);
+bool sl2_link_dial_cert(const sl2_link_t *l, int idx,
+                        uint8_t out[SL2_DIAL_CERT_LEN]);
 uint8_t sl2_link_caps_seq(const sl2_link_t *l);
 
 /* Call when caps content (incl. zone name) changes: bumps + persists caps_seq
