@@ -55,3 +55,5 @@ private:
 };
 
 extern WebUI webUI;
+
+bool webota_active();   // web_ota.cpp — OTA upload in flight

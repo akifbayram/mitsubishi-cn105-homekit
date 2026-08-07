@@ -4,11 +4,20 @@
 #include <mbedtls/sha256.h>
 #include <esp_app_desc.h>
 #include <esp_partition.h>
-#include "status_led.h"
-#include "board_profile.h"
 #include "ota_guard.h"
 
 static const char *TAG = "web_ota";
+
+// True while an OTA upload is in flight. Read by the main-loop LED policy
+// and the button handler; written only from the httpd task.
+static volatile bool s_otaActive = false;
+
+bool webota_active() { return s_otaActive; }
+
+static void otaFailCleanup(esp_ota_handle_t handle) {
+    esp_ota_abort(handle);
+    s_otaActive = false;
+}
 
 // chip_id of the RUNNING image — self-maintaining: no per-chip constant table
 // to keep in sync with new board profiles.
@@ -65,9 +74,7 @@ esp_err_t WebUI::handleOtaUpload(httpd_req_t *req) {
         return ESP_FAIL;
     }
 
-#if PIN_LED_DATA >= 0
-    statusLED.setState(SLED_OTA);
-#endif
+    s_otaActive = true;
 
     // SHA256 verification: check for X-Firmware-SHA256 header
     char expectedHash[65] = {0};
@@ -89,7 +96,7 @@ esp_err_t WebUI::handleOtaUpload(httpd_req_t *req) {
     char *buf = (char *)malloc(4096);
     if (!buf) {
         mbedtls_sha256_free(&sha256_ctx);
-        esp_ota_abort(otaHandle);
+        otaFailCleanup(otaHandle);
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Out of memory");
         return ESP_FAIL;
     }
@@ -111,7 +118,7 @@ esp_err_t WebUI::handleOtaUpload(httpd_req_t *req) {
             LOG_ERROR("Receive error at %u/%u bytes", (unsigned)received, (unsigned)totalLen);
             mbedtls_sha256_free(&sha256_ctx);
             free(buf);
-            esp_ota_abort(otaHandle);
+            otaFailCleanup(otaHandle);
             httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Receive failed");
             return ESP_FAIL;
         }
@@ -130,7 +137,7 @@ esp_err_t WebUI::handleOtaUpload(httpd_req_t *req) {
                     LOG_ERROR("Firmware rejected (%d): %s", (int)v, ota_guard_message(v));
                     mbedtls_sha256_free(&sha256_ctx);
                     free(buf);
-                    esp_ota_abort(otaHandle);
+                    otaFailCleanup(otaHandle);
                     httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, ota_guard_message(v));
                     return ESP_FAIL;
                 }
@@ -145,7 +152,7 @@ esp_err_t WebUI::handleOtaUpload(httpd_req_t *req) {
                       (unsigned)received, esp_err_to_name(err));
             mbedtls_sha256_free(&sha256_ctx);
             free(buf);
-            esp_ota_abort(otaHandle);
+            otaFailCleanup(otaHandle);
             httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Write failed");
             return ESP_FAIL;
         }
@@ -165,7 +172,7 @@ esp_err_t WebUI::handleOtaUpload(httpd_req_t *req) {
     // Upload ended before the identity header completed — not a real image.
     if (!guardPassed) {
         mbedtls_sha256_free(&sha256_ctx);
-        esp_ota_abort(otaHandle);
+        otaFailCleanup(otaHandle);
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, ota_guard_message(OTA_GUARD_SHORT));
         return ESP_FAIL;
     }
@@ -185,7 +192,7 @@ esp_err_t WebUI::handleOtaUpload(httpd_req_t *req) {
         if (strcmp(computed, expectedHash) != 0) {
             LOG_ERROR("SHA256 mismatch! Expected: %.16s... Got: %.16s...",
                       expectedHash, computed);
-            esp_ota_abort(otaHandle);
+            otaFailCleanup(otaHandle);
             httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "SHA256 mismatch");
             return ESP_FAIL;
         }
@@ -195,6 +202,7 @@ esp_err_t WebUI::handleOtaUpload(httpd_req_t *req) {
     err = esp_ota_end(otaHandle);
     if (err != ESP_OK) {
         LOG_ERROR("esp_ota_end failed: %s", esp_err_to_name(err));
+        s_otaActive = false;
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Validation failed");
         return ESP_FAIL;
     }
@@ -202,6 +210,7 @@ esp_err_t WebUI::handleOtaUpload(httpd_req_t *req) {
     err = esp_ota_set_boot_partition(partition);
     if (err != ESP_OK) {
         LOG_ERROR("esp_ota_set_boot_partition failed: %s", esp_err_to_name(err));
+        s_otaActive = false;
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Set boot failed");
         return ESP_FAIL;
     }
