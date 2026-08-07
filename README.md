@@ -224,7 +224,7 @@ curl --data-binary @build/mitsubishi-cn105-homekit.bin \
 
 **Check for updates:** The web UI Settings panel has a "Check for Updates" button. Your browser fetches the release manifest, compares it against the running version, and offers a one-click install when a newer build is available (the device itself does no GitHub I/O). This is hidden on custom and untracked builds.
 
-**Rollback protection:** After an OTA update, the device checks that WiFi and CN105 UART still work before confirming the new firmware. If it reboots before that check passes (crash, power loss), it rolls back to the previous firmware.
+**Rollback protection:** After an OTA update, the device checks that WiFi and CN105 UART still work before confirming the new firmware. If it reboots before that check passes (crash, power loss), the bootloader rolls back to the previous firmware. The rollback decision is made by the bootloader, which OTA cannot update — units flashed before this feature was enabled need one USB flash to pick it up.
 
 ## Web UI
 

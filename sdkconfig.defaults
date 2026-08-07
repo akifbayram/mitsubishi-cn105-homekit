@@ -16,6 +16,12 @@ CONFIG_BT_NIMBLE_ROLE_BROADCASTER=n
 CONFIG_BT_NIMBLE_ROLE_OBSERVER=y
 CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1
 CONFIG_BT_NIMBLE_MAX_BONDS=1
+# Observer-only: no connections → no security manager. Also required to link
+# on IDF v5.5.4+, where ble_sm.c compiles out (NIMBLE_BLE_CONNECT=0) but
+# ble_hs.c still calls ble_sm_deinit under the default NIMBLE_BLE_SM=y.
+CONFIG_BT_NIMBLE_SECURITY_ENABLE=n
+CONFIG_BT_NIMBLE_SM_LEGACY=n
+CONFIG_BT_NIMBLE_SM_SC=n
 CONFIG_LOG_MAXIMUM_LEVEL_DEBUG=y
 CONFIG_LOG_MAXIMUM_LEVEL=4
 CONFIG_ESP_TASK_WDT_EN=y
@@ -30,6 +36,12 @@ CONFIG_HEAP_CORRUPTION_DETECTION_LIGHT=y
 CONFIG_COMPILER_OPTIMIZATION_PERF=y
 CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_SILENT=y
 CONFIG_BOOTLOADER_LOG_LEVEL_WARN=y
+
+# Bootloader-managed OTA rollback: a new image boots as PENDING_VERIFY and the
+# app must call esp_ota_mark_app_valid_cancel_rollback() (main.cpp does, after
+# the WiFi/CN105 health gate) or the bootloader reverts to the previous slot.
+# Without this option that call is a no-op and a crash-looping OTA sticks.
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 
 # Serin Link v2 pairing (libsodium Ed25519/X25519) runs on the main task via
 # espnowLink.loop(); the 3.5KB IDF default overflows (debug-exception panic).
