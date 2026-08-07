@@ -45,6 +45,8 @@ CN105Controller cn105;
 
 #if PIN_LED_DATA >= 0
 StatusLED statusLED(PIN_LED_DATA, PIN_LED_ENABLE, PIN_BLUE_LED);
+static_assert(SLED_BTN_PAIR_TIER_MS == PAIR_BUTTON_HOLD_MS,
+              "LED pair tier must match the button's pairing hold threshold");
 #endif
 
 // ── Crash loop detection (RTC NOINIT survives software resets) ───────────────
@@ -66,6 +68,7 @@ static uint32_t webUIStartTime = 0;
 #if PIN_LED_DATA >= 0
 static bool lastWifiState     = true;   // force initial setWifi() call
 static const char *lastPairResult = nullptr;   // interned literal from EspnowLink
+static WifiManager::WifiTrialState lastTrialState = WifiManager::WIFI_TRIAL_IDLE;
 #endif
 
 // ── Diagnostic console commands ─────────────────────────────────────────────
@@ -430,49 +433,65 @@ extern "C" void app_main(void)
 
         // ── Status LED priority evaluation ───────────────────────────────
 #if PIN_LED_DATA >= 0
-        // Blue LED tracks WiFi independently
+        // Blue mono LED (NanoC6) tracks WiFi independently; green success
+        // flash when WiFi comes up while the setup portal is open.
         {
             bool wifiNow = WifiManager::isConnected();
             if (wifiNow != lastWifiState) {
                 statusLED.setWifi(wifiNow);
+                if (wifiNow && wifiRecovery.isAPActive()) {
+                    statusLED.requestHold(SLED_RESULT_OK, 3000);
+                }
                 lastWifiState = wifiNow;
             }
         }
 
-        // Detect a terminal pairing result (edge) and hold the LED on it.
-        // requestHold() substitutes the state in setState() until it expires;
-        // SLED_OTA still outranks an armed hold (see StatusLED::setState).
+        // WiFi credential-trial verdict (edge): submitted creds accepted or
+        // rejected → transient result hold.
+        WifiManager::WifiTrialState tr = WifiManager::getTrialState();
+        {
+            if (tr != lastTrialState) {
+                if (tr == WifiManager::WIFI_TRIAL_SUCCESS) {
+                    statusLED.requestHold(SLED_RESULT_OK, 3000);
+                } else if (tr == WifiManager::WIFI_TRIAL_FAILED) {
+                    statusLED.requestHold(SLED_RESULT_FAIL, 3000);
+                }
+                lastTrialState = tr;
+            }
+        }
+
+        // Link pairing verdict (edge) — hold the LED on the result.
         {
             const char *pr = espnowLink.pairResult();
             if (pr != lastPairResult) {   // interned — pointer compare works
                 lastPairResult = pr;
                 switch (espnowLink.pairOutcome()) {
-                    case ESPNOW_PAIR_OK:   statusLED.requestHold(SLED_PAIR_OK, 5000);  break;
-                    case ESPNOW_PAIR_FAIL: statusLED.requestHold(SLED_PAIR_FAIL, 3000); break;
+                    case ESPNOW_PAIR_OK:   statusLED.requestHold(SLED_RESULT_OK, 5000);  break;
+                    case ESPNOW_PAIR_FAIL: statusLED.requestHold(SLED_RESULT_FAIL, 3000); break;
                     default: break;
                 }
             }
         }
 
-        // RGB LED priority: OTA > pairing OK/FAIL hold > pairing listening > status
-        if (statusLED.getState() != SLED_OTA) {
-            if (espnowLink.pairingActive()) {
-                statusLED.setState(SLED_PAIR_LISTEN);
-            } else if (webUIStarted) {
-                const CN105State st = cn105.getState();
-                if (st.hasError) {
-                    statusLED.setState(SLED_ERROR_CODE);
-                } else if (!cn105.isConnected()) {
-                    statusLED.setState(SLED_CN105_DISCONNECTED);
-#if WIFI_ON_RGB
-                } else if (!WifiManager::isConnected()) {
-                    statusLED.setState(SLED_WIFI_DISCONNECTED);
+        // Gather inputs and let the pure policy pick the state (priority
+        // order lives in sled_policy.h; requestHold overrides in setState).
+        {
+            SledInputs li = {};
+            li.buttonHeldMs    = wifiRecovery.buttonHeldMs();
+            li.otaActive       = webota_active();
+#if ESPNOW_REMOTE_ENABLE
+            li.pairActionAllowed = !li.otaActive;   // mirrors checkButton()'s OTA guard
 #endif
-                } else {
-                    statusLED.setState(SLED_OFF);
-                }
-            }
-            // Boot phase: SLED_BOOT continues until webUIStarted
+            li.pairingActive   = espnowLink.pairingActive();
+            li.wifiTrialActive = (tr == WifiManager::WIFI_TRIAL_TESTING);   // real credential trials only
+            li.safeMode        = safeMode;
+            li.portalActive    = wifiRecovery.isAPActive();
+            li.webUIStarted    = webUIStarted;
+            li.hpError         = cn105.hasError();   // lock-free; getState() copies 44 B
+            li.cn105Connected  = cn105.isConnected();
+            li.wifiConnected   = lastWifiState;
+            li.wifiOnRgb       = (WIFI_ON_RGB != 0);
+            statusLED.setState(sled_evaluate(li));
         }
         statusLED.loop();
 #endif

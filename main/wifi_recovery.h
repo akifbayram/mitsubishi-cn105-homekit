@@ -30,6 +30,7 @@ public:
                                        // call (2 s / 10 s hold thresholds need ~10 ms sampling);
                                        // WiFi/AP checks are rate-limited to 1 Hz internally
     bool isAPActive() const { return _apActive; }
+    uint32_t buttonHeldMs() const;     // 0 = button not pressed; else ms held so far
     void setChangePending(bool pending); // Set/clear the NVS flag
     void activateNow();                  // Immediately enable fallback AP (no timeout)
     void beginChangeWindow();            // Dial-initiated: AP now + bounded auto-close while STA stays up

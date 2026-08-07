@@ -8,6 +8,7 @@
 #include "wifi_manager.h"
 #include "esp_utils.h"
 #include "status_led.h"
+#include "web_server.h"
 
 #include <esp_netif.h>
 #include <driver/gpio.h>
@@ -270,6 +271,14 @@ uint32_t WifiRecovery::getWifiUptimeSeconds() const {
     return (safeUptimeMs() - _wifiConnectedSince) / 1000;
 }
 
+uint32_t WifiRecovery::buttonHeldMs() const {
+#if PIN_BUTTON < 0
+    return 0;
+#else
+    return _buttonPressStart ? (uptime_ms() - _buttonPressStart) : 0;
+#endif
+}
+
 void WifiRecovery::checkButton() {
 #if PIN_BUTTON < 0
     return;
@@ -289,15 +298,16 @@ void WifiRecovery::checkButton() {
     } else if (!pressed) {
         if (_buttonPressStart != 0 && !_buttonTriggered) {
             uint32_t held = uptime_ms() - _buttonPressStart;
-            // Upper bound: a hold that reached 10 s is WiFi-erase territory even
-            // if the while-pressed check was missed — never fall into the
-            // (destructive when bonded) pairing/unbond path on release.
-            if (held >= PAIR_BUTTON_HOLD_MS && held < WIFI_RESET_BUTTON_HOLD_MS) {
+            // Upper bound: once the LED enters its red SLED_BTN_WIPE warning
+            // tier (>= SLED_BTN_WIPE_WARN_MS, 7 s), releasing must be a no-op
+            // so that tier honestly means "release now to abort" — otherwise
+            // releasing at, say, 8 s to abort the wipe would instead fire the
+            // (destructive when bonded) pairing/unbond action. The 10 s wipe
+            // threshold itself is unaffected: it fires from the while-pressed
+            // branch above, not this release path.
+            if (held >= PAIR_BUTTON_HOLD_MS && held < SLED_BTN_WIPE_WARN_MS) {
 #if ESPNOW_REMOTE_ENABLE
-                bool otaBusy = false;
-#if PIN_LED_DATA >= 0
-                otaBusy = (statusLED.getState() == SLED_OTA);
-#endif
+                bool otaBusy = webota_active();
                 if (otaBusy) {
                     LOG_INFO("[WiFiRecovery] Button pairing ignored (OTA in progress)");
                 } else if (espnowLink.pairingActive()) {

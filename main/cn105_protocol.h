@@ -190,6 +190,11 @@ public:
     /// Returns true when communication with the unit is established
     bool isConnected() const { return _state.connected; }
 
+    /// Returns true when the unit is reporting an error code. Lock-free single
+    /// field read — for callers on the 10 ms path that would otherwise pay
+    /// getState()'s critical section and whole-struct copy for one bool.
+    bool hasError() const { return _state.hasError; }
+
     /// Returns true when connected AND last response was within CN105_COMMS_TIMEOUT.
     /// Use this from HomeKit services to decide whether to report "Not Responding".
     bool isHealthy() const;

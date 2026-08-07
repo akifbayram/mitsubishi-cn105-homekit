@@ -2,20 +2,7 @@
 
 #include <cstdint>
 #include "board_profile.h"
-
-// RGB LED states (WS2812)
-enum LEDState {
-    SLED_OFF,                // Normal operation — LED dark
-    SLED_BOOT,               // Startup — white quick blink (500ms)
-    SLED_CN105_DISCONNECTED, // CN105 UART lost — red steady
-    SLED_WIFI_DISCONNECTED,  // WiFi lost — blue steady (WIFI_ON_RGB boards only)
-    SLED_ERROR_CODE,         // AC error code (non-0x80) — red fast blink (200ms)
-    SLED_OTA,                // Firmware upload — blue slow pulse (~2s)
-    SLED_PAIR_LISTEN,        // Link pairing window open — purple slow pulse
-    SLED_PAIR_OK,            // Pairing succeeded — solid green (held ~5s by caller)
-    SLED_PAIR_FAIL,          // Pairing timed out — red fast blink (held ~3s by caller)
-    SLED_UNPAIR              // Link forgotten — orange fast blink (held by caller before restart)
-};
+#include "sled_policy.h"
 
 #if PIN_LED_DATA >= 0
 
@@ -54,8 +41,20 @@ private:
 
     void setColor(uint8_t r, uint8_t g, uint8_t b);
     void off();
+    void blinkTick(uint32_t now, uint8_t r, uint8_t g, uint8_t b);
+    void pulseTick(uint32_t now, uint32_t stateAge, uint8_t r, uint8_t g, uint8_t b);
+    static uint8_t pulseLevel(uint32_t stateAge);
 };
 
 extern StatusLED statusLED;   // defined in main.cpp
 
 #endif // PIN_LED_DATA >= 0
+
+// "Which box is this?" — flash the LED for a few seconds. Callers (HAP
+// identify routines, POST /identify) need no LED knowledge and no board
+// guard: on boards without an RGB LED this compiles to nothing.
+inline void status_led_identify() {
+#if PIN_LED_DATA >= 0
+    statusLED.requestHold(SLED_IDENTIFY, 3000);
+#endif
+}

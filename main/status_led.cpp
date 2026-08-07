@@ -23,9 +23,15 @@ static const char* stateName(LEDState s) {
         case SLED_ERROR_CODE:         return "ERROR";
         case SLED_OTA:                return "OTA";
         case SLED_PAIR_LISTEN:        return "PAIR_LISTEN";
-        case SLED_PAIR_OK:            return "PAIR_OK";
-        case SLED_PAIR_FAIL:          return "PAIR_FAIL";
+        case SLED_RESULT_OK:          return "RESULT_OK";
+        case SLED_RESULT_FAIL:        return "RESULT_FAIL";
         case SLED_UNPAIR:             return "UNPAIR";
+        case SLED_PORTAL:             return "PORTAL";
+        case SLED_WIFI_TRIAL:         return "WIFI_TRIAL";
+        case SLED_SAFE_MODE:          return "SAFE_MODE";
+        case SLED_IDENTIFY:           return "IDENTIFY";
+        case SLED_BTN_PAIR:           return "BTN_PAIR";
+        case SLED_BTN_WIPE:           return "BTN_WIPE";
         default:                      return "?";
     }
 }
@@ -82,12 +88,13 @@ void StatusLED::begin() {
 
 void StatusLED::setState(LEDState state) {
     // A requestHold() override (set from another task) wins until it expires.
-    // Exception: SLED_OTA outranks everything (matching the main-loop priority
-    // chain), so a firmware upload cancels an armed hold.
+    // Which states outrank a hold — and whether they cancel it or merely
+    // bypass it — is policy, so it lives in sled_policy.h alongside the
+    // priority chain (and its host tests).
     if (_holdUntil) {
-        if (state == SLED_OTA || (int32_t)(_holdUntil - uptime_ms()) <= 0) {
+        if (sled_cancels_hold(state) || (int32_t)(_holdUntil - uptime_ms()) <= 0) {
             _holdUntil = 0;
-        } else {
+        } else if (!sled_bypasses_hold(state)) {
             state = _holdState;
         }
     }
@@ -103,34 +110,44 @@ void StatusLED::setState(LEDState state) {
         case SLED_OFF:
             off();
             break;
+        case SLED_BOOT:
+            setColor(MAX_BRIGHT, MAX_BRIGHT, MAX_BRIGHT);       // white solid
+            break;
         case SLED_CN105_DISCONNECTED:
-            setColor(MAX_BRIGHT, 0, 0);  // red steady
+            setColor(MAX_BRIGHT, 0, 0);                          // red solid
             break;
         case SLED_WIFI_DISCONNECTED:
-            setColor(0, 0, MAX_BRIGHT);  // blue steady
+            setColor(0, 0, MAX_BRIGHT);                          // blue solid
             break;
-        case SLED_BOOT:
-            _rgbOn = true;
-            setColor(MAX_BRIGHT, MAX_BRIGHT, MAX_BRIGHT);  // white on immediately
+        case SLED_RESULT_OK:
+            setColor(0, MAX_BRIGHT, 0);                          // green solid
+            break;
+        case SLED_BTN_PAIR:
+            setColor(MAX_BRIGHT, 0, MAX_BRIGHT);                 // purple solid
             break;
         case SLED_ERROR_CODE:
+        case SLED_RESULT_FAIL:
+        case SLED_BTN_WIPE:
             _rgbOn = true;
-            setColor(MAX_BRIGHT, 0, 0);  // red on immediately
+            setColor(MAX_BRIGHT, 0, 0);                          // red, blinks in loop()
             break;
-        case SLED_PAIR_OK:
+        case SLED_WIFI_TRIAL:
             _rgbOn = true;
-            setColor(0, MAX_BRIGHT, 0);  // solid green
+            setColor(0, 0, MAX_BRIGHT);                          // blue, blinks in loop()
             break;
-        case SLED_PAIR_FAIL:
+        case SLED_IDENTIFY:
             _rgbOn = true;
-            setColor(MAX_BRIGHT, 0, 0);  // red on immediately, blinks in loop()
+            setColor(MAX_BRIGHT, MAX_BRIGHT, MAX_BRIGHT);        // white, blinks in loop()
             break;
         case SLED_UNPAIR:
             _rgbOn = true;
-            setColor(MAX_BRIGHT, MAX_BRIGHT / 2, 0);  // orange on immediately, blinks in loop()
+            setColor(MAX_BRIGHT, MAX_BRIGHT / 2, 0);             // orange, blinks in loop()
             break;
+        case SLED_OTA:
         case SLED_PAIR_LISTEN:
-            // animated in loop(); leave dark until first loop tick
+        case SLED_PORTAL:
+        case SLED_SAFE_MODE:
+            // pulses — animated in loop(); dark until first tick
             break;
         default:
             break;
@@ -147,85 +164,77 @@ void StatusLED::setWifi(bool connected) {
              connected ? "connected" : "disconnected");
 }
 
+// 2 s triangle wave, 0..MAX_BRIGHT
+uint8_t StatusLED::pulseLevel(uint32_t stateAge) {
+    uint32_t phase = stateAge % 2000;
+    if (phase < 1000) return (uint8_t)((phase * MAX_BRIGHT) / 1000);
+    return (uint8_t)(((2000 - phase) * MAX_BRIGHT) / 1000);
+}
+
+// 200 ms on/off fast blink in the given color
+void StatusLED::blinkTick(uint32_t now, uint8_t r, uint8_t g, uint8_t b) {
+    if (now - _lastToggle < 200) return;
+    _lastToggle = now;
+    _rgbOn = !_rgbOn;
+    if (_rgbOn) setColor(r, g, b);
+    else off();
+}
+
+// 2 s breathe between dark and the given full-brightness color, refreshed at
+// ~50 Hz. Components scale together, so the hue holds across the ramp.
+void StatusLED::pulseTick(uint32_t now, uint32_t stateAge,
+                          uint8_t r, uint8_t g, uint8_t b) {
+    if (now - _lastToggle < 20) return;
+    _lastToggle = now;
+    uint8_t v = pulseLevel(stateAge);
+    setColor((uint8_t)((r * v) / MAX_BRIGHT),
+             (uint8_t)((g * v) / MAX_BRIGHT),
+             (uint8_t)((b * v) / MAX_BRIGHT));
+}
+
 void StatusLED::loop() {
     uint32_t now = uptime_ms();
-    uint32_t elapsed = now - _lastToggle;
     uint32_t stateAge = now - _stateStart;
 
     switch (_state) {
+        // Solids — set once in setState()
         case SLED_OFF:
+        case SLED_BOOT:
         case SLED_CN105_DISCONNECTED:
         case SLED_WIFI_DISCONNECTED:
-        case SLED_PAIR_OK:  // solid — set once in setState(), no animation here
+        case SLED_RESULT_OK:
+        case SLED_BTN_PAIR:
             break;
 
-        case SLED_BOOT: {
-            if (elapsed >= 500) {
-                _lastToggle = now;
-                _rgbOn = !_rgbOn;
-                if (_rgbOn) setColor(MAX_BRIGHT, MAX_BRIGHT, MAX_BRIGHT);
-                else off();
-            }
+        // Fast blinks (200 ms)
+        case SLED_ERROR_CODE:
+        case SLED_RESULT_FAIL:
+        case SLED_BTN_WIPE:
+            blinkTick(now, MAX_BRIGHT, 0, 0);                    // red
             break;
-        }
+        case SLED_WIFI_TRIAL:
+            blinkTick(now, 0, 0, MAX_BRIGHT);                    // blue
+            break;
+        case SLED_IDENTIFY:
+            blinkTick(now, MAX_BRIGHT, MAX_BRIGHT, MAX_BRIGHT);  // white
+            break;
+        case SLED_UNPAIR:
+            blinkTick(now, MAX_BRIGHT, MAX_BRIGHT / 2, 0);       // orange
+            break;
 
-        case SLED_ERROR_CODE: {
-            if (elapsed >= 200) {
-                _lastToggle = now;
-                _rgbOn = !_rgbOn;
-                if (_rgbOn) setColor(MAX_BRIGHT, 0, 0);
-                else off();
-            }
+        // Slow pulses (2 s triangle, ~50 Hz refresh)
+        case SLED_OTA:
+            pulseTick(now, stateAge, MAX_BRIGHT, MAX_BRIGHT, MAX_BRIGHT);  // white
             break;
-        }
-
-        case SLED_OTA: {
-            if (elapsed < 20) break;  // Rate-limit: ~50 Hz
-            _lastToggle = now;
-            uint32_t phase = stateAge % 2000;
-            uint8_t brightness;
-            if (phase < 1000) {
-                brightness = (uint8_t)((phase * MAX_BRIGHT) / 1000);
-            } else {
-                brightness = (uint8_t)(((2000 - phase) * MAX_BRIGHT) / 1000);
-            }
-            setColor(0, 0, brightness);
+        case SLED_PAIR_LISTEN:
+            pulseTick(now, stateAge, MAX_BRIGHT, 0, MAX_BRIGHT);           // purple
             break;
-        }
-
-        case SLED_PAIR_LISTEN: {
-            if (elapsed < 20) break;  // Rate-limit: ~50 Hz
-            _lastToggle = now;
-            uint32_t phase = stateAge % 2000;
-            uint8_t brightness;
-            if (phase < 1000) {
-                brightness = (uint8_t)((phase * MAX_BRIGHT) / 1000);
-            } else {
-                brightness = (uint8_t)(((2000 - phase) * MAX_BRIGHT) / 1000);
-            }
-            setColor(brightness, 0, brightness);  // purple pulse
+        case SLED_PORTAL:
+            pulseTick(now, stateAge, 0, 0, MAX_BRIGHT);                    // blue
             break;
-        }
-
-        case SLED_PAIR_FAIL: {
-            if (elapsed >= 200) {
-                _lastToggle = now;
-                _rgbOn = !_rgbOn;
-                if (_rgbOn) setColor(MAX_BRIGHT, 0, 0);
-                else off();
-            }
+        case SLED_SAFE_MODE:
+            pulseTick(now, stateAge, MAX_BRIGHT, (MAX_BRIGHT * 2) / 3, 0); // yellow
             break;
-        }
-
-        case SLED_UNPAIR: {
-            if (elapsed >= 200) {
-                _lastToggle = now;
-                _rgbOn = !_rgbOn;
-                if (_rgbOn) setColor(MAX_BRIGHT, MAX_BRIGHT / 2, 0);  // orange fast blink
-                else off();
-            }
-            break;
-        }
     }
 }
 
