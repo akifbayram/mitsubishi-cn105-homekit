@@ -75,7 +75,7 @@ bool CN105Controller::isHealthy() const {
     bool connected = _state.connected;
     uint32_t last = _lastSuccessfulResponse;
     taskEXIT_CRITICAL(&_mux);
-    return connected && last > 0 && (uptime_ms() - last) < CN105_COMMS_TIMEOUT;
+    return connected && last > 0 && (uptime_ms() - last) < commsTimeoutMs();
 }
 
 CN105State CN105Controller::getState() const {
@@ -231,9 +231,10 @@ void CN105Controller::loop() {
     // Re-read uptime_ms() because readSerial() may have updated _lastSuccessfulResponse
     uint32_t nowMs = uptime_ms();
     if (_lastSuccessfulResponse > 0 &&
-        (nowMs - _lastSuccessfulResponse) > CN105_COMMS_TIMEOUT) {
-        LOG_ERROR("COMMUNICATION LOST! No response for %lums (timeout=%dms)",
-                  (unsigned long)(nowMs - _lastSuccessfulResponse), CN105_COMMS_TIMEOUT);
+        (nowMs - _lastSuccessfulResponse) > commsTimeoutMs()) {
+        LOG_ERROR("COMMUNICATION LOST! No response for %lums (timeout=%lums)",
+                  (unsigned long)(nowMs - _lastSuccessfulResponse),
+                  (unsigned long)commsTimeoutMs());
         taskENTER_CRITICAL(&_mux);
         _state.connected = false;
         taskEXIT_CRITICAL(&_mux);

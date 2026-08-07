@@ -115,7 +115,11 @@ static uint8_t current_service_shape(void)
     return shape;
 }
 
-void homekit_reconcile_service_shape(void)
+// bumpOnChange=false covers runtime mutations where the SDK call itself
+// already bumped c# (hap_add_bridged_accessory): only the NVS-tracked shape
+// needs to catch up, so the next boot's reconcile doesn't see a phantom
+// change and bump a second time.
+static void store_service_shape(bool bumpOnChange)
 {
     if (!s_started) return;   // DB shape is meaningless before hap_start()
 
@@ -134,12 +138,18 @@ void homekit_reconcile_service_shape(void)
     // just start tracking from here, without bumping.
     bool store = (err == ESP_ERR_NVS_NOT_FOUND);
     if (err == ESP_OK && storedShape != shape) {
-        LOG_INFO("[HK] Service shape changed (0x%02X -> 0x%02X) — bumping config number",
-                 storedShape, shape);
-        if (hap_update_config_number() == HAP_SUCCESS) {
-            store = true;   // only record the new shape once the bump is queued
+        if (!bumpOnChange) {
+            LOG_INFO("[HK] Service shape changed (0x%02X -> 0x%02X) — recorded, c# already bumped",
+                     storedShape, shape);
+            store = true;
         } else {
-            LOG_ERROR("[HK] hap_update_config_number failed — will retry next boot");
+            LOG_INFO("[HK] Service shape changed (0x%02X -> 0x%02X) — bumping config number",
+                     storedShape, shape);
+            if (hap_update_config_number() == HAP_SUCCESS) {
+                store = true;   // only record the new shape once the bump is queued
+            } else {
+                LOG_ERROR("[HK] hap_update_config_number failed — will retry next boot");
+            }
         }
     } else if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
         LOG_ERROR("[HK] hk-meta nvs_get_u8 failed: %s", esp_err_to_name(err));
@@ -155,6 +165,16 @@ void homekit_reconcile_service_shape(void)
     }
 
     nvs_close(h);
+}
+
+void homekit_reconcile_service_shape(void)
+{
+    store_service_shape(true);
+}
+
+void homekit_record_service_shape(void)
+{
+    store_service_shape(false);
 }
 
 // ── Public API ──────────────────────────────────────────────────────────────

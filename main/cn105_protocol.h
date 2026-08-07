@@ -110,10 +110,9 @@ constexpr uint32_t CN105_DEFER_DELAY       = 750;     // ms — defer next cycle
 constexpr uint8_t  CN105_MAX_CONNECT_RETRIES = 5;
 
 // ── Communication Health ─────────────────────────────────────────────────────
-// Configurable timeout for detecting CN105 communication failure.
-// If no valid response is received within this period, the device is
-// considered disconnected and HomeKit will report "Not Responding".
-// Default: 6 × update_interval (12s) — more responsive than ESPHome reference.
+// Floor for the communication-loss timeout. The effective timeout is
+// commsTimeoutMs() = max(this, 6 × runtime poll interval); past it the device
+// is considered disconnected and HomeKit reports "Not Responding".
 constexpr uint32_t CN105_COMMS_TIMEOUT     = CN105_UPDATE_INTERVAL * 6;  // 12000 ms
 
 // Number of info request types polled per cycle
@@ -250,6 +249,14 @@ public:
 
     /// Runtime-configurable update interval (poll period)
     void setUpdateInterval(uint32_t ms) { _updateInterval = ms; }
+
+    /// Communication-loss timeout: 6 × the runtime poll interval, floored at
+    /// the compile-time default. The poll interval is user-settable up to
+    /// 30 s; a fixed 12 s timeout would falsely declare the link dead there.
+    uint32_t commsTimeoutMs() const {
+        uint32_t t = _updateInterval * 6;
+        return t > CN105_COMMS_TIMEOUT ? t : CN105_COMMS_TIMEOUT;
+    }
 
 #ifndef UNIT_TEST
     /// Start a dedicated FreeRTOS task for UART I/O and protocol management.

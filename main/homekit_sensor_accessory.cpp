@@ -205,13 +205,13 @@ static void ensure_sensor_accessory()
 {
     if (sensor_configured() && !s_rsAcc) {
         create_sensor_accessory();
-        // Reconcile the shape the accessory list now has (idempotent: derives
+        // Record the shape the accessory list now has (idempotent: derives
         // presence from live state, so a failed create is a no-op; pre-
         // hap_start it does nothing and the boot-time reconcile covers it).
         // hap_add_bridged_accessory already bumped c# for the running server —
-        // this keeps the NVS-tracked shape in step so the next boot doesn't
-        // see a phantom change.
-        homekit_reconcile_service_shape();
+        // record WITHOUT bumping again, keeping the NVS-tracked shape in step
+        // so the next boot doesn't see a phantom change.
+        homekit_record_service_shape();
     }
 }
 

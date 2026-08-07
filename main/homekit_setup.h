@@ -48,10 +48,14 @@ uint8_t homekit_get_boot_mode_mask(void);
 /// Reconcile the live HAP service shape (mode-gated services + Remote Sensor
 /// accessory presence) against the shape recorded in NVS, bumping the HAP
 /// config number on mismatch so paired Home apps refresh their cached
-/// accessory database. Runs after hap_start(); call again whenever the shape
-/// changes at runtime (e.g. the sensor accessory is created). No-op before
-/// HomeKit has started.
+/// accessory database. Runs after hap_start(). No-op before HomeKit has
+/// started.
 void homekit_reconcile_service_shape(void);
+
+/// Record the live HAP service shape in NVS WITHOUT bumping the config
+/// number. Use after a runtime mutation whose SDK call already bumped c#
+/// (hap_add_bridged_accessory does) — reconciling there would bump twice.
+void homekit_record_service_shape(void);
 
 #ifdef __cplusplus
 }

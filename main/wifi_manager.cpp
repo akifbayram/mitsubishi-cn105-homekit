@@ -305,22 +305,31 @@ void WifiManager::loop()
     if (nowMs - s_lastTrialCheck < 250) return;
     s_lastTrialCheck = nowMs;
 
-    // Snapshot under the lock; NVS/esp_wifi work happens outside it.
+    // Snapshot under the lock; NVS/esp_wifi work happens outside it. The
+    // credential copies matter: a concurrent connect() may overwrite
+    // s_trial.* the moment the lock is released.
     portENTER_CRITICAL(&s_trialMux);
     bool active = s_trial.active;
     bool commit = s_trial.commitPending;
     bool expired = active && !commit && (int64_t)nowMs >= s_trial.deadlineMs;
+    bool haveOld = s_trial.haveOld;
+    char newSsid[sizeof(s_trial.newSsid)], newPass[sizeof(s_trial.newPass)];
+    char oldSsid[sizeof(s_trial.oldSsid)], oldPass[sizeof(s_trial.oldPass)];
+    memcpy(newSsid, s_trial.newSsid, sizeof(newSsid));
+    memcpy(newPass, s_trial.newPass, sizeof(newPass));
+    memcpy(oldSsid, s_trial.oldSsid, sizeof(oldSsid));
+    memcpy(oldPass, s_trial.oldPass, sizeof(oldPass));
     portEXIT_CRITICAL(&s_trialMux);
     if (!active) return;
 
     if (commit) {
-        saveCredentials(s_trial.newSsid, s_trial.newPass);
+        saveCredentials(newSsid, newPass);
         portENTER_CRITICAL(&s_trialMux);
         s_trial.active = false;
         s_trial.commitPending = false;
         s_trial.result = WIFI_TRIAL_SUCCESS;
         portEXIT_CRITICAL(&s_trialMux);
-        LOG_INFO("Trial join succeeded — credentials committed (SSID: %s)", s_trial.newSsid);
+        LOG_INFO("Trial join succeeded — credentials committed (SSID: %s)", newSsid);
         return;
     }
 
@@ -330,14 +339,14 @@ void WifiManager::loop()
         s_trial.result = WIFI_TRIAL_FAILED;  // latched until the next connect()
         portEXIT_CRITICAL(&s_trialMux);
         s_pendingJoin = false;
-        if (s_trial.haveOld) {
+        if (haveOld) {
             LOG_WARN("Trial join to '%s' failed — restoring previous network '%s'",
-                     s_trial.newSsid, s_trial.oldSsid);
-            applyStaConfig(s_trial.oldSsid, s_trial.oldPass);
+                     newSsid, oldSsid);
+            applyStaConfig(oldSsid, oldPass);
             esp_wifi_connect();
         } else {
             LOG_WARN("Trial join to '%s' failed — no previous credentials to restore",
-                     s_trial.newSsid);
+                     newSsid);
         }
     }
 }
