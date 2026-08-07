@@ -6,6 +6,7 @@
 #include "wifi_recovery.h"
 #include "homekit_setup.h"
 #include "logging.h"
+#include "status_led.h"
 #include <cstring>
 #include <cstdio>
 #include <lwip/sockets.h>
@@ -274,6 +275,13 @@ esp_err_t WebUI::handleWifiSetup(httpd_req_t *req) {
     return ESP_OK;
 }
 
+esp_err_t WebUI::handleIdentify(httpd_req_t *req) {
+    status_led_identify();
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"status\":\"ok\"}");
+    return ESP_OK;
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
 // AP mode (captive portal handler on the port-80 web server)
 // ══════════════════════════════════════════════════════════════════════════════
@@ -369,7 +377,8 @@ void WebUI::begin(CN105Controller *ctrl) {
     config.server_port      = 80;
     config.ctrl_port        = 32769;  // Different from default to avoid conflict
     config.stack_size       = 8192;   // Default 4096 too small for WS handlers + log buffers
-    config.max_uri_handlers = 10;     // Default 8 too few for all endpoints
+    config.max_uri_handlers = 12;     // Default 8 too few for all endpoints; 1 spare so
+                                       // the next handler doesn't silently fail to register
     config.max_open_sockets = 7;
     config.lru_purge_enable = true;
     config.open_fn          = setTcpNoDelay;
@@ -453,6 +462,18 @@ void WebUI::begin(CN105Controller *ctrl) {
         .supported_subprotocol = NULL
     };
     httpd_register_uri_handler(_server, &wifiScanUri);
+
+    // Register POST /identify handler (flash the status LED)
+    const httpd_uri_t identifyUri = {
+        .uri       = "/identify",
+        .method    = HTTP_POST,
+        .handler   = handleIdentify,
+        .user_ctx  = this,
+        .is_websocket = false,
+        .handle_ws_control_frames = false,
+        .supported_subprotocol = NULL
+    };
+    httpd_register_uri_handler(_server, &identifyUri);
 
     // Register PWA manifest and icon handlers
     const httpd_uri_t manifestUri = {

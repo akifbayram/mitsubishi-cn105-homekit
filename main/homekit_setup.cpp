@@ -5,6 +5,7 @@
 #include "logging.h"
 #include "branding.h"
 #include "esp_utils.h"
+#include "status_led.h"
 #include <cstring>
 #include <cstdio>
 
@@ -75,6 +76,7 @@ static void hap_event_handler(void* arg, esp_event_base_t event_base,
 static int accessory_identify(hap_acc_t *ha)
 {
     LOG_INFO("[HK] Accessory identified");
+    status_led_identify();
     return HAP_SUCCESS;
 }
 

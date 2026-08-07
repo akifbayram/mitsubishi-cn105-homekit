@@ -829,6 +829,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
         <span class="fw-file-name" id="fwFileName">No file selected</span>
       </div>
       <button class="btn-secondary" id="fwUploadBtn" style="margin-top:9px" onclick="uploadFirmware()" disabled>Upload</button>
+      <button class="btn-secondary" id="fwIdentifyBtn" style="margin-top:9px" onclick="identifyDevice()">Flash LED</button>
       <button class="btn-danger" id="fwRestartBtn" style="margin-top:9px" onclick="restartDevice()">Restart Device</button>
     </div>
   </div>
@@ -2642,6 +2643,10 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
 
   window.restartDevice=function(){
     if(confirm('Restart the device?')){send({cmd:'restart'})}
+  };
+
+  window.identifyDevice=function(){
+    fetch('/identify',{method:'POST'}).catch(function(){});
   };
 
   window.resetHomeKit=function(){

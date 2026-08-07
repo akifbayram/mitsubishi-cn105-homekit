@@ -8,6 +8,7 @@
 #include "logging.h"
 #include "esp_utils.h"
 #include "settings.h"
+#include "status_led.h"
 
 #include <cmath>
 #include <cstdio>
@@ -39,6 +40,7 @@ static uint32_t    s_lastSync    = 0;
 static int sensor_identify(hap_acc_t *ha)
 {
     LOG_INFO("[HK:Sensor] identify");
+    status_led_identify();
     return HAP_SUCCESS;
 }
 
