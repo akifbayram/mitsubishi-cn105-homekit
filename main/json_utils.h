@@ -4,26 +4,95 @@
 #include <cstdlib>
 #include <cstdio>
 #include <cstdarg>
+#include <cctype>
 
 // ════════════════════════════════════════════════════════════════════════════
 // Lightweight JSON parsing helpers (strstr-based, no external library)
 // ════════════════════════════════════════════════════════════════════════════
 
+// Parse exactly 4 hex digits; returns -1 if any is not hex.
+inline int jsonHex4(const char *p) {
+    int v = 0;
+    for (int k = 0; k < 4; k++) {
+        char c = p[k];
+        if (c >= '0' && c <= '9')      v = (v << 4) | (c - '0');
+        else if (c >= 'a' && c <= 'f') v = (v << 4) | (c - 'a' + 10);
+        else if (c >= 'A' && c <= 'F') v = (v << 4) | (c - 'A' + 10);
+        else return -1;
+    }
+    return v;
+}
+
 // Extract a string value for a given key from JSON.
 // Returns true if found; copies value into buf (up to bufLen-1 chars).
+//
+// Handles backslash escapes: clients send JSON.stringify() output, so \" and
+// \\ are normal input (WiFi passwords, device names) — a scan for the next
+// raw '"' would truncate them. \uXXXX (incl. surrogate pairs) decodes to
+// UTF-8; a lone surrogate or malformed \u becomes '?'. On overflow the value
+// is truncated at a character boundary (an escape is never half-copied).
 inline bool jsonGetString(const char *json, const char *key, char *buf, size_t bufLen) {
     char pattern[64];
     snprintf(pattern, sizeof(pattern), "\"%s\":\"", key);
     const char *p = strstr(json, pattern);
-    if (!p) return false;
+    if (!p || bufLen == 0) return false;
     p += strlen(pattern);
-    const char *end = strchr(p, '"');
-    if (!end) return false;
-    size_t len = end - p;
-    if (len >= bufLen) len = bufLen - 1;
-    memcpy(buf, p, len);
-    buf[len] = '\0';
-    return true;
+
+    size_t j = 0;
+    while (*p && *p != '"') {
+        if (*p != '\\') {
+            if (j + 1 < bufLen) buf[j++] = *p;
+            p++;
+            continue;
+        }
+        char e = p[1];
+        if (e == '\0') { buf[0] = '\0'; return false; }   // dangling backslash
+        p += 2;
+        char out;
+        switch (e) {
+            case 'n': out = '\n'; break;
+            case 't': out = '\t'; break;
+            case 'r': out = '\r'; break;
+            case 'b': out = '\b'; break;
+            case 'f': out = '\f'; break;
+            case 'u': {
+                int cp = jsonHex4(p);
+                if (cp < 0) {                              // malformed hex:
+                    while (isxdigit((unsigned char)*p)) p++;   // swallow partial run
+                    out = '?'; break;
+                }
+                p += 4;
+                if (cp >= 0xD800 && cp <= 0xDBFF) {        // high surrogate
+                    int lo = (p[0] == '\\' && p[1] == 'u') ? jsonHex4(p + 2) : -1;
+                    if (lo >= 0xDC00 && lo <= 0xDFFF) {
+                        cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00);
+                        p += 6;
+                    } else { out = '?'; break; }           // lone high surrogate
+                } else if (cp >= 0xDC00 && cp <= 0xDFFF) {
+                    out = '?'; break;                       // lone low surrogate
+                }
+                // Encode cp as UTF-8; drop whole (with terminator) if it can't fit
+                char u[4]; size_t n;
+                if (cp < 0x80)        { u[0] = (char)cp; n = 1; }
+                else if (cp < 0x800)  { u[0] = (char)(0xC0 | (cp >> 6));
+                                        u[1] = (char)(0x80 | (cp & 0x3F)); n = 2; }
+                else if (cp < 0x10000){ u[0] = (char)(0xE0 | (cp >> 12));
+                                        u[1] = (char)(0x80 | ((cp >> 6) & 0x3F));
+                                        u[2] = (char)(0x80 | (cp & 0x3F)); n = 3; }
+                else                  { u[0] = (char)(0xF0 | (cp >> 18));
+                                        u[1] = (char)(0x80 | ((cp >> 12) & 0x3F));
+                                        u[2] = (char)(0x80 | ((cp >> 6) & 0x3F));
+                                        u[3] = (char)(0x80 | (cp & 0x3F)); n = 4; }
+                if (j + n < bufLen)
+                    for (size_t k = 0; k < n; k++) buf[j++] = u[k];
+                continue;
+            }
+            default: out = e; break;   // \" \\ \/ and anything unknown: literal
+        }
+        if (j + 1 < bufLen) buf[j++] = out;
+    }
+    buf[j] = '\0';
+    return *p == '"';                  // false if the value was unterminated
 }
 
 // Extract a numeric (float) value for a given key from JSON.

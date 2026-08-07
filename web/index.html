@@ -1360,7 +1360,6 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
         else if(msg.type==='log') onLog(msg.msg);
         else if(msg.type==='deviceInfo') onDeviceInfo(msg);
         else if(msg.type==='events') onEvents(msg);
-        else if(msg.type==='ota') onOta(msg);
         else if(msg.type==='bleScanResults') onBleScanResults(msg);
         else if(msg.type==='wifiSaved') onWifiSaved();
         else if(msg.type==='error') alert(msg.msg);
@@ -2321,21 +2320,8 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   };
 
   // ── OTA Upload ────────────────────────────────────────────────────────────
-  function onOta(msg){
-    var prog=$('otaProgress'),bar=$('otaBar'),status=$('otaStatus');
-    prog.style.display='block';
-    if(msg.status==='starting'){
-      bar.style.width='0%';
-      status.textContent='Starting upload...';
-    }else if(msg.status==='progress'){
-      bar.style.width=msg.pct+'%';
-      status.textContent='Uploading: '+msg.pct+'%';
-    }else if(msg.status==='done'){
-      bar.style.width='100%';
-      bar.style.background='var(--green)';
-      status.textContent='Update complete! Restarting...';
-    }
-  }
+  // Progress is driven by xhr.upload.onprogress and completion by the HTTP
+  // response (web_ota.cpp deliberately sends no WS frames during upload).
 
   // SHA-256 of an ArrayBuffer as lowercase hex; resolves null when
   // crypto.subtle is unavailable (insecure context, i.e. plain http).
@@ -2622,7 +2608,8 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       if(j.app!=='cn105-homekit-settings'||!j.settings) throw new Error('not a settings file');
       var st=j.settings;
       var cfg={cmd:'config'};
-      if(typeof st.deviceName==='string') cfg.deviceName=st.deviceName;
+      // Same sanitization as the manual save path (saveConfig)
+      if(typeof st.deviceName==='string') cfg.deviceName=st.deviceName.replace(/["\\\n\r]/g,'').trim();
       if(st.tempUnit==='C'||st.tempUnit==='F') cfg.tempUnit=st.tempUnit;
       if(typeof st.pollInterval==='number') cfg.pollInterval=st.pollInterval;
       if(typeof st.logLevel==='number') cfg.logLevel=st.logLevel;
