@@ -4,8 +4,10 @@
 
 #include "ble_sensor.h"
 #include "settings.h"
+#include "sl2_proto.h"
 #include "logging.h"
 #include "esp_utils.h"
+#include "link_sensor.h"
 
 #include "ble_decoders.h"
 
@@ -342,7 +344,7 @@ void BleSensor::begin() {
         LOG_INFO("No sensor MAC configured — scanning deferred");
     }
 
-    s_prevFeed = settings.get().bleFeedEnabled;
+    s_prevFeed = (settings.get().roomSource == SL2_ROOMSRC_BLE);
     s_bleEnabled.store(settings.get().bleEnabled);
 
     if (!s_bleEnabled.load()) {
@@ -391,11 +393,20 @@ void BleSensor::loop(CN105Controller &cn105) {
     }
 
     // Deferred clearRemoteTemperature — kept pending until the CN105 link can
-    // actually carry it, so a clear issued while disconnected isn't lost
+    // actually carry it, so a clear issued while disconnected isn't lost.
+    // Skip it if the dial's own sensor has since become the selected AND
+    // active source: LinkSensor's loop() sends promptly on selection
+    // (have_sent starts false), so firing this stale clear could land after
+    // that send and stomp it, leaving the pump on internal for up to
+    // LinkSensor's 20s keepalive before its next resend notices and corrects.
     if (s_pendingClear.load() && cn105.isConnected()) {
-        cn105.clearRemoteTemperature();
+        bool handedToLink = (settings.get().roomSource == SL2_ROOMSRC_LINK) &&
+                             LinkSensor::isActive();
+        if (!handedToLink) {
+            cn105.clearRemoteTemperature();
+            s_lastSentTemp = NAN;
+        }
         s_pendingClear.store(false);
-        s_lastSentTemp = NAN;
     }
 
     if (!s_bleEnabled.load()) return;
@@ -408,10 +419,10 @@ void BleSensor::loop(CN105Controller &cn105) {
     lastUpd = s_lastUpdate;
     taskEXIT_CRITICAL(&s_mux);
 
-    uint32_t staleMs = (uint32_t)settings.get().bleStaleTimeoutS * 1000;
+    uint32_t staleMs = (uint32_t)settings.get().roomStaleTimeoutS * 1000;
     bool active = lastUpd > 0 && (now - lastUpd) < staleMs;
     bool stale  = lastUpd > 0 && !active;
-    bool feed   = settings.get().bleFeedEnabled;
+    bool feed   = (settings.get().roomSource == SL2_ROOMSRC_BLE);
 
     // Radio duty: hunt hard until readings flow, then back off (see ScanProfile)
     ScanProfile want = (active && !s_discoveryMode.load()) ? ScanProfile::TRACK
@@ -471,14 +482,14 @@ int      BleSensor::rssi()         { return readLocked(s_rssi); }
 bool BleSensor::isActive() {
     if (!s_bleEnabled.load()) return false;
     uint32_t lu = readLocked(s_lastUpdate);
-    uint32_t staleMs = (uint32_t)settings.get().bleStaleTimeoutS * 1000;
+    uint32_t staleMs = (uint32_t)settings.get().roomStaleTimeoutS * 1000;
     return lu > 0 && (uptime_ms() - lu) < staleMs;
 }
 
 bool BleSensor::isStale() {
     if (!s_bleEnabled.load()) return false;
     uint32_t lu = readLocked(s_lastUpdate);
-    uint32_t staleMs = (uint32_t)settings.get().bleStaleTimeoutS * 1000;
+    uint32_t staleMs = (uint32_t)settings.get().roomStaleTimeoutS * 1000;
     return lu > 0 && (uptime_ms() - lu) >= staleMs;
 }
 
@@ -493,11 +504,11 @@ uint32_t BleSensor::lastUpdateAge() {
 }
 
 bool BleSensor::isEnabled() {
-    return settings.get().bleFeedEnabled;
+    return (settings.get().roomSource == SL2_ROOMSRC_BLE);
 }
 
 void BleSensor::setEnabled(bool enabled) {
-    settings.get().bleFeedEnabled = enabled;
+    settings.get().roomSource = enabled ? SL2_ROOMSRC_BLE : SL2_ROOMSRC_INTERNAL;
     settings.save();
     LOG_INFO("Feed %s", enabled ? "enabled" : "disabled");
     // loop() reacts to the change: a falling edge clears the remote temp on the
@@ -537,7 +548,7 @@ void BleSensor::setAddr(const char* mac) {
 
     // If the old reading may be live in the HP, hand it back to its internal
     // thermistor now rather than after the stale timeout
-    if (hadReading && settings.get().bleFeedEnabled) s_pendingClear.store(true);
+    if (hadReading && (settings.get().roomSource == SL2_ROOMSRC_BLE)) s_pendingClear.store(true);
 
     strncpy(stored, mac, storedSize - 1);
     stored[storedSize - 1] = '\0';

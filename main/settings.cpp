@@ -1,5 +1,6 @@
 #include "settings.h"
 #include "cn105_protocol.h"
+#include "sl2_proto.h"
 
 #include <algorithm>
 
@@ -51,6 +52,54 @@ void SettingsStore::runKeyMigrations() {
             LOG_INFO("[Settings] migrated NVS key %s -> %s", m->oldKey, m->newKey);
         }
     }
+
+    // 2026-08: bleFeed -> roomSrc. Not a plain rename (KEY_MIGRATIONS above
+    // copies a value byte-for-byte under its new name) — bleFeed was a bool
+    // and roomSrc is an sl2_room_src enum, so the value needs mapping, not
+    // copying, which is why this runs by hand instead of through the table.
+    // An installation that was feeding the heat pump from BLE must keep
+    // feeding from BLE after this update: a silent flip to the internal
+    // thermistor would change how the house is heated without anyone asking
+    // for it. Guarded the same way as the KEY_MIGRATIONS loop above: bleFeed
+    // is erased only once roomSrc has been confirmed written, so a failed
+    // write (full/corrupt NVS, power loss mid-write) leaves bleFeed in place
+    // to retry next boot instead of silently losing the BLE feed.
+    {
+        uint8_t legacyFeed;
+        if (nvs_get_u8(_handle, "bleFeed", &legacyFeed) == ESP_OK) {
+            uint8_t src = legacyFeed ? SL2_ROOMSRC_BLE : SL2_ROOMSRC_INTERNAL;
+            if (nvs_set_u8(_handle, "roomSrc", src) == ESP_OK) {
+                nvs_erase_key(_handle, "bleFeed");
+                migrated = true;
+                LOG_INFO("[Settings] migrated bleFeed -> roomSrc=%u", src);
+            } else {
+                LOG_WARN("[Settings] roomSrc write failed — bleFeed kept for retry next boot");
+            }
+        }
+    }
+
+    // 2026-08: bleTimeout -> roomTimeout. Independent of the bleFeed
+    // migration above and guarded the same way — one write can succeed while
+    // the other fails, so each legacy key's erase is gated on its own new
+    // key's write succeeding.
+    {
+        uint16_t legacyTimeout;
+        if (nvs_get_u16(_handle, "bleTimeout", &legacyTimeout) == ESP_OK) {
+            if (legacyTimeout < 30 || legacyTimeout > 3600) {
+                // Out of range: nothing worth carrying forward — roomTimeout
+                // falls back to its own default on load — so just drop it.
+                nvs_erase_key(_handle, "bleTimeout");
+                migrated = true;
+            } else if (nvs_set_u16(_handle, "roomTimeout", legacyTimeout) == ESP_OK) {
+                nvs_erase_key(_handle, "bleTimeout");
+                migrated = true;
+                LOG_INFO("[Settings] migrated bleTimeout -> roomTimeout=%u", legacyTimeout);
+            } else {
+                LOG_WARN("[Settings] roomTimeout write failed — bleTimeout kept for retry next boot");
+            }
+        }
+    }
+
     if (migrated) nvs_commit(_handle);
 }
 
@@ -159,6 +208,27 @@ void SettingsStore::begin() {
         _settings.modeMask = mode_mask_sanitize(val);
     }
 
+    // roomSource — uint8_t (enum sl2_room_src). Outside BLE_ENABLE: a build
+    // without BLE still needs to choose Internal vs Link. Sanitized on load
+    // (same reasoning as modeMask above) so Task 14's arbitration logic can
+    // trust it everywhere instead of re-checking a corrupted NVS value.
+    {
+        uint8_t val = SL2_ROOMSRC_INTERNAL;
+        nvs_get_u8(_handle, "roomSrc", &val);
+        if (val != SL2_ROOMSRC_INTERNAL && val != SL2_ROOMSRC_BLE && val != SL2_ROOMSRC_LINK)
+            val = SL2_ROOMSRC_INTERNAL;
+        _settings.roomSource = val;
+    }
+
+    // roomStaleTimeoutS — uint16_t
+    {
+        uint16_t val = 600;
+        nvs_get_u16(_handle, "roomTimeout", &val);
+        _settings.roomStaleTimeoutS = val;
+    }
+    if (_settings.roomStaleTimeoutS < 30) _settings.roomStaleTimeoutS = 30;
+    if (_settings.roomStaleTimeoutS > 3600) _settings.roomStaleTimeoutS = 3600;
+
 #ifdef BLE_ENABLE
     // bleEnabled — bool stored as uint8_t
     // First-boot default honors the -DBLE_SENSOR_DEFAULT_ON build flag; a stored
@@ -185,27 +255,11 @@ void SettingsStore::begin() {
         }
     }
 
-    // bleFeedEnabled — bool stored as uint8_t
-    {
-        uint8_t val = 1;
-        nvs_get_u8(_handle, "bleFeed", &val);
-        _settings.bleFeedEnabled = (val != 0);
-    }
-
-    // bleStaleTimeoutS — uint16_t
-    {
-        uint16_t val = 600;
-        nvs_get_u16(_handle, "bleTimeout", &val);
-        _settings.bleStaleTimeoutS = val;
-    }
-    if (_settings.bleStaleTimeoutS < 30) _settings.bleStaleTimeoutS = 30;
-    if (_settings.bleStaleTimeoutS > 3600) _settings.bleStaleTimeoutS = 3600;
-
     LOG_INFO("[Settings] BLE: enabled=%s addr=%s feed=%s timeout=%us",
              _settings.bleEnabled ? "ON" : "OFF",
              strlen(_settings.bleSensorAddr) > 0 ? _settings.bleSensorAddr : "(none)",
-             _settings.bleFeedEnabled ? "ON" : "OFF",
-             _settings.bleStaleTimeoutS);
+             _settings.roomSource == SL2_ROOMSRC_BLE ? "ON" : "OFF",
+             _settings.roomStaleTimeoutS);
 #endif
 
     LOG_INFO("[Settings] Loaded: logLevel=%d poll=%lums name=%s unit=%s",
@@ -225,11 +279,11 @@ void SettingsStore::save() {
     nvs_set_u8(_handle, "wifiChgPend", _settings.wifiChangePending ? 1 : 0);
     nvs_set_u8(_handle, "vaneConfig", _settings.vaneConfig);
     nvs_set_u8(_handle, "modeMask", _settings.modeMask);
+    nvs_set_u8(_handle, "roomSrc", _settings.roomSource);
+    nvs_set_u16(_handle, "roomTimeout", _settings.roomStaleTimeoutS);
 #ifdef BLE_ENABLE
     nvs_set_u8(_handle, "bleOn", _settings.bleEnabled ? 1 : 0);
     nvs_set_str(_handle, "bleAddr", _settings.bleSensorAddr);
-    nvs_set_u8(_handle, "bleFeed", _settings.bleFeedEnabled ? 1 : 0);
-    nvs_set_u16(_handle, "bleTimeout", _settings.bleStaleTimeoutS);
 #endif
     nvs_commit(_handle);
     _generation++;

@@ -27,6 +27,7 @@
 #include "homekit_setup.h"
 #include "homekit_services.h"
 #include "web_server.h"
+#include "link_sensor.h"
 
 #ifdef BLE_ENABLE
 #include "ble_sensor.h"
@@ -260,6 +261,7 @@ extern "C" void app_main(void)
 #ifdef BLE_ENABLE
     uint32_t lastBleLoop   = 0;
 #endif
+    uint32_t lastLinkSensorLoop = 0;
 
     while (true) {
         esp_task_wdt_reset();
@@ -430,6 +432,13 @@ extern "C" void app_main(void)
             lastBleLoop = now;
         }
 #endif
+
+        // ── Link-sensor keepalive — 1 Hz (not BLE-gated: a build without BLE
+        //    still supports a dial-sourced room temperature) ────────────────
+        if (webUIStarted && now - lastLinkSensorLoop >= 1000) {
+            LinkSensor::loop(cn105);
+            lastLinkSensorLoop = now;
+        }
 
         // ── Status LED priority evaluation ───────────────────────────────
 #if PIN_LED_DATA >= 0

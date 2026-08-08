@@ -40,6 +40,7 @@
 #include "settings.h"
 #include "status_led.h"
 #include "ble_config.h"
+#include "link_sensor.h"
 #ifdef BLE_ENABLE
 #include "ble_sensor.h"
 #endif
@@ -396,6 +397,30 @@ static bool h_apply(void *, uint16_t mask, const struct sl2_cmd_pkt *cmd) {
     return true;
 }
 
+/* A bonded dial reported its own sensor (reading, and optionally a source
+ * edit). Always feed the reading — even when it isn't the selected source —
+ * so LinkSensor's freshness/status tracking stays live for a source switch
+ * later. The edit is separate: is_edit is only true for a long-enough frame
+ * carrying something other than the NOEDIT sentinel (core-verified, see
+ * sl2_link.h), but the VALUE still needs validating here — it crossed the
+ * air. Reject anything past the three known sources, and reject LINK
+ * specifically when this same packet's flags say the dial has no sensing
+ * hardware to offer (feed() above already applied those flags, so
+ * hasSensor() reflects this packet, not a stale one). */
+static void h_room_sensor(void *, const uint8_t src_mac[6],
+                          const struct sl2_dial_sensor_pkt *p, bool is_edit) {
+    LinkSensor::feed(src_mac, p);
+    if (is_edit && p->want_src <= SL2_ROOMSRC_LINK &&
+        (p->want_src != SL2_ROOMSRC_LINK || LinkSensor::hasSensor())) {
+        auto &st = settings.get();
+        if (st.roomSource != p->want_src) {
+            st.roomSource = p->want_src;
+            settings.save();
+            LOG_INFO("room source -> %u (set from dial)", (unsigned)p->want_src);
+        }
+    }
+}
+
 static bool h_get_caps(void *, struct sl2_caps_pkt *out) {
     out->caps_flags = 0;
     uint8_t mm = settings.get().modeMask;
@@ -422,13 +447,41 @@ static bool h_get_caps(void *, struct sl2_caps_pkt *out) {
     out->hum_step_pct = 0;
     uint16_t feat = SL2_FEAT_WIFI_INFO | SL2_FEAT_HOMEKIT | SL2_FEAT_OUTSIDE_T |
                     SL2_FEAT_COMPRESSOR | SL2_FEAT_FW_INFO | SL2_FEAT_RUNTIME |
-                    SL2_FEAT_LINK_OTA_CREDS | SL2_FEAT_WIFI_SETUP;
+                    SL2_FEAT_LINK_OTA_CREDS | SL2_FEAT_WIFI_SETUP |
+                    SL2_FEAT_LINK_SENSOR;   /* we always accept a dial-sourced
+                                              * reading, BLE_ENABLE or not */
 #ifdef BLE_ENABLE
-    if (BleSensor::isBleEnabled() && BleSensor::isEnabled()) feat |= SL2_FEAT_SENSOR_BATT;
+    /* This bit means "a BLE sensor exists and can be chosen", NOT "is
+     * currently chosen" — the dial keys its Room-sensor offer list off it
+     * (ui_settings.c room_src_next()), so gate on CONFIGURED, not selected.
+     * BleSensor::isEnabled() now means roomSource == SL2_ROOMSRC_BLE (task
+     * 12); using it here made the option disappear the moment the user
+     * picked anything else, with no way back except the web UI. */
+    if (BleSensor::isBleEnabled() && BleSensor::getAddr()[0]) feat |= SL2_FEAT_SENSOR_BATT;
 #endif
     out->features = feat;
     snprintf(out->name, sizeof out->name, "%s", settings.get().deviceName);
     return true;
+}
+
+/* Health of the SELECTED room-temperature source, for SL2_TLV_ROOM_SRC. Each
+ * dynamic source knows its own freshness; Internal has no failure mode — the
+ * heat pump's own thermistor is always there. */
+static uint8_t room_src_status(void) {
+    switch (settings.get().roomSource) {
+        case SL2_ROOMSRC_LINK:
+            return LinkSensor::status();
+        case SL2_ROOMSRC_BLE:
+#ifdef BLE_ENABLE
+            if (BleSensor::isActive()) return SL2_ROOMST_OK;
+            if (BleSensor::isStale())  return SL2_ROOMST_STALE;
+            return SL2_ROOMST_UNAVAILABLE;
+#else
+            return SL2_ROOMST_UNAVAILABLE;   /* selected but this build has no BLE */
+#endif
+        default:
+            return SL2_ROOMST_OK;            /* Internal */
+    }
 }
 
 /* NUL-joined string pair for variable TLVs; returns bytes or 0 if too big. */
@@ -470,8 +523,18 @@ static size_t h_fill_info(void *, uint8_t *buf, size_t cap) {
         uint8_t c[4] = { st.compressorHz, st.stage, st.subMode, st.autoSubMode };
         sl2_tlv_put(buf, cap, &off, SL2_TLV_COMPRESSOR, c, 4);
     }
+    {   /* Which source drives the pump, and whether it is healthy. Emitted in
+         * EVERY INFO — the dial re-derives it from presence, so silence means
+         * "internal", not packet thrift (spec §9 freshness rule). Unconditional
+         * on BLE_ENABLE: Link is a source in every build. */
+        const uint8_t v[2] = { settings.get().roomSource, room_src_status() };
+        sl2_tlv_put(buf, cap, &off, SL2_TLV_ROOM_SRC, v, 2);
+    }
 #ifdef BLE_ENABLE
-    if (BleSensor::isEnabled() && BleSensor::isActive()) {
+    /* Configured, not selected — same reasoning as the CAPS bit above. A
+     * healthy BLE sensor's battery belongs on the dial's About page whether
+     * or not it's the source currently driving the pump. */
+    if (BleSensor::isBleEnabled() && BleSensor::getAddr()[0] && BleSensor::isActive()) {
         int8_t b = BleSensor::battery();
         if (b >= 0) {
             uint8_t pct = (uint8_t)b;
@@ -618,6 +681,7 @@ void EspnowLink::begin(CN105Controller *ctrl) {
     s_hvac.apply = h_apply;
     s_hvac.get_caps = h_get_caps;
     s_hvac.fill_info_tlvs = h_fill_info;
+    s_hvac.room_sensor = h_room_sensor;
     s_hvac.wifi_creds = h_wifi_creds;
     s_hvac.wifi_setup = h_wifi_setup;
 
@@ -711,6 +775,7 @@ bool EspnowLink::pairingActive() const { return s_stat.pairing; }
 int  EspnowLink::pairingSecondsLeft() const { return s_stat.secsLeft; }
 const char *EspnowLink::pairResult() const { return s_stat.result; }
 EspnowPairOutcome EspnowLink::pairOutcome() const { return s_stat.outcome; }
+uint8_t EspnowLink::roomSourceStatus() const { return room_src_status(); }
 
 void espnow_forget_and_restart(void) {
     if (!s_started) esp_restart();   /* link never came up — nothing to forget */
@@ -781,6 +846,7 @@ void espnow_register_console(void) {
 
 #else  // ESPNOW_REMOTE_ENABLE == 0
 #include <esp_system.h>
+#include "sl2_proto.h"   // SL2_ROOMST_OK — dependency-free, safe without the rest of this TU
 EspnowLink espnowLink;
 void EspnowLink::begin(CN105Controller *) {}
 void EspnowLink::loop() {}
@@ -788,6 +854,10 @@ bool EspnowLink::isBonded() const { return false; }
 bool EspnowLink::isPeerLive() const { return false; }
 void EspnowLink::getPeerMac(uint8_t out[6]) const { for (int i = 0; i < 6; i++) out[i] = 0; }
 bool EspnowLink::getDialDetail(EspnowDialDetail &out) const { (void)out; return false; }
+// Simplified default, matching every other query on this stub facade: no
+// link means Link can never be the selected source, so Internal — always
+// healthy — is the only reachable case worth getting right here.
+uint8_t EspnowLink::roomSourceStatus() const { return SL2_ROOMST_OK; }
 void EspnowLink::startPairing() {}
 void EspnowLink::cancelPairing() {}
 bool EspnowLink::pairingActive() const { return false; }

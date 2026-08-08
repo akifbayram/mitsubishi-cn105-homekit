@@ -40,6 +40,10 @@ public:
     bool isPeerLive() const;             // any bonded dial probed recently
     void getPeerMac(uint8_t out[6]) const;   // first bonded dial (00.. if none)
     bool getDialDetail(EspnowDialDetail &out) const;  // false if not bonded
+    // Health of the room-temperature source currently selected in settings
+    // (enum sl2_room_status). The same check the INFO TLV publishes to the
+    // dial, so the web UI and the dial can never show conflicting freshness.
+    uint8_t roomSourceStatus() const;
     void startPairing();                 // 60 s signed-TOFU pairing window
     void cancelPairing();
     bool pairingActive() const;

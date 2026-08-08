@@ -33,11 +33,13 @@ struct DeviceSettings {
     bool     wifiChangePending = false; // True after WiFi creds changed via web UI (shorter fallback timeout)
     uint8_t  vaneConfig = 2;          // 0=no vanes, 1=vertical only, 2=vertical+horizontal
     uint8_t  modeMask = MODE_CAP_ALL; // MODE_CAP_* bits — operating modes this unit supports (mode_caps.h)
+    // Which source drives the heat pump's room temperature. Outside the BLE
+    // ifdef on purpose: a build without BLE still chooses Internal vs Link.
+    uint8_t  roomSource = 0;              // enum sl2_room_src
+    uint16_t roomStaleTimeoutS = 600;     // Seconds before a source is stale (30-3600)
 #ifdef BLE_ENABLE
     bool     bleEnabled = false;          // Master BLE on/off (lazy NimBLE init)
     char     bleSensorAddr[18] = "";      // "AA:BB:CC:DD:EE:FF" or empty
-    bool     bleFeedEnabled = false;      // Feed BLE temp to heat pump
-    uint16_t bleStaleTimeoutS = 600;      // Seconds before sensor marked stale (30-3600)
 #endif
 };
 

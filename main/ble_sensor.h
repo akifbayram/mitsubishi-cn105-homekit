@@ -40,7 +40,10 @@ namespace BleSensor {
     bool     isStale();       // No data for stale timeout
     bool     isReverted();    // Stale watchdog handed the HP back to its internal sensor
     uint32_t lastUpdateAge(); // ms since last reading
-    bool     isEnabled();     // Feed toggle (NVS)
+    bool     isEnabled();     // roomSource == SL2_ROOMSRC_BLE: BLE is the
+                               // SELECTED room source right now. NOT "is a
+                               // sensor configured" — for that, check
+                               // isBleEnabled() && getAddr()[0] instead.
     void     setEnabled(bool enabled);   // Persist feed toggle; loop() reacts to the change
     void     setAddr(const char* mac);   // Update MAC ("" clears), reset readings, restart scan
     const char* getAddr();

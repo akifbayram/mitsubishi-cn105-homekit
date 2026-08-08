@@ -65,6 +65,12 @@ typedef struct sl2_hvac_iface {
     bool (*get_caps)(void *ctx, struct sl2_caps_pkt *out);
     /* Append TLVs for INFO; return bytes written (0 ok). */
     size_t (*fill_info_tlvs)(void *ctx, uint8_t *buf, size_t cap);
+    /* A bonded dial reported its own room sensor. Optional (may be NULL).
+     * `is_edit` is true only when the frame carried want_src AND it was not
+     * SL2_ROOMSRC_NOEDIT — the core does the length check so every adapter
+     * cannot get it wrong independently. */
+    void (*room_sensor)(void *ctx, const uint8_t src_mac[6],
+                        const struct sl2_dial_sensor_pkt *p, bool is_edit);
     /* Link OTA: STA creds. Return false (or NULL hook) when unavailable —
      * the core then answers ok=0 and CAPS should omit SL2_FEAT_LINK_OTA_CREDS. */
     bool (*wifi_creds)(void *ctx, char ssid[33], char psk[65]);

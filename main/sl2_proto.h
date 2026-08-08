@@ -41,7 +41,8 @@ enum sl2_pkt_type {
     SL2_PKT_WIFI_RESP = 9,   /* ctrl -> dial, encrypted (Link OTA) */
     SL2_PKT_WIFI_SETUP = 10, /* dial -> ctrl, encrypted (raise setup AP) */
     SL2_PKT_DIAL_INFO  = 11, /* dial -> ctrl, encrypted (dial identity) */
-    /* 12..127 reserved for core growth; 128..255 experiments, never shipped */
+    SL2_PKT_DIAL_SENSOR = 12, /* dial -> ctrl, encrypted (dial's own room sensor) */
+    /* 13..127 reserved for core growth; 128..255 experiments, never shipped */
 };
 
 /* ── semantic HVAC model ──────────────────────────────────────────────── */
@@ -268,7 +269,8 @@ enum {  /* sl2_caps_pkt.features — telemetry/services the controller offers */
     SL2_FEAT_LINK_OTA_CREDS = 1u << 7,
     SL2_FEAT_ENERGY         = 1u << 8,
     SL2_FEAT_WIFI_SETUP     = 1u << 9,  /* accepts WIFI_SETUP (on-demand setup AP) */
-    /* bits 10-15 spare */
+    SL2_FEAT_LINK_SENSOR    = 1u << 10, /* accepts DIAL_SENSOR as a room source */
+    /* bits 11-15 spare */
 };
 
 /* vane axis descriptor byte: low nibble = n_pos (0 = axis absent),
@@ -326,6 +328,7 @@ enum sl2_tlv_type {          /* 0x01..0x7F core; 0x80..0xFF vendor-specific */
     SL2_TLV_DIAL_CERT   = 0x0A,  /* DIAL_INFO tail only: raw 112 B link_cert
                                   * (Serin-signed device identity); absent on
                                   * unprovisioned dials */
+    SL2_TLV_ROOM_SRC    = 0x0B,  /* u8 applied_src; u8 status */
 };
 
 /* Append one TLV. Returns false (and writes nothing) if it doesn't fit. */
@@ -403,6 +406,49 @@ struct __attribute__((packed)) sl2_dial_info_pkt {
 };
 #define SL2_DIAL_INFO_MIN_LEN 3   /* through caps_seq; model/fw may be absent */
 
+/* ── DIAL_SENSOR (dial -> ctrl, encrypted, push) ──────────────────────────
+ *
+ * A dial with its own temperature sensor offers itself as a room-temperature
+ * source. The dial only ever REPORTS; the controller decides whether to use
+ * the reading (see SL2_TLV_ROOM_SRC for what it decided).
+ *
+ * `want_src` doubles as the edit channel so streaming and editing share one
+ * message type. It is idempotent — the dial re-sends until the controller's
+ * INFO reflects the change, exactly as it treats CMD.
+ *
+ * SL2_ROOMSRC_NOEDIT is 0xFF, not 0, on purpose: the tolerant decode
+ * zero-fills a short frame, and 0 means Internal. A receiver must treat
+ * len < 7 as reading-only by LENGTH, never by value. */
+enum {  /* sl2_dial_sensor_pkt.flags */
+    SL2_DSF_HAS_SENSOR = 1u << 0,  /* dial has sensing hardware (reading may
+                                    * still be absent — see temp_dc) */
+    /* bits 1-7 spare */
+};
+
+enum sl2_room_src {
+    SL2_ROOMSRC_INTERNAL = 0,     /* heat pump's own thermistor */
+    SL2_ROOMSRC_BLE      = 1,     /* controller's BLE sensor */
+    SL2_ROOMSRC_LINK     = 2,     /* the dial's own sensor */
+    SL2_ROOMSRC_NOEDIT   = 0xFF,  /* want_src sentinel: not an edit */
+};
+
+enum sl2_room_status {
+    SL2_ROOMST_OK          = 0,   /* the selected source is feeding now */
+    SL2_ROOMST_STALE       = 1,   /* selected but timed out -> internal */
+    SL2_ROOMST_UNAVAILABLE = 2,   /* selected but never had a reading */
+};
+
+struct __attribute__((packed)) sl2_dial_sensor_pkt {
+    uint8_t  type;           /* SL2_PKT_DIAL_SENSOR */
+    uint8_t  version;        /* SL2_PROTO_VERSION */
+    uint8_t  flags;          /* SL2_DSF_* */
+    int16_t  temp_dc;        /* deci-C; SL2_DC_NA  = no reading */
+    uint8_t  hum_pct;        /* 0..100; SL2_HUM_NA = no reading */
+    uint8_t  want_src;       /* enum sl2_room_src; NOEDIT = reading only */
+    uint8_t  reserved[2];    /* senders zero-fill, receivers ignore */
+};
+#define SL2_DIAL_SENSOR_MIN_LEN 6   /* through hum_pct; want_src may be absent */
+
 /* ── sizeof guards — every vendored copy must agree ───────────────────── */
 #define SL2_STATIC_ASSERT(c, m) typedef char sl2_sa_##m[(c) ? 1 : -1]
 SL2_STATIC_ASSERT(sizeof(struct sl2_state_pkt)     == 26,  state_size);
@@ -416,7 +462,9 @@ SL2_STATIC_ASSERT(sizeof(struct sl2_wifi_req_pkt)  == 4,   wifi_req_size);
 SL2_STATIC_ASSERT(sizeof(struct sl2_wifi_resp_pkt) == 103, wifi_resp_size);
 SL2_STATIC_ASSERT(sizeof(struct sl2_wifi_setup_pkt) == 4,  wifi_setup_size);
 SL2_STATIC_ASSERT(sizeof(struct sl2_dial_info_pkt) == 43,  dial_info_size);
+SL2_STATIC_ASSERT(sizeof(struct sl2_dial_sensor_pkt) == 9, dial_sensor_size);
 SL2_STATIC_ASSERT(SL2_DIAL_INFO_MIN_LEN <= (int)sizeof(struct sl2_dial_info_pkt), dial_info_minlen);
+SL2_STATIC_ASSERT(SL2_DIAL_SENSOR_MIN_LEN <= (int)sizeof(struct sl2_dial_sensor_pkt), dial_sensor_minlen);
 SL2_STATIC_ASSERT(SL2_STATE_MIN_LEN <= (int)sizeof(struct sl2_state_pkt), state_minlen);
 SL2_STATIC_ASSERT(SL2_CMD_MIN_LEN   <= (int)sizeof(struct sl2_cmd_pkt),   cmd_minlen);
 SL2_STATIC_ASSERT(SL2_PROBE_MIN_LEN <= (int)sizeof(struct sl2_probe_pkt), probe_minlen);

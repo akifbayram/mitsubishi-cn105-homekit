@@ -22,6 +22,7 @@
 #include "ble_sensor.h"
 #endif
 #include "espnow_link.h"
+#include "link_sensor.h"
 
 static const char *TAG = "web_ws";
 
@@ -288,22 +289,40 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
             LOG_INFO("Config bleAddr=%s", bleAddrVal);
             pushState();  // setAddr() already persists; just confirm to the UI at once
         }
+#endif
 
-        bool bleFeedVal;
-        if (jsonGetBool(msg, "bleFeed", &bleFeedVal)) {
-            BleSensor::setEnabled(bleFeedVal);
-            LOG_INFO("Config bleFeed=%s", bleFeedVal ? "ON" : "OFF");
-        }
-
+        // roomStaleTimeoutS governs BOTH remote feeds (BLE + Link), so like
+        // roomSource it's handled outside the BLE ifdef. Key name is legacy.
         int bleTimeoutVal;
         if (jsonGetInt(msg, "bleTimeout", &bleTimeoutVal)) {
             if (bleTimeoutVal >= 30 && bleTimeoutVal <= 3600) {
-                settings.get().bleStaleTimeoutS = (uint16_t)bleTimeoutVal;
+                settings.get().roomStaleTimeoutS = (uint16_t)bleTimeoutVal;
                 LOG_INFO("Config bleTimeout=%ds", bleTimeoutVal);
                 changed = true;  // saved + pushState() handled by the `changed` block below
             }
         }
-#endif
+
+        // roomSource is not BLE-specific (Internal/Link don't need BLE at
+        // all) so it's validated and saved unconditionally, outside the
+        // #ifdef above. Same acceptance test as Task 14's h_room_sensor()
+        // (espnow_link.cpp) so the dial and the web UI can't disagree: reject
+        // out-of-range values and reject Link specifically when no bonded
+        // dial has advertised sensing hardware — a stored "Link" with no
+        // dial would silently leave the pump on its internal sensor while
+        // the UI claimed otherwise.
+        int roomSourceVal;
+        if (jsonGetInt(msg, "roomSource", &roomSourceVal)) {
+            if (roomSourceVal >= SL2_ROOMSRC_INTERNAL && roomSourceVal <= SL2_ROOMSRC_LINK &&
+                !(roomSourceVal == SL2_ROOMSRC_LINK && !LinkSensor::hasSensor())) {
+                settings.get().roomSource = (uint8_t)roomSourceVal;
+                settings.save();
+                LOG_INFO("Config roomSource=%d", roomSourceVal);
+            }
+            // Push on accept AND reject: the web UI paints its source rows
+            // optimistically on tap, and this echo is what confirms the
+            // selection or snaps a rejected one back.
+            pushState();
+        }
 
         if (changed) {
             settings.save();
@@ -499,7 +518,7 @@ void WebUI::pushState() {
     char escSsid[65];
     jsonEscape(ssid, escSsid, sizeof(escSsid));
 
-    char buf[1536];
+    char buf[1792];
     int n = snprintf(buf, sizeof(buf),
         "{\"type\":\"state\""
         ",\"power\":%s"
@@ -659,6 +678,43 @@ void WebUI::pushState() {
         hkReady ? homekit_get_setup_payload() : ""
     );
 
+    {
+        // Room source + Serin Link sensor — deliberately OUTSIDE the
+        // BLE_ENABLE block: Internal/Link need no BLE, and a BLE-disabled
+        // build must still render the Room Sensor card (Heat Pump + Serin
+        // Link rows). roomSource/roomStatus are the same values Task 14's
+        // INFO TLV sends the dial, so web and dial can't disagree.
+        // "bleTimeout" keeps its legacy key — it now governs both feeds,
+        // but renaming would break exported settings files.
+        float linkT = LinkSensor::temperature();
+        float linkH = LinkSensor::humidity();
+        uint32_t linkAge = LinkSensor::lastUpdateAge();
+        if (linkAge == UINT32_MAX) linkAge = 0;
+        char linkTStr[8] = "null", linkHStr[8] = "null";
+        if (!std::isnan(linkT)) snprintf(linkTStr, sizeof(linkTStr), "%.2f", linkT);
+        if (!std::isnan(linkH)) snprintf(linkHStr, sizeof(linkHStr), "%.0f", linkH);
+
+        jsonAppend(buf, sizeof(buf), &n,
+            ",\"roomSource\":%d"
+            ",\"roomStatus\":%d"
+            ",\"bleTimeout\":%u"
+            ",\"hasLinkSensor\":%s"
+            ",\"linkTemp\":%s"
+            ",\"linkHumidity\":%s"
+            ",\"linkActive\":%s"
+            ",\"linkStale\":%s"
+            ",\"linkStaleMs\":%lu",
+            (int)settings.get().roomSource,
+            (int)espnowLink.roomSourceStatus(),
+            (unsigned int)settings.get().roomStaleTimeoutS,
+            LinkSensor::hasSensor() ? "true" : "false",
+            linkTStr,
+            linkHStr,
+            LinkSensor::isActive() ? "true" : "false",
+            LinkSensor::isStale() ? "true" : "false",
+            (unsigned long)linkAge);
+    }
+
 #ifdef BLE_ENABLE
     {
         float bleT = BleSensor::temperature();
@@ -684,9 +740,7 @@ void WebUI::pushState() {
             ",\"bleReverted\":%s"
             ",\"bleStaleMs\":%lu"
             ",\"bleAddr\":\"%s\""
-            ",\"bleFeed\":%s"
             ",\"bleBattLow\":%s"
-            ",\"bleTimeout\":%u"
             ",\"bleDiscovering\":%s"
             ",\"bleSensorType\":%s%s%s",
             BleSensor::isBleEnabled() ? "true" : "false",
@@ -699,9 +753,7 @@ void WebUI::pushState() {
             BleSensor::isReverted() ? "true" : "false",
             (unsigned long)staleMs,
             BleSensor::getAddr(),
-            BleSensor::isEnabled() ? "true" : "false",
             (bleB >= 0 && bleB <= BLE_BATT_LOW_PCT) ? "true" : "false",
-            (unsigned int)settings.get().bleStaleTimeoutS,
             BleSensor::isDiscovering() ? "true" : "false",
             sType ? "\"" : "", sType ? sType : "null", sType ? "\"" : ""
         );

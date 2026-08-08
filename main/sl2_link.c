@@ -3,6 +3,7 @@
  * sl2_port.h / sl2_crypto.h / sl2_link.h for the contracts.
  */
 #include "sl2_link.h"
+#include <stddef.h>   /* offsetof */
 
 /* ── small helpers ────────────────────────────────────────────────────── */
 
@@ -339,6 +340,20 @@ void sl2_link_on_recv(sl2_link_t *l, const uint8_t src[6], const uint8_t dst[6],
             if (l->hvac->apply(l->hvac->ctx, c.mask, &c))
                 echo_state_all(l);          /* converge every head fast */
         }
+        break;
+    case SL2_PKT_DIAL_SENSOR:
+        if (len >= SL2_DIAL_SENSOR_MIN_LEN && l->hvac->room_sensor) {
+            struct sl2_dial_sensor_pkt p;
+            sl2_decode_pkt(&p, sizeof p, data, len);
+            /* want_src is only present on a long-enough frame. The tolerant
+             * decode zero-fills it otherwise, and 0 is Internal — so gate on
+             * LENGTH, never on the decoded value. */
+            const bool has_want =
+                (size_t)len > offsetof(struct sl2_dial_sensor_pkt, want_src);
+            const bool is_edit = has_want && p.want_src != SL2_ROOMSRC_NOEDIT;
+            l->hvac->room_sensor(l->hvac->ctx, src, &p, is_edit);
+        }
+        d->last_probe_ms = now;   /* a sensor report proves liveness */
         break;
     case SL2_PKT_WIFI_REQ:
         if (len >= SL2_WIFI_REQ_MIN_LEN) {
