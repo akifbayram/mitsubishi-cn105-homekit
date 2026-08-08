@@ -8,6 +8,9 @@
 #include <esp_heap_caps.h>
 #include <esp_system.h>
 #include <esp_console.h>
+#if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
+#include <driver/usb_serial_jtag.h>
+#endif
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
@@ -86,6 +89,16 @@ static int cmdWdtTest(int argc, char **argv) {
     for (;;) vTaskDelay(pdMS_TO_TICKS(100));   // subscribed, never fed
     return 0;
 }
+
+// True when a USB-Serial-JTAG host is actively on the bus (SOF activity per
+// the driver's connection monitor). Headless units — powered from the heat
+// pump's CN105 connector, no computer attached — return false, and the
+// console REPL must not start there (see the guard at the call site).
+#if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
+static bool console_host_present(void) { return usb_serial_jtag_is_connected(); }
+#else
+static bool console_host_present(void) { return true; }  // UART console: no host concept
+#endif
 
 static void registerDiagConsole(void) {
     const esp_console_cmd_t cmd = {
@@ -294,11 +307,30 @@ extern "C" void app_main(void)
         // AP is down — i.e. when Improv Serial is not running. This keeps a single
         // console owner and avoids the recovery-path deadlock. Consequence: Improv
         // is first-provisioning-only; later re-provisioning is via the AP web UI.
+        // Headless guard: with no USB host ever attached, esp_console REPL
+        // init can block its caller indefinitely inside console I/O
+        // (linenoiseProbe runs on the CALLING task by design — see the
+        // comment in esp_console_common.c — and the no-host paths carry
+        // IDF-14303 TODOs). Field units run headless off the heat pump
+        // connector; starting the REPL there blocked main at ~T+5 (normal)
+        // / ~T+10 (safe mode) and the 10 s task-WDT panicked every boot —
+        // the 2026-08-05/06 customer crash loop, A/B-proven on the bench
+        // (identical build minus this call: 20 s crash metronome vs stable).
+        // Gate on live host presence — the check re-arms each pass, so
+        // plugging USB in later still brings the REPL up — and run the init
+        // on a disposable helper task so main is never exposed even if the
+        // connection state is stale.
         if (!espnowConsoleInit &&
-            WifiManager::isConnected() && !wifiRecovery.isAPActive()) {
-            espnowConsoleInit = true;   // attempt once (no-op stub when ESP-NOW off)
-            espnow_register_console();
-            registerDiagConsole();      // piggybacks on the REPL the line above started
+            WifiManager::isConnected() && !wifiRecovery.isAPActive() &&
+            console_host_present()) {
+            // Attempt once (no-op stub when ESP-NOW off); stay re-armed if
+            // the helper task could not even be created (transient low heap),
+            // so a later pass retries instead of losing the console for good.
+            espnowConsoleInit = xTaskCreate([](void *) {
+                espnow_register_console();
+                registerDiagConsole();  // piggybacks on the REPL the line above started
+                vTaskDelete(nullptr);
+            }, "repl_init", 4096, nullptr, 2, nullptr) == pdPASS;
         }
 
         // ── Push state to HomeKit (throttled internally) ─────────────────
