@@ -211,7 +211,7 @@ input[type=range].slim::-moz-range-thumb{width:22px;height:22px;}
 .status-label{font-size:11px;color:var(--text2);display:block;}
 .status-item>span:not(.status-label),.status-item .item-val{font-size:14px;color:var(--text);font-weight:500;margin-top:3px;display:block;font-variant-numeric:tabular-nums;}
 
-/* ===== iOS switch (#bleEnableToggle / #bleFeedToggle) ===== */
+/* ===== iOS switch (#bleEnableToggle) ===== */
 .ios-toggle{position:relative;display:inline-block;width:51px;height:31px;flex:none;}
 .ios-toggle input{position:absolute;opacity:0;width:100%;height:100%;margin:0;cursor:pointer;z-index:1;}
 .ios-toggle-slider{position:absolute;inset:0;border-radius:16px;background:var(--surface3);transition:background .2s;}
@@ -227,6 +227,20 @@ input[type=range].slim::-moz-range-thumb{width:22px;height:22px;}
 .inset-row:last-child{border-bottom:none;}
 .inset-row .lbl,.inset-block .lbl{font-size:15px;color:var(--text);font-weight:500;}
 .inset-row .sub,.inset-block .sub{font-size:12px;color:var(--text2);margin-top:2px;max-width:230px;}
+
+/* ===== Room sensor source rows (radio-style; tap = select) ===== */
+.src-rows{display:flex;flex-direction:column;gap:8px;margin-bottom:6px;}
+.src-row{display:flex;align-items:center;gap:12px;padding:12px 14px;width:100%;text-align:left;cursor:pointer;
+  background:transparent;border:1.5px solid var(--sep);border-radius:14px;font:inherit;color:inherit;
+  transition:border-color .2s ease,background .2s ease;}
+.src-row.sel{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 7%,transparent);}
+.src-row:active{background:var(--surface3);}
+.src-row .src-main{flex:1;min-width:0;}
+.src-row .lbl{display:flex;align-items:center;gap:8px;font-size:15px;font-weight:500;color:var(--text);}
+.src-row .sub{display:block;font-size:12px;color:var(--text2);margin-top:2px;}
+.src-row .src-temp{flex:none;font-size:17px;font-weight:600;color:var(--text);font-variant-numeric:tabular-nums;}
+.src-badge{flex:none;font-size:10.5px;font-weight:600;padding:2px 7px;border-radius:8px;background:var(--accent);color:#fff;}
+.src-badge.stale{background:var(--orange);}
 .inset-block{padding:14px 18px;border-bottom:1px solid var(--sep);}
 .inset-block:last-child{border-bottom:none;}
 .ble-sep{border:none;border-top:1px solid var(--sep);margin:18px 0;}
@@ -580,32 +594,20 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     </div>
   </div>
 
-  <!-- ===== REMOTE SENSOR (BLE) ===== -->
-  <!-- Hidden until a state push carries bleEnabled: BLE_DISABLE builds never send it -->
-  <h2 class="group-label" id="bleGroupLabel" style="display:none">Remote Sensor<span class="section-summary"><span class="status-dot idle" id="bleDot"></span><span class="summary-text" id="bleStatusLabel"></span></span></h2>
-  <div class="card" id="bleCard" style="display:none">
+  <!-- ===== ROOM SENSOR (source rows: Heat Pump / BLE / Serin Link) ===== -->
+  <!-- Hidden until a state push carries roomSource AND there is at least one
+       remote source to offer (a BLE build, or a bonded sensing dial). A user
+       with neither never sees this section. -->
+  <h2 class="group-label" id="roomGroupLabel" style="display:none">Room Sensor<span class="section-summary"><span class="status-dot idle" id="roomDot"></span><span class="summary-text" id="roomStatusLabel"></span></span></h2>
+  <div class="card" id="roomCard" style="display:none">
     <div id="bleBanner" class="ble-banner info hidden" style="margin-bottom:12px"></div>
-    <div class="status-grid cols3" id="bleStatusGrid">
-      <div class="status-item" id="bleTempRow"><span class="status-label">Temp</span><span id="bleTemp">--</span></div>
-      <div class="status-item" id="bleHumRow"><span class="status-label">Humidity</span><span id="bleHum">--</span></div>
-      <div class="status-item" id="bleBattRow"><span class="status-label">Battery</span><span id="bleBatt">--</span></div>
-      <div class="status-item"><span class="status-label">Signal</span><span id="bleRssiVal">--</span></div>
-      <div class="status-item" id="bleAgeItem"><span class="status-label">Updated</span><span id="bleAge">--</span></div>
-      <div class="status-item" id="bleSensorChip"><span class="status-label">Sensor</span><span id="bleSensorType">--</span></div>
-    </div>
-    <hr class="ble-sep" id="bleStatusSep">
+    <div id="srcRows" class="src-rows" role="radiogroup" aria-label="Room temperature source"></div>
+    <div class="ble-help" style="margin-top:8px;margin-bottom:4px">The sensor the heat pump uses as the room temperature. Tap a source to switch.</div>
 
-    <div class="inset-row" id="bleEnableRow" style="padding-left:0;padding-right:0;padding-top:0">
+    <div class="inset-row" id="bleEnableRow" style="padding-left:0;padding-right:0">
       <div><div class="lbl">Enable Remote Sensor</div><div class="sub">Scans for a nearby BLE temperature sensor.</div></div>
       <label class="ios-toggle">
         <input type="checkbox" id="bleEnableToggle" onchange="toggleBleEnabled()" aria-label="Enable remote sensor">
-        <span class="ios-toggle-slider"></span>
-      </label>
-    </div>
-    <div class="inset-row" id="bleFeedRow" style="padding-left:0;padding-right:0">
-      <div><div class="lbl">Use as Room Temp</div><div class="sub" id="bleFeedHelp">Sends the reading to the heat pump as the room temperature.</div></div>
-      <label class="ios-toggle">
-        <input type="checkbox" id="bleFeedToggle" onchange="toggleBleFeed()" aria-label="Use remote sensor as room temperature">
         <span class="ios-toggle-slider"></span>
       </label>
     </div>
@@ -622,6 +624,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
         <button class="btn-primary grow0" id="bleScanBtn" onclick="startBleScan()">Scan</button>
       </div>
       <div class="ble-help">The Bluetooth address of the sensor to pair with.</div>
+      <div class="ble-help" id="bleSensorTypeLine" style="display:none"></div>
       <div id="bleScanResults" style="display:none;margin-top:10px"></div>
       <div id="bleToast" class="ble-banner info" style="display:none;margin-top:10px"></div>
       <button class="btn-secondary" style="margin-top:10px" onclick="saveBleConfig()">Save Sensor</button>
@@ -1486,6 +1489,69 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     }
   }
 
+  // Room-source badge text, indexed by enum sl2_room_src (Internal/BLE/Link).
+  var SRC_LABEL=["Heat Pump Sensor","Remote Sensor","Serin Link"];
+
+  // ── Room Sensor source rows ────────────────────────────────────────────────
+  // One tappable row per source this unit can actually serve — BLE needs a
+  // build with BLE + a configured address, Link needs a dial that advertised
+  // sensing hardware — so the user is never offered a dead option. Selection
+  // paints optimistically on tap and self-corrects from the firmware's ack
+  // push (accepted or rejected, pushState always follows a roomSource write).
+  function fmtAge(ms){
+    if(!ms||ms>=4294967295) return null;
+    var sec=Math.floor(ms/1000);
+    return sec<60?sec+'s ago':Math.floor(sec/60)+'m '+sec%60+'s ago';
+  }
+  function srcRowHtml(v,name,sub,temp,dotCls,sel,badge){
+    // badge: null/false = plain "Active"; 'stale' = "Active · stale"; 'nodata'
+    // = "Active · no data" (SL2_ROOMST_UNAVAILABLE — selected but nothing has
+    // ever arrived, so the pump is quietly running on its internal thermistor).
+    // Both non-plain states share the orange treatment — neither is healthy.
+    var badgeText=badge==='stale'?'Active · stale':badge==='nodata'?'Active · no data':'Active';
+    return '<button type="button" class="src-row'+(sel?' sel':'')+'" role="radio" aria-checked="'+(sel?'true':'false')+'" onclick="selectRoomSource('+v+')">'+
+      '<span class="status-dot '+dotCls+'"></span>'+
+      '<span class="src-main"><span class="lbl">'+name+
+        (sel?'<span class="src-badge'+(badge?' stale':'')+'">'+badgeText+'</span>':'')+
+      '</span>'+(sub?'<span class="sub">'+sub+'</span>':'')+'</span>'+
+      (temp!=null?'<span class="src-temp">'+temp+'</span>':'')+
+    '</button>';
+  }
+  function renderSourceRows(s){
+    var sel=s.roomSource||0;
+    var srcStale=s.roomStatus===1;      // SL2_ROOMST_STALE
+    var srcNoData=s.roomStatus===2;     // SL2_ROOMST_UNAVAILABLE
+    var selBadge=srcStale?'stale':srcNoData?'nodata':null;
+    // Heat pump's own sensor: always offered. It is the fallback, not a
+    // monitored feed — no reading or health dot of its own.
+    var rows=srcRowHtml(0,SRC_LABEL[0],'Built into the indoor unit',null,
+                        sel===0?'active':'idle',sel===0,null);
+    if(s.bleEnabled!==undefined&&s.bleAddr){
+      var bits=[];
+      if(s.bleHumidity!=null&&s.bleHumidity>=0) bits.push(s.bleHumidity+'%');
+      if(s.bleBattery>=0) bits.push(s.bleBattery+'% batt');
+      if(s.bleRssi) bits.push(s.bleRssi+' dBm');
+      var age=fmtAge(s.bleStaleMs);
+      if(age) bits.push(age); else if(s.bleActive) bits.push('updated now');
+      var dot=!s.bleEnabled?'idle':s.bleStale?'error':s.bleActive?'active':'idle';
+      var sub=!s.bleEnabled?'Disabled':(bits.join(' · ')||'Scanning…');
+      rows+=srcRowHtml(1,SRC_LABEL[1],sub,
+                       s.bleTemp!=null?fmtReadingTemp(s.bleTemp)+'°':null,
+                       dot,sel===1,sel===1?selBadge:null);
+    }
+    if(s.hasLinkSensor){
+      var lb=[];
+      if(s.linkHumidity!=null) lb.push(s.linkHumidity+'%');
+      var lage=fmtAge(s.linkStaleMs);
+      if(lage) lb.push(lage); else if(s.linkActive) lb.push('updated now');
+      var ldot=s.linkStale?'error':s.linkActive?'active':'idle';
+      rows+=srcRowHtml(2,SRC_LABEL[2],lb.join(' · ')||'Waiting for a reading…',
+                       s.linkTemp!=null?fmtReadingTemp(s.linkTemp)+'°':null,
+                       ldot,sel===2,sel===2?selBadge:null);
+    }
+    $('srcRows').innerHTML=rows;
+  }
+
   // ── State handler ──────────────────────────────────────────────────────────
   function onState(s){
     lastState=s;   // retained for diagnostics copy + event timestamps
@@ -1525,13 +1591,16 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     roomTemp.textContent=fmtReadingTemp(s.room);
     $('roomDeg').hidden=(s.room==null);
 
-    // Temperature source indicator
+    // Temperature source indicator — driven by the applied source + its own
+    // status (not the old BLE-only feed/stale flags) so Serin Link shows up
+    // and a stale feed of ANY source reads as stale, not as a live "Remote
+    // Sensor".
     var srcEl=$('tempSource');
-    if(s.bleTemp!==undefined&&s.bleAddr){
-      srcEl.className='temp-source active'+(s.bleActive&&s.bleFeed&&!s.bleStale?' remote':s.bleStale?' stale':'');
-      if(s.bleActive&&s.bleFeed&&!s.bleStale) srcEl.textContent='Remote Sensor';
-      else if(s.bleStale) srcEl.textContent='Internal (remote stale)';
-      else srcEl.textContent='Internal Sensor';
+    if(s.roomSource!==undefined){
+      var srcStale=s.roomStatus===1;              // SL2_ROOMST_STALE
+      var srcLive =s.roomSource>0&&s.roomStatus===0;
+      srcEl.className='temp-source active'+(srcLive?' remote':srcStale?' stale':'');
+      srcEl.textContent=SRC_LABEL[s.roomSource]||SRC_LABEL[0];
     }else{srcEl.className='temp-source'}
 
     if(s.operating){
@@ -1567,112 +1636,70 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       $('errorCode').style.color='var(--green)';
     }
 
-    // BLE Remote Sensor
-    if(s.bleEnabled!==undefined){
-      $('bleCard').style.display='';
-      $('bleGroupLabel').style.display='';
-      var bleOn=!!s.bleEnabled;
-      $('bleEnableToggle').checked=bleOn;
+    // ── Room Sensor card: source rows + BLE config ─────────────────────────
+    // Gated on roomSource plus at least one remote source to offer: a BLE
+    // build always qualifies (bleEnabled rides every push), a BLE-disabled
+    // build qualifies once a sensing dial is bonded. Neither → no card.
+    if(s.roomSource!==undefined&&(s.bleEnabled!==undefined||s.hasLinkSensor)){
+      $('roomCard').style.display='';
+      $('roomGroupLabel').style.display='';
+      renderSourceRows(s);
+
+      // Header dot + summary reflect the ACTIVE source's health — not BLE's.
+      var roomDot=$('roomDot'),roomLbl=$('roomStatusLabel');
+      var srcStale=s.roomStatus===1;      // SL2_ROOMST_STALE
+      var srcNoData=s.roomStatus===2;     // SL2_ROOMST_UNAVAILABLE — selected but never reported; pump is on its internal thermistor
+      if(srcStale){roomDot.className='status-dot error';roomLbl.textContent=(SRC_LABEL[s.roomSource]||SRC_LABEL[0])+' · Stale';roomLbl.style.color='var(--red)'}
+      else if(srcNoData){roomDot.className='status-dot idle';roomLbl.textContent=(SRC_LABEL[s.roomSource]||SRC_LABEL[0])+' · No reading';roomLbl.style.color='var(--text3)'}
+      else if(s.roomSource>0){roomDot.className='status-dot active';roomLbl.textContent=SRC_LABEL[s.roomSource];roomLbl.style.color='var(--green)'}
+      else{roomDot.className='status-dot idle';roomLbl.textContent=SRC_LABEL[0];roomLbl.style.color='var(--text3)'}
+
+      // Timeout governs both remote feeds (BLE + Link) — rides the card, not
+      // the BLE chrome. Preserve user input while editing.
+      if(!$('bleTimeoutInput').matches(':focus')){$('bleTimeoutInput').value=s.bleTimeout||600}
+
+      // BLE-specific chrome: enable toggle + MAC config (absent on BLE-off builds)
+      var hasBle=s.bleEnabled!==undefined;
+      var bleOn=hasBle&&!!s.bleEnabled;
       var noMac=!s.bleAddr;
-      // Live readings (chips + their divider) appear only once a sensor is configured
-      var configured=bleOn&&!noMac;
-      // Hide all BLE content when disabled; hide the readings until configured
-      var bleGrid=$('bleStatusGrid');
-      var bleSep=$('bleConfigSep');
-      var bleStatusSep=$('bleStatusSep');
-      var bleConfig=$('bleConfigDiv');
-      $('bleFeedRow').style.display=bleOn?'':'none';
-      $('bleFeedHelp').style.display=bleOn?'':'none';
-      $('bleTimeoutRow').style.display=bleOn?'':'none';
-      $('bleTimeoutHelp').style.display=bleOn?'':'none';
-      bleGrid.style.display=configured?'':'none';
-      bleSep.style.display=bleOn?'':'none';
-      if(bleStatusSep)bleStatusSep.style.display=configured?'':'none';
-      bleConfig.style.display=bleOn?'':'none';
-      var bleDot=$('bleDot');
+      $('bleEnableRow').style.display=hasBle?'':'none';
+      $('bleEnableToggle').checked=bleOn;
+      $('bleConfigSep').style.display=bleOn?'':'none';
+      $('bleConfigDiv').style.display=bleOn?'':'none';
+      if(bleOn&&!$('bleMacInput').matches(':focus')){$('bleMacInput').value=s.bleAddr||''}
+      var typeLine=$('bleSensorTypeLine');
+      if(bleOn&&s.bleSensorType){typeLine.textContent='Detected sensor: '+s.bleSensorType;typeLine.style.display=''}
+      else{typeLine.style.display='none'}
+
+      // Banner: real problems only. Which source drives the pump is shown by
+      // the rows themselves — a healthy-but-unselected sensor is NOT a warning
+      // (the old "Not the active room source" caution is deliberately gone).
       var banner=$('bleBanner');
-      var statusLbl=$('bleStatusLabel');
-      var waiting=!noMac&&!s.bleActive&&!s.bleStale;
-      var stale=!!s.bleStale;
-      var feedOff=!s.bleFeed;
-
-      // Status dot + header label (visible when collapsed)
-      if(!bleOn){bleDot.className='status-dot idle';statusLbl.textContent='Disabled';statusLbl.style.color='var(--text3)'}
-      else if(noMac){bleDot.className='status-dot idle';statusLbl.textContent='Not Configured';statusLbl.style.color='var(--text3)'}
-      else if(stale){bleDot.className='status-dot error';statusLbl.textContent='Stale';statusLbl.style.color='var(--red)'}
-      else if(s.bleActive&&feedOff){bleDot.className='status-dot warning';statusLbl.textContent='Feed Off';statusLbl.style.color='var(--orange)'}
-      else if(s.bleActive){bleDot.className='status-dot active';statusLbl.textContent='Active';statusLbl.style.color='var(--green)'}
-      else{bleDot.className='status-dot idle';statusLbl.textContent='Scanning\u2026';statusLbl.style.color='var(--text2)'}
-
-      // Contextual banner (visible when expanded)
-      if(!bleOn){banner.style.display='none'}
-      else if(noMac){banner.className='ble-banner info';banner.textContent='Configure a sensor MAC address to begin';banner.style.display='flex'}
-      else if(stale){
+      if(bleOn&&noMac){banner.className='ble-banner info';banner.textContent='Configure a sensor MAC address to begin';banner.style.display='flex'}
+      else if(s.roomSource===1&&s.bleStale){
         var staleSec=Math.floor((s.bleStaleMs||0)/1000);
         banner.className='ble-banner warn';
         // bleReverted = the firmware's stale watchdog actually handed the HP
         // back to its internal sensor (not inferred client-side)
-        banner.textContent='No update for '+staleSec+'s'+(s.bleReverted?' \u2014 reverted to internal sensor':'');
-        banner.style.display='flex'
-      }
-      else if(waiting){banner.className='ble-banner muted';banner.textContent='Scanning for sensor\u2026';banner.style.display='flex'}
-      else if(s.bleActive&&feedOff){banner.className='ble-banner caution';banner.textContent='Not feeding temperature to heat pump';banner.style.display='flex'}
-      else if(s.bleBattLow){banner.className='ble-banner warn';banner.textContent='Sensor battery low ('+s.bleBattery+'%)';banner.style.display='flex'}
+        banner.textContent='No update from the remote sensor for '+staleSec+'s'+(s.bleReverted?' — reverted to internal sensor':'');
+        banner.style.display='flex'}
+      else if(s.roomSource===2&&s.linkStale){
+        var linkSec=Math.floor((s.linkStaleMs||0)/1000);
+        banner.className='ble-banner warn';
+        banner.textContent='No update from Serin Link for '+linkSec+'s — using internal sensor';
+        banner.style.display='flex'}
+      else if(bleOn&&s.bleBattLow){banner.className='ble-banner warn';banner.textContent='Sensor battery low ('+s.bleBattery+'%)';banner.style.display='flex'}
       else{banner.style.display='none'}
-
-      // Dim only the readings grid while awaiting the first update (configured
-      // but no data yet) — the controls below stay interactive and must look it
-      bleGrid.classList.toggle('ble-dimmed',waiting);
-
-      // Temperature
-      var tempStr=s.bleTemp!=null?fmtReadingTemp(s.bleTemp):'--';
-      $('bleTemp').textContent=tempStr+(s.bleTemp!=null?(tempUnit==='F'?'°F':'°C'):'');
-
-      // Humidity
-      if(s.bleHumidity!=null&&s.bleHumidity>=0){$('bleHum').textContent=s.bleHumidity+'%'}
-      else{$('bleHum').textContent='--'}
-
-      // Battery
-      if(s.bleBattery>=0){
-        $('bleBatt').textContent=s.bleBattery+'%';
-        $('bleBatt').style.color=s.bleBattLow?'var(--red)':s.bleBattery<=30?'var(--orange)':'';
-      }else{$('bleBatt').textContent='--';$('bleBatt').style.color=''}
-
-      // RSSI
-      if(s.bleRssi){$('bleRssiVal').textContent=s.bleRssi+' dBm'}
-      else{$('bleRssiVal').textContent='--'}
-
-      // Last update age
-      if(s.bleStaleMs>0&&s.bleStaleMs<4294967295){
-        var sec=Math.floor(s.bleStaleMs/1000);
-        $('bleAge').textContent=sec<60?sec+'s ago':Math.floor(sec/60)+'m '+sec%60+'s ago'
-      }else{$('bleAge').textContent=s.bleActive?'now':'--'}
-
-      // MAC input (preserve user input while editing)
-      if(!$('bleMacInput').matches(':focus')){$('bleMacInput').value=s.bleAddr||''}
-
-      // Feed toggle
-      $('bleFeedToggle').checked=!!s.bleFeed;
-
-      // Stale timeout (preserve user input while editing)
-      if(!$('bleTimeoutInput').matches(':focus')){$('bleTimeoutInput').value=s.bleTimeout||600}
-
-      // Sensor type
-      if(s.bleSensorType){$('bleSensorType').textContent=s.bleSensorType}
-      else{$('bleSensorType').textContent='--'}
 
       // Discovery state
       var scanBtn=$('bleScanBtn');
-      if(s.bleDiscovering){scanBtn.textContent='Scanning\u2026';scanBtn.disabled=true;scanBtn.classList.add('scanning')}
+      if(s.bleDiscovering){scanBtn.textContent='Scanning…';scanBtn.disabled=true;scanBtn.classList.add('scanning')}
       else if(scanBtn.classList.contains('scanning')){scanBtn.textContent='Scan';scanBtn.disabled=false;scanBtn.classList.remove('scanning')}
-
-      // When BLE disabled, show status as "Disabled"
-      if(!bleOn){
-        bleDot.className='status-dot idle';
-        statusLbl.textContent='Disabled';
-        statusLbl.style.color='var(--text3)';
-        banner.style.display='none';
-      }
+    }else{
+      // Neither a remote-capable build nor a bonded Link dial: hide the card.
+      // Reachable at runtime (not just at boot) if a Serin Link dial unpairs.
+      $('roomCard').style.display='none';
+      $('roomGroupLabel').style.display='none';
     }
 
     // CN105 header: glowing dot + status label
@@ -1993,12 +2020,19 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       showToast('Not connected — change not sent',true);
     }
   };
-  window.toggleBleFeed=function(){
-    if(!send({cmd:'config',bleFeed:$('bleFeedToggle').checked})){
-      $('bleFeedToggle').checked=!$('bleFeedToggle').checked;
+  window.selectRoomSource=function(v){
+    if(lastState&&lastState.roomSource===v) return;
+    if(!send({cmd:'config',roomSource:v})){
       showToast('Not connected — change not sent',true);
+      return;
     }
+    // Optimistic repaint; the firmware acks every roomSource write with a
+    // pushState (accepted or rejected), which confirms or snaps this back.
+    if(lastState){lastState.roomSource=v;renderSourceRows(lastState);}
   };
+  // Test hook: lets a headless harness drive the closure-scoped state
+  // handler directly (no live WebSocket needed). Not used by the UI.
+  window.__setState=function(s){onState(s)};
   var bleScanPicked=false;
   window.startBleScan=function(){
     if(!ensureConnected()) return;
@@ -2590,7 +2624,15 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     var out={app:'cn105-homekit-settings',v:1,fw:RUNNING_FW_VER,exported:new Date().toISOString(),
       settings:{deviceName:s.deviceName,tempUnit:s.tempUnit,pollInterval:s.pollInterval,logLevel:s.logLevel,
         vaneConfig:s.vaneConfig,modeMask:s.modeMask,heatThresh:s.heatThresh,coolThresh:s.coolThresh}};
-    if(s.bleEnabled!=null) out.settings.ble={enabled:s.bleEnabled,addr:s.bleAddr||'',feed:!!s.bleFeed,timeout:s.bleTimeout};
+    // roomSource is not BLE-specific (Internal/Link don't need BLE at all), so
+    // it rides at the top level rather than inside the ble sub-object.
+    if(s.roomSource!=null) out.settings.roomSource=s.roomSource;
+    // The sensor timeout governs BLE AND Serin Link, so it also needs a
+    // top-level slot independent of bleEnabled (a BLE-disabled build with a
+    // bonded dial still has a timeout to export). Kept inside ble.timeout too
+    // so files exported here still import cleanly against the old ble-only path.
+    if(s.bleTimeout!=null) out.settings.roomTimeout=s.bleTimeout;
+    if(s.bleEnabled!=null) out.settings.ble={enabled:s.bleEnabled,addr:s.bleAddr||'',timeout:s.bleTimeout};
     var blob=new Blob([JSON.stringify(out,null,2)],{type:'application/json'});
     var a=document.createElement('a');
     a.href=URL.createObjectURL(blob);
@@ -2616,10 +2658,11 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       if(typeof st.logLevel==='number') cfg.logLevel=st.logLevel;
       if(typeof st.vaneConfig==='number') cfg.vaneConfig=st.vaneConfig;
       if(typeof st.modeMask==='number') cfg.modeMask=st.modeMask;
+      if(typeof st.roomSource==='number') cfg.roomSource=st.roomSource;
+      if(typeof st.roomTimeout==='number') cfg.bleTimeout=st.roomTimeout;
       if(st.ble){
         if(typeof st.ble.enabled==='boolean') cfg.bleEnabled=st.ble.enabled;
         if(typeof st.ble.addr==='string'&&st.ble.addr) cfg.bleAddr=st.ble.addr;
-        if(typeof st.ble.feed==='boolean') cfg.bleFeed=st.ble.feed;
         if(typeof st.ble.timeout==='number') cfg.bleTimeout=st.ble.timeout;
       }
       send(cfg);
