@@ -23,11 +23,20 @@ idf_component_register(
          "espnow_link.cpp"
          "sl2_link.c"
          "link_sensor.cpp"
+         "sl2_sodium_slim.c"
+         "sl2_monocypher/monocypher.c"
+         "sl2_monocypher/monocypher-ed25519.c"
     INCLUDE_DIRS "."
     REQUIRES nvs_flash esp_wifi esp_netif esp_http_server esp_timer driver bt app_update mbedtls
              esp_hap_core esp_hap_apple_profiles esp_hap_platform espressif__mdns
              console espressif__libsodium
 )
+
+# ── libsodium flash trim (all targets): selector stubs + compact
+# Ed25519/X25519, serving BOTH HomeKit pair-setup/verify and Serin Link.
+# Mechanism documented in sl2_sodium_slim.c; HAP's ChaCha20-Poly1305 stays
+# linked by its direct references.
+include(${CMAKE_CURRENT_LIST_DIR}/sl2_sodium_slim.cmake)
 
 # ── Pass firmware version from git to source code ────────────────────────────
 target_compile_definitions(${COMPONENT_TARGET} PRIVATE FW_VERSION="${PROJECT_VER}")

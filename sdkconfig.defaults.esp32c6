@@ -3,3 +3,28 @@ CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
 CONFIG_ESPTOOLPY_FLASHSIZE_8MB=n
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_4mb.csv"
+
+# ── Flash budget: mbedTLS trims (ported from the matter branch, measured
+# −28,048 B there; see its EXPERIMENT-REPORT.md). Nothing in this image runs
+# TLS: HAP uses libsodium (ChaCha20-Poly1305/Ed25519/X25519) + mbedTLS
+# SRP/HKDF primitives, OTA is browser-mediated, and hap_fw_upgrade is not
+# referenced. ──────────────────────────────────────────────────────────────
+# Error-description string tables (~15 KB): mbedtls_strerror() falls back to
+# "UNKNOWN ERROR CODE"; numeric -0xNNNN codes still log.
+CONFIG_MBEDTLS_ERROR_STRINGS=n
+# Software-GCM fallback for non-AES ciphers pulls in ARIA (~4 KB); unused.
+CONFIG_MBEDTLS_GCM_SUPPORT_NON_AES_CIPHER=n
+# Every ECC consumer here is P-256 (WPA3-SAE group 19, OWE group 19).
+# Residual risk: an AP configured for SAE/OWE with ONLY group 20/21 —
+# vanishingly rare — would not associate.
+CONFIG_MBEDTLS_ECP_DP_SECP192R1_ENABLED=n
+CONFIG_MBEDTLS_ECP_DP_SECP224R1_ENABLED=n
+CONFIG_MBEDTLS_ECP_DP_SECP384R1_ENABLED=n
+CONFIG_MBEDTLS_ECP_DP_SECP521R1_ENABLED=n
+CONFIG_MBEDTLS_ECP_DP_SECP192K1_ENABLED=n
+CONFIG_MBEDTLS_ECP_DP_SECP224K1_ENABLED=n
+CONFIG_MBEDTLS_ECP_DP_SECP256K1_ENABLED=n
+CONFIG_MBEDTLS_ECP_DP_BP256R1_ENABLED=n
+CONFIG_MBEDTLS_ECP_DP_BP384R1_ENABLED=n
+CONFIG_MBEDTLS_ECP_DP_BP512R1_ENABLED=n
+CONFIG_MBEDTLS_ECP_DP_CURVE25519_ENABLED=n
