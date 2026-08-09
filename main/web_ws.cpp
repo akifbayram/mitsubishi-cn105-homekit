@@ -405,6 +405,18 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
                        "{\"type\":\"error\",\"msg\":\"HomeKit is not running - nothing to reset\"}");
         }
 
+    } else if (strcmp(cmd, "wifiForget") == 0) {
+        // ── Erase stored WiFi credentials, reboot into the setup AP ──────
+        // Deliberately NOT gated by a typed confirm string. factoryReset is,
+        // because it is irreversible; this is recoverable in under a minute
+        // from the AP, so it sits with hkReset / forgetRemote / restart.
+        LOG_WARN("WiFi credential erase requested");
+        eventlog_append(EV_WIFI_CREDS_CHANGED, 1);   // code 1 = erased
+        sendWsText(httpd_req_to_sockfd(req), "{\"type\":\"wifiForgotten\"}");
+        vTaskDelay(pdMS_TO_TICKS(300));   // let the frame flush before we go
+        WifiManager::eraseCredentials();
+        esp_restart();
+
     } else if (strcmp(cmd, "forgetRemote") == 0) {
         LOG_WARN("ESP-NOW remote forget requested");
         sendWsText(httpd_req_to_sockfd(req), "{\"type\":\"info\",\"msg\":\"Forgetting remote...\"}");

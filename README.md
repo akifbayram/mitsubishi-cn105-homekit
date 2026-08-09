@@ -132,12 +132,13 @@ The device will connect automatically on boot. WiFi can still be changed later v
 
 ### 3. WiFi Recovery
 
-If the device loses WiFi, it spins up a fallback AP (**Serin-XXXX**) after 5 minutes while still trying to reconnect in the background. Three recovery options:
+If the device loses WiFi, it spins up a fallback AP (**Serin-XXXX**) after 5 minutes while still trying to reconnect in the background. Four recovery options:
 
 | Layer | Method | Details |
 |-------|--------|---------|
 | **Auto AP** | Automatic | Fallback AP activates after 5 min disconnect (2 min after a credential change). Disables automatically when WiFi reconnects. |
 | **Recovery page** | Web browser | Connect to the AP and navigate to `192.168.4.1` to enter new WiFi credentials. |
+| **Forget WiFi** | Web UI | **WiFi** card → **Advanced** → *Forget Wi-Fi…* erases stored credentials and restarts into setup mode. Available on every board. |
 | **Button reset** | Physical | 10-second long-press on the board button (e.g., GPIO9 on NanoC6) erases stored WiFi credentials. Only available on boards with a button. |
 
 ### 4. HomeKit Pairing

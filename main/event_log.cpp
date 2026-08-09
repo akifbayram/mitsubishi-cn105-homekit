@@ -116,11 +116,14 @@ int eventlog_json(char *out, size_t cap) {
                    (unsigned long)e->bootN, (unsigned long)e->uptimeS,
                    (unsigned long)e->epoch, eventlog_type_str(e->type),
                    (unsigned)e->code);
-        // BOOT/CRASH carry a reset reason: name it here so the browser never
-        // needs its own copy of the esp_reset_reason_t numbering.
+        // Events whose code byte carries a variant name it here, so the
+        // browser never needs its own copy of the esp_reset_reason_t
+        // numbering or of what a code byte means.
         if (e->type == EV_BOOT || e->type == EV_CRASH) {
             jsonAppend(out, cap, &n, ",\"r\":\"%s\"",
                        reset_reason_str((esp_reset_reason_t)e->code));
+        } else if (e->type == EV_WIFI_CREDS_CHANGED && e->code == 1) {
+            jsonAppend(out, cap, &n, ",\"r\":\"erased\"");
         }
         jsonAppend(out, cap, &n, "}");
     }

@@ -664,6 +664,13 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     <div id="wifiBanner" class="ble-banner muted" style="display:none;margin-top:12px;flex-direction:column;align-items:stretch;gap:10px;text-align:center">
       Testing new Wi-Fi credentials — the device switches over automatically if they work, and reverts to the current network if they don't. No reboot needed; if the address changes, reconnect at the new IP.
     </div>
+    <details class="advanced">
+      <summary>Advanced</summary>
+      <p class="setting-caption" style="margin:8px 0 10px">
+        Forgets the saved network and restarts into setup mode. HomeKit pairing, the paired Link, and every other setting are kept. You'll need to join the device's own hotspot to put it back on a network.
+      </p>
+      <button class="btn-danger" onclick="forgetWifi()">Forget Wi-Fi&hellip;</button>
+    </details>
     <span id="rssiVal" class="hidden"></span>
   </div>
 
@@ -1366,6 +1373,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
         else if(msg.type==='events') onEvents(msg);
         else if(msg.type==='bleScanResults') onBleScanResults(msg);
         else if(msg.type==='wifiSaved') onWifiSaved();
+        else if(msg.type==='wifiForgotten') onWifiForgotten();
         else if(msg.type==='error') alert(msg.msg);
       }catch(e){}
     };
@@ -1552,6 +1560,23 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     $('srcRows').innerHTML=rows;
   }
 
+  // ── Device→field application ───────────────────────────────────────────────
+  // onState() re-applies the whole device state at 1 Hz, so every editable
+  // field needs protecting from a mid-edit overwrite. :focus alone is NOT
+  // enough — blurring to tap Save hands the field back a full second before
+  // the click handler reads it, so the push in between restores the device's
+  // old value and the save writes that back. Dirty from the first keystroke
+  // until saved: the same contract settingsDirty gives the Settings card.
+  var fieldDirty={};
+  function markDirty(id){fieldDirty[id]=true}
+  function clearDirty(id){fieldDirty[id]=false}
+  function applyFromDevice(id,value){
+    var el=$(id);
+    if(!el||fieldDirty[id]||el.matches(':focus')) return;   // user owns it
+    var v=(value==null)?'':String(value);
+    if(el.value!==v) el.value=v;
+  }
+
   // ── State handler ──────────────────────────────────────────────────────────
   function onState(s){
     lastState=s;   // retained for diagnostics copy + event timestamps
@@ -1655,8 +1680,8 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       else{roomDot.className='status-dot idle';roomLbl.textContent=SRC_LABEL[0];roomLbl.style.color='var(--text3)'}
 
       // Timeout governs both remote feeds (BLE + Link) — rides the card, not
-      // the BLE chrome. Preserve user input while editing.
-      if(!$('bleTimeoutInput').matches(':focus')){$('bleTimeoutInput').value=s.bleTimeout||600}
+      // the BLE chrome.
+      applyFromDevice('bleTimeoutInput',s.bleTimeout||600);
 
       // BLE-specific chrome: enable toggle + MAC config (absent on BLE-off builds)
       var hasBle=s.bleEnabled!==undefined;
@@ -1666,7 +1691,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       $('bleEnableToggle').checked=bleOn;
       $('bleConfigSep').style.display=bleOn?'':'none';
       $('bleConfigDiv').style.display=bleOn?'':'none';
-      if(bleOn&&!$('bleMacInput').matches(':focus')){$('bleMacInput').value=s.bleAddr||''}
+      if(bleOn) applyFromDevice('bleMacInput',s.bleAddr||'');
       var typeLine=$('bleSensorTypeLine');
       if(bleOn&&s.bleSensorType){typeLine.textContent='Detected sensor: '+s.bleSensorType;typeLine.style.display=''}
       else{typeLine.style.display='none'}
@@ -1919,6 +1944,24 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     $('wifiBanner').style.display='block';
   }
 
+  // The device is about to vanish — the socket dies and never comes back, so
+  // this banner is the user's only handoff. Reuses #wifiBanner (mutually
+  // exclusive with the wifiSaved state) retinted to .warn.
+  function onWifiForgotten(){
+    var ap=(deviceInfo&&deviceInfo.hostname)||'';
+    var where=ap?('the Wi-Fi hotspot "'+ap+'"')
+                :'the device\'s "{{BRAND_AP_PREFIX}}-…" Wi-Fi hotspot';
+    var b=$('wifiBanner');
+    b.className='ble-banner warn';
+    b.style.display='block';
+    b.textContent='Restarting into setup mode. Join '+where+
+      ' (password {{BRAND_AP_PASSWORD}}), then open http://192.168.4.1 to pick a new network.';
+    $('cfgSSID').disabled=true;
+    $('cfgPass').disabled=true;
+    $('wifiSaveBtn').disabled=true;
+    $('wifiRefreshBtn').disabled=true;
+  }
+
   // ── WiFi Scanner ──────────────────────────────────────────────────────────
   var wifiScanning=false;
   function makeNetSignal(rssi){
@@ -2004,16 +2047,30 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     if(mac&&!/^([0-9A-F]{2}:){5}[0-9A-F]{2}$/.test(mac)){showBleToast('Invalid MAC — use AA:BB:CC:DD:EE:FF',true);return}
     var t=parseInt($('bleTimeoutInput').value,10);
     if(isNaN(t)||t<30||t>3600){showBleToast('Timeout must be 30–3600 seconds',true);return}
-    if(!send({cmd:'config',bleAddr:mac,bleTimeout:t})) showToast('Not connected — not saved',true);
+    if(!send({cmd:'config',bleAddr:mac,bleTimeout:t})){showToast('Not connected — not saved',true);return}
+    // Handed to the device — let its ack push drive these fields again.
+    clearDirty('bleMacInput');clearDirty('bleTimeoutInput');
   };
   // Normalize the sensor MAC as it's typed or pasted: hex only, uppercase,
-  // a colon after every pair (so pasting "aabbccddeeff" just works)
+  // a colon after every pair (so pasting "aabbccddeeff" just works). Rewriting
+  // .value drops the caret to the end, so it is re-derived from the hex-digit
+  // count before it — which survives the colons being re-grouped.
   $('bleMacInput').addEventListener('input',function(){
+    markDirty('bleMacInput');
+    var pre=this.value.slice(0,this.selectionStart).replace(/[^0-9a-fA-F]/g,'').length;
     var hex=this.value.replace(/[^0-9a-fA-F]/g,'').toUpperCase().slice(0,12);
     var parts=hex.match(/.{1,2}/g);
     var v=parts?parts.join(':'):'';
-    if(v!==this.value)this.value=v;
+    if(v!==this.value){
+      this.value=v;
+      // Offset just past the Nth hex digit: N digits + the (N-1)/2 colons
+      // before it. Clamping to the length also covers an over-long paste.
+      var pos=pre?pre+((pre-1)>>1):0;
+      if(pos>v.length)pos=v.length;
+      this.setSelectionRange(pos,pos);
+    }
   });
+  $('bleTimeoutInput').addEventListener('input',function(){markDirty('bleTimeoutInput')});
   window.toggleBleEnabled=function(){
     if(!send({cmd:'config',bleEnabled:$('bleEnableToggle').checked})){
       $('bleEnableToggle').checked=!$('bleEnableToggle').checked;
@@ -2112,6 +2169,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   function pickBleSensor(addr){
     bleScanPicked=true;
     $('bleMacInput').value=addr;
+    markDirty('bleMacInput');   // holds the pick if the save below can't go out
     $('bleScanResults').style.display='none';
     $('bleScanResults').textContent='';
     saveBleConfig();
@@ -2574,7 +2632,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       when=new Date((lastState.epoch-(lastState.uptime-e.u))*1000);
     var ts=when?when.toLocaleString():('boot #'+e.b+' +'+fmtUptime(e.u));
     var what=e.t;
-    if(e.r) what+=' ('+e.r+')';                       // BOOT/CRASH reset reason (named device-side)
+    if(e.r) what+=' ('+e.r+')';                       // code-byte variant, named device-side
     else if(e.t==='CN105_ERROR') what+=' ('+fmtErr(e.c)+')';
     return ts+'  '+what;
   }
@@ -2695,6 +2753,13 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   window.resetHomeKit=function(){
     if(confirm('This will remove all HomeKit pairings. You will need to re-pair in the Home app. Continue?')){
       send({cmd:'hkReset'});
+    }
+  };
+
+  window.forgetWifi=function(){
+    if(!ensureConnected()) return;
+    if(confirm('Forget the saved Wi-Fi network and restart into setup mode?\n\nHomeKit pairing and all other settings are kept.')){
+      send({cmd:'wifiForget'});
     }
   };
 

@@ -28,6 +28,7 @@ enum EventType : uint8_t {
     EV_RECOVERY_AP,         // WiFi recovery access point raised
     EV_HK_RESET,            // HomeKit pairings reset via web UI
     EV_WIFI_CREDS_CHANGED,  // WiFi credentials changed via web UI/AP portal
+                            // code 0 = new credentials applied, 1 = erased
 };
 
 // Load state from NVS and record the boot (plus EV_CRASH/EV_SAFE_MODE when
