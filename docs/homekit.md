@@ -42,7 +42,7 @@ Vane positions (including swing mode) are controlled exclusively through the [we
 
 ## Temperature
 
-The heat pump supports 16–31°C. The web UI offers a °C/°F display toggle, but the protocol always operates in Celsius. Half-degree precision is supported when the unit's enhanced temperature encoding is detected.
+Setpoints range from 16°C to 30.5°C. The upper bound is 30.5 rather than the protocol's 31 so that the °C and °F ladders stay symmetric — 31°C has no distinct °F step of its own. The web UI offers a °C/°F display toggle, but the protocol always operates in Celsius. Half-degree precision is supported when the unit's enhanced temperature encoding is detected.
 
 ### Known issue — °F values differ between Apple Home and the web UI
 
