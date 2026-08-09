@@ -30,6 +30,7 @@ struct EspnowDialDetail {
     char    model[24];
     char    fw[16];
     bool    syncing;       // dial's caps_seq != unit's
+    uint8_t certState;     // sl2_cert_state_t: 0 NONE/1 PRESENT/2 INVALID/3 OK
 };
 
 class EspnowLink {

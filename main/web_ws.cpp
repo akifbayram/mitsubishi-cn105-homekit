@@ -641,9 +641,12 @@ void WebUI::pushState() {
 
         EspnowDialDetail dd;
         if (espnowLink.getDialDetail(dd)) {
+            // remoteCertState: sl2_cert_state_t — 0 NONE (unprovisioned dial,
+            // the common home-built case) / 1 PRESENT / 2 INVALID / 3 OK.
             jsonAppend(buf, sizeof(buf), &n,
-                ",\"remoteLastSeen\":%ld,\"remoteSyncing\":%s",
-                (long)dd.lastSeenSec, dd.syncing ? "true" : "false");
+                ",\"remoteLastSeen\":%ld,\"remoteSyncing\":%s,\"remoteCertState\":%u",
+                (long)dd.lastSeenSec, dd.syncing ? "true" : "false",
+                (unsigned)dd.certState);
             if (dd.rssi != 0)
                 jsonAppend(buf, sizeof(buf), &n, ",\"remoteRssi\":%d", dd.rssi);
             if (dd.haveInfo && dd.model[0]) {

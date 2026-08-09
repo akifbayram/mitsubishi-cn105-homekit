@@ -98,6 +98,7 @@ struct LinkStatus {
     char    model[24] = {};
     char    fw[16] = {};
     bool    syncing = false;
+    uint8_t certState = 0;   /* sl2_cert_state_t */
 };
 static LinkStatus s_stat;
 
@@ -635,6 +636,7 @@ static void snapshot_status(void) {
         memcpy(s_stat.model, dv.model, sizeof s_stat.model);
         memcpy(s_stat.fw, dv.fw, sizeof s_stat.fw);
         s_stat.syncing = dv.have_info && (dv.caps_seq != sl2_link_caps_seq(&s_link));
+        s_stat.certState = dv.cert_state;
     } else {
         s_stat.lastSeenSec = -1;
         s_stat.rssi = 0;
@@ -642,6 +644,7 @@ static void snapshot_status(void) {
         s_stat.model[0] = 0;
         s_stat.fw[0] = 0;
         s_stat.syncing = false;
+        s_stat.certState = SL2_CERT_NONE;
     }
     const char *r = sl2_link_pair_result(&s_link);
     if (r != s_stat.result) {              /* interned — pointer compare works */
@@ -767,6 +770,7 @@ bool EspnowLink::getDialDetail(EspnowDialDetail &out) const {
     memcpy(out.model, s_stat.model, sizeof out.model);
     memcpy(out.fw, s_stat.fw, sizeof out.fw);
     out.syncing = s_stat.syncing;
+    out.certState = s_stat.certState;
     return true;
 }
 void EspnowLink::startPairing() { if (s_started) s_reqPairStart = true; }

@@ -210,6 +210,17 @@ input[type=range].slim::-moz-range-thumb{width:22px;height:22px;}
 .status-item{background:var(--surface2);border-radius:var(--radius-sm);padding:11px 13px;min-width:0;}
 .status-label{font-size:11px;color:var(--text2);display:block;}
 .status-item>span:not(.status-label),.status-item .item-val{font-size:14px;color:var(--text);font-weight:500;margin-top:3px;display:block;font-variant-numeric:tabular-nums;}
+/* Link card tiles. The wide sensor tile headlines its reading, and two tiles
+   put a non-text element (badge, check icon) where a plain value goes — these
+   selectors carry the same weight as the value rule above and are declared
+   after it, so they win without !important. */
+.status-item.sensor-tile{display:flex;align-items:center;justify-content:space-between;gap:12px;}
+.sensor-val{font-size:20px;color:var(--text);font-weight:500;margin-top:3px;display:block;
+  font-variant-numeric:tabular-nums;letter-spacing:-.3px;}
+.sensor-val .sub{font-size:14px;color:var(--text2);font-weight:500;letter-spacing:0;}
+.status-item>span.src-badge{font-size:10.5px;font-weight:600;color:#fff;margin-top:0;display:inline-flex;align-items:center;}
+.status-item>span.id-val{display:flex;align-items:center;gap:5px;}
+.status-item>span.id-val svg{width:12px;height:12px;flex:none;}
 
 /* ===== iOS switch (#bleEnableToggle) ===== */
 .ios-toggle{position:relative;display:inline-block;width:51px;height:31px;flex:none;}
@@ -774,13 +785,42 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   <!-- ===== DISPLAY LINK ===== -->
   <h2 class="group-label">Link<span class="section-summary"><span class="status-dot idle" id="remoteDot"></span><span class="summary-text" id="remoteSummary">—</span></span></h2>
   <div class="card" id="remoteCard">
-    <div style="display:flex;align-items:center;gap:12px">
-      <span class="icon-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="12" cy="12" r="8"/><path d="M12 8v4" stroke-linecap="round"/></svg></span>
-      <div class="stack-tight" style="flex:1;min-width:0">
-        <div class="t">Link</div>
-        <div class="b" id="remoteModelLine"><span id="remoteModel">—</span><span id="remoteFwWrap" style="display:none"> · fw <span id="remoteFw"></span></span></div>
-        <div class="b" id="remoteLiveLine" style="display:none"><span id="remoteLastSeen"></span><span id="remoteRssiWrap" style="display:none"> · <span id="remoteRssi"></span></span><span id="remoteSyncWrap" style="display:none"> · syncing…</span></div>
-        <div class="b"><span id="remoteStatus">—</span><span id="remoteMacWrap" style="display:none"> · <span id="remoteMac" class="mono">—</span></span></div>
+    <!-- The one instance of the Link-went-quiet caution: it lives with the
+         device that stopped reporting, so the Room Sensor card no longer
+         repeats the same sentence. -->
+    <div id="linkBanner" class="ble-banner caution" style="display:none;margin-bottom:14px"></div>
+    <div class="row-head">
+      <div class="row-head-left">
+        <span class="icon-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="12" cy="12" r="8"/><path d="M12 8v4" stroke-linecap="round"/></svg></span>
+        <div class="stack-tight" style="min-width:0">
+          <div class="t" id="remoteTitle">Link</div>
+          <div class="b" id="remoteSub">Not Paired</div>
+        </div>
+      </div>
+      <span class="row-head-meta" id="remoteMeta"></span>
+    </div>
+    <!-- Telemetry, bonded only: what the unit already knows about the dial. -->
+    <div id="remoteDetail" style="display:none">
+      <div class="status-item sensor-tile" id="linkSensorTile">
+        <div style="min-width:0">
+          <span class="status-label">Onboard Sensor</span>
+          <span class="sensor-val" id="linkSensorVal">—</span>
+        </div>
+        <span class="src-badge" id="linkSensorBadge" style="display:none"></span>
+      </div>
+      <div class="status-grid cols3" id="remoteGrid" style="margin-top:8px">
+        <div class="status-item">
+          <span class="status-label">Signal</span>
+          <span id="remoteRssi">—</span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">Firmware</span>
+          <span id="remoteFw">—</span>
+        </div>
+        <div class="status-item" id="remoteIdTile" style="display:none">
+          <span class="status-label">Identity</span>
+          <span class="id-val" id="remoteIdVal">—</span>
+        </div>
       </div>
     </div>
     <div class="btn-row" id="remotePairRow" style="margin-top:14px">
@@ -1769,11 +1809,8 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
         // back to its internal sensor (not inferred client-side)
         banner.textContent='No update from the remote sensor for '+staleSec+'s'+(s.bleReverted?' — reverted to internal sensor':'');
         banner.style.display='flex'}
-      else if(s.roomSource===2&&s.linkStale){
-        var linkSec=Math.floor((s.linkStaleMs||0)/1000);
-        banner.className='ble-banner warn';
-        banner.textContent='No update from Serin Link for '+linkSec+'s — using internal sensor';
-        banner.style.display='flex'}
+      // A stale Serin Link is called out on the Link card itself (#linkBanner),
+      // not here — the same sentence on two cards reads as two problems.
       else if(bleOn&&s.bleBattLow){banner.className='ble-banner warn';banner.textContent='Sensor battery low ('+s.bleBattery+'%)';banner.style.display='flex'}
       else{banner.style.display='none'}
 
@@ -1903,40 +1940,79 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
 
     // ── ESP-NOW remote (Dial) status ──────────────────────────────────────
     if(s.remoteBonded!=null){
-      var rs=$('remoteStatus'),rDot=$('remoteDot'),rSum=$('remoteSummary');
-      if(s.remoteBonded===false){rs.textContent='Not Paired';rDot.className='status-dot idle';rSum.textContent='Not Paired';rSum.style.color='var(--text3)';}
-      else if(s.remoteLive){rs.textContent='Paired';rDot.className='status-dot active';rSum.textContent='Paired';rSum.style.color='var(--green)';}
-      else{rs.textContent='Idle';rDot.className='status-dot idle';rSum.textContent='Idle';rSum.style.color='var(--text2)';}
-      $('remoteMac').textContent=s.remoteMac||'—';
-      $('remoteMacWrap').style.display=(s.remoteBonded&&s.remoteMac)?'':'none';
-      // model / fw
-      var model=$('remoteModel');
-      // Only show the model line when bonded — when not paired the status
-      // line already says "Not Paired", so a second "Not paired" is redundant.
-      if(s.remoteBonded){
-        model.textContent = s.remoteModel || 'Model unknown — update the Link';
-        $('remoteModelLine').style.display='';
-      } else { $('remoteModelLine').style.display='none'; }
-      var fwWrap=$('remoteFwWrap');
-      if(s.remoteBonded && s.remoteFw){ $('remoteFw').textContent=s.remoteFw; fwWrap.style.display=''; }
-      else { fwWrap.style.display='none'; }
-      // liveness line (last seen · rssi · syncing)
-      var liveLine=$('remoteLiveLine');
-      if(s.remoteBonded && s.remoteLastSeen!=null){
-        var ls=s.remoteLastSeen;
-        $('remoteLastSeen').textContent = ls<0 ? 'Not seen yet'
-          : ls<2 ? 'Last seen just now' : 'Last seen '+fmtAgo(ls);
-        var rw=$('remoteRssiWrap');
-        if(s.remoteRssi!=null){ $('remoteRssi').textContent=s.remoteRssi+' dBm'; rw.style.display=''; }
-        else { rw.style.display='none'; }
-        $('remoteSyncWrap').style.display = s.remoteSyncing ? '' : 'none';
-        liveLine.style.display='';
-      } else { liveLine.style.display='none'; }
+      var bonded=s.remoteBonded===true;
+      var rDot=$('remoteDot'),rSum=$('remoteSummary');
+      // Bonded-but-quiet is warning-orange, not the neutral grey of never-paired:
+      // a dial that has gone silent is worth noticing, an absent one isn't.
+      if(!bonded){rDot.className='status-dot idle';rSum.textContent='Not Paired';rSum.style.color='var(--text3)';}
+      else if(s.remoteLive){rDot.className='status-dot active';rSum.textContent='Paired';rSum.style.color='var(--green)';}
+      else{rDot.className='status-dot warning';rSum.textContent='Idle';rSum.style.color='var(--orange)';}
+
+      // Header: model over MAC once bonded; the card's own name before that,
+      // where the summary chip already says "Not Paired".
+      $('remoteTitle').textContent = bonded ? (s.remoteModel||'Model unknown — update the Link') : 'Link';
+      var sub=$('remoteSub');
+      sub.textContent = bonded ? (s.remoteMac||'—') : 'Not Paired';
+      sub.className   = bonded ? 'b mono' : 'b';
+      var meta='';
+      if(bonded && s.remoteLastSeen!=null)
+        meta = s.remoteLastSeen<0 ? 'not seen yet' : 'seen '+fmtAgo(s.remoteLastSeen);
+      if(bonded && s.remoteSyncing) meta += (meta?' · ':'')+'syncing…';
+      $('remoteMeta').textContent=meta;
+
+      // Link went quiet while it was the applied room source: the pump is back
+      // on its own thermistor, which is the part worth saying out loud.
+      var lBnr=$('linkBanner');
+      if(bonded && s.roomSource===2 && s.linkStale){
+        lBnr.textContent="No update from the Link for "+fmtSpan(Math.floor((s.linkStaleMs||0)/1000))+
+                         " — using the heat pump's internal sensor.";
+        lBnr.style.display='flex';
+      } else { lBnr.style.display='none'; }
+
+      $('remoteDetail').style.display=bonded?'':'none';
+      if(bonded){
+        // Onboard sensor — only dials that carry sensing hardware get the tile.
+        var sensor=!!s.hasLinkSensor;
+        $('linkSensorTile').style.display=sensor?'':'none';
+        $('remoteGrid').style.marginTop=sensor?'8px':'0';
+        if(sensor){
+          var val=$('linkSensorVal'),badge=$('linkSensorBadge');
+          // Stale trades the humidity for the age — how old the number is
+          // matters more than a second reading nobody should trust.
+          var sfx = s.linkStale ? fmtAgo(Math.floor((s.linkStaleMs||0)/1000))
+                  : (s.linkHumidity!=null ? s.linkHumidity+'% humidity' : '');
+          val.innerHTML = (s.linkTemp!=null?fmtReadingTemp(s.linkTemp)+'°':'—')+
+                          (sfx?' <span class="sub">· '+sfx+'</span>':'');
+          val.style.color = s.linkStale ? 'var(--text2)' : 'var(--text)';
+          if(s.linkStale){ badge.className='src-badge stale'; badge.textContent='STALE'; badge.style.display=''; }
+          else if(s.roomSource===2){ badge.className='src-badge'; badge.textContent='ROOM SOURCE'; badge.style.display=''; }
+          else badge.style.display='none';
+        }
+        $('remoteRssi').textContent = s.remoteRssi!=null ? s.remoteRssi+' dBm' : '—';
+        $('remoteFw').textContent   = s.remoteFw || '—';
+        // Identity (sl2_cert_state_t). NONE — no cert TLV at all — hides the
+        // tile: most home-built dials are unprovisioned and that is not a
+        // fault to display. Firmware without the key reads the same way.
+        var cert=s.remoteCertState||0,idVal=$('remoteIdVal');
+        $('remoteIdTile').style.display = cert?'':'none';
+        $('remoteGrid').className = 'status-grid'+(cert?' cols3':'');
+        if(cert===3){
+          idVal.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><use href="#icCheck"/></svg>Verified';
+          idVal.style.color='var(--green)';
+        }else if(cert===2){
+          idVal.textContent='Invalid'; idVal.style.color='var(--red)';
+        }else if(cert===1){
+          idVal.textContent='Unverified'; idVal.style.color='var(--text2)';
+        }
+      }
 
       var pairing=s.remotePairing===true;
-      $('pairRemoteBtn').style.display=(pairing||s.remoteBonded)?'none':'';
+      $('pairRemoteBtn').style.display=(pairing||bonded)?'none':'';
       $('cancelPairBtn').style.display=pairing?'':'none';
-      $('forgetRemoteBtn').style.display=s.remoteBonded?'':'none';
+      $('forgetRemoteBtn').style.display=bonded?'':'none';
+      // Unpaired the header's own 14px bottom margin is the only gap needed;
+      // paired, the button sits 14px under the tile grid.
+      $('remotePairRow').style.marginTop=bonded?'14px':'0';
       var ps=$('pairStatus');
       if(pairing){
         ps.textContent='Listening… '+(s.remotePairSecs||0)+'s — hold the button on the Link';
@@ -1970,11 +2046,14 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     c.className='container'+(mode?' mode-'+mode:'');
   }
 
-  function fmtAgo(sec){
-    if(sec<60) return sec+'s ago';
-    if(sec<3600) return Math.floor(sec/60)+'m ago';
-    return Math.floor(sec/3600)+'h ago';
+  // Coarse duration ("45s" / "6m" / "2h"). fmtSpan is the bare span, for copy
+  // that reads as a length of time; fmtAgo is the same value as a timestamp.
+  function fmtSpan(sec){
+    if(sec<60) return sec+'s';
+    if(sec<3600) return Math.floor(sec/60)+'m';
+    return Math.floor(sec/3600)+'h';
   }
+  function fmtAgo(sec){ return fmtSpan(sec)+' ago'; }
   function fmtUptime(sec){
     var h=Math.floor(sec/3600);
     var m=Math.floor((sec%3600)/60);
