@@ -8,6 +8,7 @@
 #include "logging.h"
 #include "esp_utils.h"
 #include "link_sensor.h"
+#include "room_avg.h"
 
 #include "ble_decoders.h"
 
@@ -32,18 +33,27 @@ static const char *TAG = "ble";
 // main-task-only and marked as such.
 // ══════════════════════════════════════════════════════════════════════════════
 
-// ── Latest reading (guarded by s_mux) ───────────────────────────────────────
+// ── Per-slot state: scan target + latest reading (guarded by s_mux — the
+//    setters rewrite targets from the httpd task while the scan callback
+//    compares against them) ────────────────────────────────────────────────
+struct SlotState {
+    char        mac[18];      // "AA:BB:CC:DD:EE:FF"; compared case-insensitively
+    bool        valid;        // mac holds a parseable target
+    float       temp;
+    float       hum;
+    int8_t      batt;
+    int         rssi;
+    uint32_t    lastUpdate;
+    const char* type;         // detected decoder type (string literal, nullptr = unknown)
+};
 static portMUX_TYPE s_mux = portMUX_INITIALIZER_UNLOCKED;
-static float    s_temperature = NAN;
-static float    s_humidity    = NAN;
-static int8_t   s_battery     = -1;
-static int      s_rssi        = 0;
-static uint32_t s_lastUpdate  = 0;
+static SlotState s_slots[ROOM_MAX_BLE_SENSORS];   // readings reset in begin()/setSensor()
 
-// ── Scan target (guarded by s_mux — setAddr rewrites it from the httpd task
-//    while the scan callback compares against it) ────────────────────────────
-static char     s_targetMac[18] = {0};   // "AA:BB:CC:DD:EE:FF"; compared case-insensitively
-static bool     s_addrValid     = false;
+// Reset a slot's readings/identity, keeping its target. Call under s_mux.
+static void resetSlotReadings(SlotState &sl) {
+    sl.temp = NAN; sl.hum = NAN; sl.batt = -1; sl.rssi = 0;
+    sl.lastUpdate = 0; sl.type = nullptr;
+}
 
 // ── Scan duty profiles ──────────────────────────────────────────────────────
 // SEARCH runs a 90 % window to find the sensor fast; TRACK drops to 30 % once
@@ -73,10 +83,7 @@ static std::atomic<bool> s_bleEnabled{false};      // Mirror of settings.bleEnab
 // ── Keepalive state (main task only) ────────────────────────────────────────
 static uint32_t s_lastKeepalive = 0;
 static float    s_lastSentTemp  = NAN;   // last value sent to the HP
-static bool     s_prevFeed      = false; // feed-toggle edge detection
-
-// ── Detected type (logged once per configured sensor, on nullptr → value) ───
-static std::atomic<const char*> s_sensorType{nullptr};
+static int      s_prevFeedSlot  = -1;    // feed edge detection (-1 = not feeding)
 
 // ── Discovery state ─────────────────────────────────────────────────────────
 // Results are written from the NimBLE host task and read from the main task —
@@ -98,7 +105,26 @@ static T readLocked(const T& var) {
 }
 
 static bool targetConfigured() {
-    return readLocked(s_addrValid);
+    taskENTER_CRITICAL(&s_mux);
+    bool any = false;
+    for (const SlotState &sl : s_slots) any = any || sl.valid;
+    taskEXIT_CRITICAL(&s_mux);
+    return any;
+}
+
+// Which slot the legacy single-source feed reads from: single mode with a BLE
+// member picked. -1 when averaging or a non-BLE source is selected. Public —
+// link_sensor/espnow_link/room_avg use it for their arbitration checks.
+int BleSensor::feedSlot() {
+    const DeviceSettings &st = settings.get();
+    if (st.roomMode != 0 || st.roomSingle < ROOM_MEMBER_BLE0) return -1;
+    int idx = st.roomSingle - ROOM_MEMBER_BLE0;
+    return idx < ROOM_MAX_BLE_SENSORS ? idx : -1;
+}
+
+// One home for the freshness rule shared by loop()/isActive()/isStale().
+static bool freshAt(uint32_t lastUpdate, uint32_t now, uint32_t staleMs) {
+    return lastUpdate > 0 && (now - lastUpdate) < staleMs;
 }
 
 // A scan should be running whenever there's a target to track or a discovery
@@ -198,15 +224,15 @@ static int gap_event_cb(struct ble_gap_event *event, void *arg) {
             }
         }
 
-        // MAC filter: only process the configured target sensor. Snapshot the
-        // target under the lock — setAddr rewrites it from the httpd task.
-        bool addrValid;
-        char target[18];
+        // MAC filter: only process configured target sensors. Match under the
+        // lock — setSensor rewrites targets from the httpd task.
         taskENTER_CRITICAL(&s_mux);
-        addrValid = s_addrValid;
-        memcpy(target, s_targetMac, sizeof(target));
+        int slot = -1;
+        for (int i = 0; i < ROOM_MAX_BLE_SENSORS; i++) {
+            if (s_slots[i].valid && strcasecmp(addrStr, s_slots[i].mac) == 0) { slot = i; break; }
+        }
         taskEXIT_CRITICAL(&s_mux);
-        if (!addrValid || strcasecmp(addrStr, target) != 0) return 0;
+        if (slot < 0) return 0;
 
         // Decode the live advertisement and publish the freshest reading
         SensorReading reading;
@@ -214,21 +240,26 @@ static int gap_event_cb(struct ble_gap_event *event, void *arg) {
         if (liveType) {
             bool gotTemp = !std::isnan(reading.temp);
             taskENTER_CRITICAL(&s_mux);
+            SlotState &sl = s_slots[slot];
             if (gotTemp) {
-                s_temperature = reading.temp;
+                sl.temp = reading.temp;
                 // Freshness follows the temperature: battery-only frames from
                 // split-field sensors (SwitchBot Pro family) must not keep the
                 // stale-revert watchdog from firing
-                s_lastUpdate  = uptime_ms();
+                sl.lastUpdate = uptime_ms();
             }
-            if (!std::isnan(reading.hum))  s_humidity = reading.hum;
-            if (reading.batt >= 0)         s_battery  = reading.batt;
-            s_rssi = disc->rssi;
+            if (!std::isnan(reading.hum))  sl.hum  = reading.hum;
+            if (reading.batt >= 0)         sl.batt = reading.batt;
+            sl.rssi = disc->rssi;
+            bool firstType = (sl.type == nullptr);
+            sl.type = liveType;
             taskEXIT_CRITICAL(&s_mux);
 
-            if (gotTemp) s_staleReverted.store(false);
-            if (s_sensorType.exchange(liveType) == nullptr) {
-                LOG_INFO("Detected sensor type: %s", liveType);
+            // Only a reading from the slot that actually feeds the pump may
+            // rearm the stale watchdog — another sensor's chatter must not.
+            if (gotTemp && slot == BleSensor::feedSlot()) s_staleReverted.store(false);
+            if (firstType) {
+                LOG_INFO("Detected sensor type: %s (slot %d)", liveType, slot);
             }
         }
 
@@ -332,19 +363,24 @@ static void deinitNimble() {
 // ══════════════════════════════════════════════════════════════════════════════
 
 void BleSensor::begin() {
-    const char* addr = settings.get().bleSensorAddr;
-    if (validMac(addr)) {
-        taskENTER_CRITICAL(&s_mux);
-        memcpy(s_targetMac, addr, 17);   // validMac guarantees exactly 17 chars
-        s_targetMac[17] = '\0';
-        s_addrValid = true;
-        taskEXIT_CRITICAL(&s_mux);
-        LOG_INFO("Target sensor: %s", addr);
+    int nTargets = 0;
+    taskENTER_CRITICAL(&s_mux);
+    for (int i = 0; i < ROOM_MAX_BLE_SENSORS; i++) {
+        SlotState &sl = s_slots[i];
+        resetSlotReadings(sl);
+        const char* addr = settings.get().bleSensors[i].addr;
+        sl.valid = validMac(addr);
+        memset(sl.mac, 0, sizeof(sl.mac));
+        if (sl.valid) { memcpy(sl.mac, addr, 17); nTargets++; }  // validMac guarantees exactly 17 chars
+    }
+    taskEXIT_CRITICAL(&s_mux);
+    if (nTargets) {
+        LOG_INFO("%d target sensor(s) configured", nTargets);
     } else {
         LOG_INFO("No sensor MAC configured — scanning deferred");
     }
 
-    s_prevFeed = (settings.get().roomSource == SL2_ROOMSRC_BLE);
+    s_prevFeedSlot = feedSlot();
     s_bleEnabled.store(settings.get().bleEnabled);
 
     if (!s_bleEnabled.load()) {
@@ -400,9 +436,13 @@ void BleSensor::loop(CN105Controller &cn105) {
     // that send and stomp it, leaving the pump on internal for up to
     // LinkSensor's 20s keepalive before its next resend notices and corrects.
     if (s_pendingClear.load() && cn105.isConnected()) {
-        bool handedToLink = (settings.get().roomSource == SL2_ROOMSRC_LINK) &&
+        bool handedToLink = (settings.get().roomMode == 0) &&
+                            (settings.get().roomSingle == ROOM_MEMBER_LINK) &&
                              LinkSensor::isActive();
-        if (!handedToLink) {
+        // Same reasoning for a switch into Average mode: the blend owns the
+        // register now, and this stale clear would stomp its value.
+        bool handedToAvg = RoomAvg::isFeeding();
+        if (!handedToLink && !handedToAvg) {
             cn105.clearRemoteTemperature();
             s_lastSentTemp = NAN;
         }
@@ -412,21 +452,31 @@ void BleSensor::loop(CN105Controller &cn105) {
     if (!s_bleEnabled.load()) return;
 
     uint32_t now = uptime_ms();
-    float temp;
-    uint32_t lastUpd;
+    int  slot = feedSlot();
+    uint32_t staleMs = (uint32_t)settings.get().roomStaleTimeoutS * 1000;
+
+    float temp = NAN;
+    uint32_t lastUpd = 0;
+    bool allConfiguredActive = true;
     taskENTER_CRITICAL(&s_mux);
-    temp    = s_temperature;
-    lastUpd = s_lastUpdate;
+    if (slot >= 0) {
+        temp    = s_slots[slot].temp;
+        lastUpd = s_slots[slot].lastUpdate;
+    }
+    for (const SlotState &sl : s_slots) {
+        if (sl.valid && !freshAt(sl.lastUpdate, now, staleMs))
+            allConfiguredActive = false;
+    }
     taskEXIT_CRITICAL(&s_mux);
 
-    uint32_t staleMs = (uint32_t)settings.get().roomStaleTimeoutS * 1000;
     bool active = lastUpd > 0 && (now - lastUpd) < staleMs;
     bool stale  = lastUpd > 0 && !active;
-    bool feed   = (settings.get().roomSource == SL2_ROOMSRC_BLE);
+    bool feed   = (slot >= 0);
 
-    // Radio duty: hunt hard until readings flow, then back off (see ScanProfile)
-    ScanProfile want = (active && !s_discoveryMode.load()) ? ScanProfile::TRACK
-                                                           : ScanProfile::SEARCH;
+    // Radio duty: hunt hard until every configured sensor's readings flow,
+    // then back off (see ScanProfile)
+    ScanProfile want = (allConfiguredActive && !s_discoveryMode.load()) ? ScanProfile::TRACK
+                                                                        : ScanProfile::SEARCH;
     if (s_scanProfile.exchange(want) != want) s_pendingRestart.store(true);
 
     // Deferred scan stop+restart (enable, address change, profile switch, discovery)
@@ -435,10 +485,11 @@ void BleSensor::loop(CN105Controller &cn105) {
         if (wantScan()) startScan();
     }
 
-    // Feed toggled from the web UI (httpd task): a falling edge hands the HP
-    // back to its internal sensor, a rising edge forces a prompt send below
-    if (feed != s_prevFeed) {
-        s_prevFeed      = feed;
+    // Feed toggled from the web UI (httpd task), or moved to a different
+    // sensor slot: a falling edge hands the HP back to its internal sensor, a
+    // rising edge (or slot move) forces a prompt send below
+    if (slot != s_prevFeedSlot) {
+        s_prevFeedSlot  = slot;
         s_lastKeepalive = 0;
         s_lastSentTemp  = NAN;
         if (!feed) s_pendingClear.store(true);
@@ -470,58 +521,59 @@ void BleSensor::loop(CN105Controller &cn105) {
     }
 }
 
-float    BleSensor::temperature()  { return readLocked(s_temperature); }
-float    BleSensor::humidity()     { return readLocked(s_humidity); }
-int8_t   BleSensor::battery()      { return readLocked(s_battery); }
-int      BleSensor::rssi()         { return readLocked(s_rssi); }
+static bool slotIdxOk(int idx) { return idx >= 0 && idx < ROOM_MAX_BLE_SENSORS; }
 
-// Master toggle off reports neither active nor stale: the last reading survives
-// in s_temperature/s_lastUpdate for a quick re-enable, but consumers (web badge,
-// Dial state, HomeKit) must see the sensor as absent — not as feeding for the
+float    BleSensor::temperature(int idx) { return slotIdxOk(idx) ? readLocked(s_slots[idx].temp) : NAN; }
+float    BleSensor::humidity(int idx)    { return slotIdxOk(idx) ? readLocked(s_slots[idx].hum)  : NAN; }
+int8_t   BleSensor::battery(int idx)     { return slotIdxOk(idx) ? readLocked(s_slots[idx].batt) : -1; }
+int      BleSensor::rssi(int idx)        { return slotIdxOk(idx) ? readLocked(s_slots[idx].rssi) : 0; }
+const char* BleSensor::sensorType(int idx) { return slotIdxOk(idx) ? readLocked(s_slots[idx].type) : nullptr; }
+bool     BleSensor::isConfigured(int idx) { return slotIdxOk(idx) && readLocked(s_slots[idx].valid); }
+
+// Master toggle off reports neither active nor stale: the last readings
+// survive in the slots for a quick re-enable, but consumers (web badge, Dial
+// state, HomeKit) must see the sensors as absent — not as feeding for the
 // rest of the stale window, then "stale" forever.
-bool BleSensor::isActive() {
-    if (!s_bleEnabled.load()) return false;
-    uint32_t lu = readLocked(s_lastUpdate);
+bool BleSensor::isActive(int idx) {
+    if (!s_bleEnabled.load() || !slotIdxOk(idx)) return false;
     uint32_t staleMs = (uint32_t)settings.get().roomStaleTimeoutS * 1000;
-    return lu > 0 && (uptime_ms() - lu) < staleMs;
+    return freshAt(readLocked(s_slots[idx].lastUpdate), uptime_ms(), staleMs);
 }
 
-bool BleSensor::isStale() {
-    if (!s_bleEnabled.load()) return false;
-    uint32_t lu = readLocked(s_lastUpdate);
+bool BleSensor::isStale(int idx) {
+    if (!s_bleEnabled.load() || !slotIdxOk(idx)) return false;
+    uint32_t lu = readLocked(s_slots[idx].lastUpdate);
     uint32_t staleMs = (uint32_t)settings.get().roomStaleTimeoutS * 1000;
-    return lu > 0 && (uptime_ms() - lu) >= staleMs;
+    return lu > 0 && !freshAt(lu, uptime_ms(), staleMs);
 }
 
 bool BleSensor::isReverted() {
     return s_staleReverted.load();
 }
 
-uint32_t BleSensor::lastUpdateAge() {
-    uint32_t lu = readLocked(s_lastUpdate);
+uint32_t BleSensor::lastUpdateAge(int idx) {
+    if (!slotIdxOk(idx)) return UINT32_MAX;
+    uint32_t lu = readLocked(s_slots[idx].lastUpdate);
     if (lu == 0) return UINT32_MAX;
     return uptime_ms() - lu;
 }
 
 bool BleSensor::isEnabled() {
-    return (settings.get().roomSource == SL2_ROOMSRC_BLE);
+    return feedSlot() >= 0;
 }
 
 void BleSensor::setEnabled(bool enabled) {
-    settings.get().roomSource = enabled ? SL2_ROOMSRC_BLE : SL2_ROOMSRC_INTERNAL;
+    settings.get().roomMode   = 0;
+    settings.get().roomSingle = enabled ? ROOM_MEMBER_BLE0 : ROOM_MEMBER_INTERNAL;
     settings.save();
     LOG_INFO("Feed %s", enabled ? "enabled" : "disabled");
     // loop() reacts to the change: a falling edge clears the remote temp on the
     // heat pump, a rising edge sends the current reading promptly
 }
 
-void BleSensor::setAddr(const char* mac) {
-    if (!mac) return;
-    char* stored = settings.get().bleSensorAddr;
-    constexpr size_t storedSize = sizeof(settings.get().bleSensorAddr);
-
-    // Unchanged (also "" == "") — keep detection state, no NVS wear, no restart
-    if (strcasecmp(mac, stored) == 0) return;
+void BleSensor::setSensor(int idx, const char* mac, const char* name) {
+    if (!mac || !slotIdxOk(idx)) return;
+    BleSensorCfg &cfg = settings.get().bleSensors[idx];
 
     bool valid = strlen(mac) > 0;
     if (valid && !validMac(mac)) {
@@ -529,44 +581,62 @@ void BleSensor::setAddr(const char* mac) {
         return;
     }
 
-    // Different sensor: forget the old one's identity and readings in the same
-    // critical section as the target swap, so neither the feed nor the UI can
-    // keep presenting the old sensor's values as current
-    s_sensorType.store(nullptr);
-    taskENTER_CRITICAL(&s_mux);
-    memset(s_targetMac, 0, sizeof(s_targetMac));
-    if (valid) memcpy(s_targetMac, mac, 17);   // validMac guarantees exactly 17 chars
-    s_addrValid     = valid;
-    bool hadReading = s_lastUpdate != 0;
-    s_temperature   = NAN;
-    s_humidity      = NAN;
-    s_battery       = -1;
-    s_rssi          = 0;
-    s_lastUpdate    = 0;
-    taskEXIT_CRITICAL(&s_mux);
-    s_staleReverted.store(false);
+    bool macChanged = strcasecmp(mac, cfg.addr) != 0;
+    bool nameChanged = name && strncmp(name, cfg.name, sizeof(cfg.name) - 1) != 0;
+    if (!macChanged && !nameChanged) return;  // no NVS wear, no restart
 
-    // If the old reading may be live in the HP, hand it back to its internal
-    // thermistor now rather than after the stale timeout
-    if (hadReading && (settings.get().roomSource == SL2_ROOMSRC_BLE)) s_pendingClear.store(true);
+    if (macChanged) {
+        // Different sensor: forget the old one's identity and readings in the
+        // same critical section as the target swap, so neither the feed nor
+        // the UI can keep presenting the old sensor's values as current
+        taskENTER_CRITICAL(&s_mux);
+        SlotState &sl = s_slots[idx];
+        memset(sl.mac, 0, sizeof(sl.mac));
+        if (valid) memcpy(sl.mac, mac, 17);   // validMac guarantees exactly 17 chars
+        sl.valid = valid;
+        bool hadReading = sl.lastUpdate != 0;
+        resetSlotReadings(sl);
+        taskEXIT_CRITICAL(&s_mux);
+        if (idx == feedSlot()) s_staleReverted.store(false);
 
-    strncpy(stored, mac, storedSize - 1);
-    stored[storedSize - 1] = '\0';
-    settings.save();
-    s_pendingRestart.store(true);
-    if (valid) {
-        LOG_INFO("Sensor address set: %s", mac);
-    } else {
-        LOG_INFO("Sensor address cleared");
+        // If the old reading may be live in the HP, hand it back to its
+        // internal thermistor now rather than after the stale timeout
+        if (hadReading && idx == feedSlot()) s_pendingClear.store(true);
+
+        strncpy(cfg.addr, mac, sizeof(cfg.addr) - 1);
+        cfg.addr[sizeof(cfg.addr) - 1] = '\0';
+        // A cleared slot leaves the average and drops its calibration; a
+        // replaced sensor must not inherit the old one's offset either.
+        settings.get().roomMembers &= (uint8_t)~(1u << (ROOM_MEMBER_BLE0 + idx));
+        settings.get().roomOffsets[ROOM_MEMBER_BLE0 + idx] = 0;
+        if (!valid) {
+            cfg.name[0] = '\0';
+            // A cleared slot can't stay the single-mode pick: without this,
+            // roomSingle points at an empty slot and the pump quietly runs on
+            // internal while the UI shows a source that no longer exists. A
+            // REPLACED sensor keeps the selection on purpose (sensor swap).
+            if (settings.get().roomSingle == ROOM_MEMBER_BLE0 + idx)
+                settings.get().roomSingle = ROOM_MEMBER_INTERNAL;
+        }
     }
+    if (name) {
+        strncpy(cfg.name, name, sizeof(cfg.name) - 1);
+        cfg.name[sizeof(cfg.name) - 1] = '\0';
+    }
+    settings.save();
+    if (macChanged) s_pendingRestart.store(true);
+    LOG_INFO("Sensor slot %d %s: %s", idx, valid ? "set" : "cleared", valid ? mac : "");
+}
+
+void BleSensor::renameSensor(int idx, const char* name) {
+    if (!name || !slotIdxOk(idx)) return;
+    const BleSensorCfg &cfg = settings.get().bleSensors[idx];
+    if (!cfg.addr[0]) return;                 // empty slot has nothing to name
+    setSensor(idx, cfg.addr, name);           // same MAC -> only the name path runs
 }
 
 const char* BleSensor::getAddr() {
-    return settings.get().bleSensorAddr;
-}
-
-const char* BleSensor::sensorType() {
-    return s_sensorType.load();
+    return settings.get().bleSensors[0].addr;
 }
 
 void BleSensor::startDiscovery() {

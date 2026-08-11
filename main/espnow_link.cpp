@@ -34,6 +34,7 @@
 #include "logging.h"
 #include "cn105_protocol.h"
 #include "cn105_strings.h"
+#include "room_avg.h"
 #include "wifi_manager.h"
 #include "wifi_recovery.h"
 #include "homekit_setup.h"
@@ -414,8 +415,12 @@ static void h_room_sensor(void *, const uint8_t src_mac[6],
     if (is_edit && p->want_src <= SL2_ROOMSRC_LINK &&
         (p->want_src != SL2_ROOMSRC_LINK || LinkSensor::hasSensor())) {
         auto &st = settings.get();
-        if (st.roomSource != p->want_src) {
-            st.roomSource = p->want_src;
+        // The dial speaks the legacy enum: an explicit pick is a single-mode
+        // selection, so an edit also drops out of averaging.
+        uint8_t single = room_single_from_legacy(p->want_src);
+        if (st.roomMode != 0 || st.roomSingle != single) {
+            st.roomMode   = 0;
+            st.roomSingle = single;
             settings.save();
             LOG_INFO("room source -> %u (set from dial)", (unsigned)p->want_src);
         }
@@ -474,13 +479,23 @@ static uint8_t room_src_status(void) {
             return LinkSensor::status();
         case SL2_ROOMSRC_BLE:
 #ifdef BLE_ENABLE
-            if (BleSensor::isActive()) return SL2_ROOMST_OK;
-            if (BleSensor::isStale())  return SL2_ROOMST_STALE;
+        {
+            /* roomSource only derives to BLE in single mode, so feedSlot()
+             * names the selected slot. */
+            int idx = BleSensor::feedSlot();
+            if (BleSensor::isActive(idx)) return SL2_ROOMST_OK;
+            if (BleSensor::isStale(idx))  return SL2_ROOMST_STALE;
             return SL2_ROOMST_UNAVAILABLE;
+        }
 #else
             return SL2_ROOMST_UNAVAILABLE;   /* selected but this build has no BLE */
 #endif
         default:
+            /* Internal — also what averaging derives to (the dial has no
+             * "average" concept). Surface a dead average as STALE so the dial
+             * shows the same warning the web UI does. */
+            if (settings.get().roomMode == 1 && RoomAvg::status().fallback)
+                return SL2_ROOMST_STALE;
             return SL2_ROOMST_OK;            /* Internal */
     }
 }

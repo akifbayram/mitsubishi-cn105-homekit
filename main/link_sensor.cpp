@@ -4,6 +4,7 @@
 #include "logging.h"
 #include "esp_utils.h"
 #include "ble_sensor.h"   // arbitration guard below; safe to include unconditionally
+#include "room_avg.h"
 
 #include <cstring>
 #include <cmath>
@@ -86,12 +87,16 @@ void LinkSensor::loop(CN105Controller &cn105) {
     // taken over, so the clear always proceeds.
     if (s_pendingClear.load() && cn105.isConnected()) {
 #ifdef BLE_ENABLE
-        bool handedToBle = (settings.get().roomSource == SL2_ROOMSRC_BLE) &&
-                            BleSensor::isActive();
+        // feedSlot() is -1 unless a BLE slot is the selected single-mode
+        // source; isActive range-checks, so this is false in every other mode.
+        bool handedToBle = BleSensor::isActive(BleSensor::feedSlot());
 #else
         bool handedToBle = false;
 #endif
-        if (!handedToBle) cn105.clearRemoteTemperature();
+        // A switch into Average mode hands the register to the blend the same
+        // way — don't stomp its value with this stale clear.
+        bool handedToAvg = RoomAvg::isFeeding();
+        if (!handedToBle && !handedToAvg) cn105.clearRemoteTemperature();
         s_pendingClear.store(false);
     }
 
@@ -103,7 +108,8 @@ void LinkSensor::loop(CN105Controller &cn105) {
     lastUpd = s_lastUpdate;
     taskEXIT_CRITICAL(&s_mux);
 
-    bool     selected    = (settings.get().roomSource == SL2_ROOMSRC_LINK);
+    bool     selected    = (settings.get().roomMode == 0) &&
+                           (settings.get().roomSingle == ROOM_MEMBER_LINK);
     bool     haveReading = (lastUpd != 0);
     uint32_t age         = haveReading ? (now - lastUpd) : 0;
     uint32_t staleMs      = (uint32_t)settings.get().roomStaleTimeoutS * 1000;

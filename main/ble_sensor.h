@@ -32,22 +32,45 @@ namespace BleSensor {
     void setBleEnabled(bool on);         // Master enable/disable (lazy NimBLE init)
     bool isBleEnabled();                 // Current master toggle state
 
-    float    temperature();   // NAN if no data
-    float    humidity();      // NAN if not supported
-    int8_t   battery();       // -1 if not supported
-    int      rssi();          // BLE advertisement RSSI
-    bool     isActive();      // Has fresh data
-    bool     isStale();       // No data for stale timeout
+    // ── Per-slot readings (idx = 0..ROOM_MAX_BLE_SENSORS-1, settings list) ──
+    float    temperature(int idx);   // NAN if no data
+    float    humidity(int idx);      // NAN if not supported
+    int8_t   battery(int idx);       // -1 if not supported
+    int      rssi(int idx);          // BLE advertisement RSSI
+    bool     isActive(int idx);      // Has fresh data
+    bool     isStale(int idx);       // No data for stale timeout
+    uint32_t lastUpdateAge(int idx); // ms since last reading; UINT32_MAX if none
+    const char* sensorType(int idx); // Detected type (nullptr if unknown)
+    bool     isConfigured(int idx);  // Slot has a valid address
+
+    // Legacy no-arg accessors = slot 0, the "primary" sensor (HomeKit sensor
+    // accessory, dial battery TLV — both predate the multi-sensor list).
+    inline float    temperature()   { return temperature(0); }
+    inline float    humidity()      { return humidity(0); }
+    inline int8_t   battery()       { return battery(0); }
+    inline int      rssi()          { return rssi(0); }
+    inline bool     isActive()      { return isActive(0); }
+    inline bool     isStale()       { return isStale(0); }
+    inline uint32_t lastUpdateAge() { return lastUpdateAge(0); }
+    inline const char* sensorType() { return sensorType(0); }
+
     bool     isReverted();    // Stale watchdog handed the HP back to its internal sensor
-    uint32_t lastUpdateAge(); // ms since last reading
-    bool     isEnabled();     // roomSource == SL2_ROOMSRC_BLE: BLE is the
-                               // SELECTED room source right now. NOT "is a
-                               // sensor configured" — for that, check
-                               // isBleEnabled() && getAddr()[0] instead.
+    // Which slot the single-mode feed reads from; -1 when averaging or a
+    // non-BLE source is selected. Safe to pass straight into the indexed
+    // accessors — they range-check.
+    int      feedSlot();
+    bool     isEnabled();     // a BLE slot is the SELECTED single-mode room
+                               // source right now. NOT "is a sensor
+                               // configured" — for that, check
+                               // isBleEnabled() && isConfigured(i) instead.
     void     setEnabled(bool enabled);   // Persist feed toggle; loop() reacts to the change
-    void     setAddr(const char* mac);   // Update MAC ("" clears), reset readings, restart scan
-    const char* getAddr();
-    const char* sensorType();            // Detected sensor type (nullptr if unknown)
+
+    // Sensor list management. mac "" clears the slot (readings reset, scan
+    // restarted); name nullptr keeps the stored name.
+    void     setSensor(int idx, const char* mac, const char* name);
+    void     renameSensor(int idx, const char* name);
+    inline void setAddr(const char* mac) { setSensor(0, mac, nullptr); }  // legacy web cmd
+    const char* getAddr();               // slot 0 address (legacy call sites)
 
     // Discovery scan
     void startDiscovery();

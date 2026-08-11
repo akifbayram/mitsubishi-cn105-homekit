@@ -23,6 +23,7 @@ idf_component_register(
          "espnow_link.cpp"
          "sl2_link.c"
          "link_sensor.cpp"
+         "room_avg.cpp"
          "sl2_sodium_slim.c"
          "sl2_monocypher/monocypher.c"
          "sl2_monocypher/monocypher-ed25519.c"

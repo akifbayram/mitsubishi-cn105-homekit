@@ -1,5 +1,6 @@
 #include "homekit_services.h"
 #include "cn105_strings.h"
+#include "room_avg.h"
 #include "settings.h"
 #include "logging.h"
 #include "esp_utils.h"
@@ -393,12 +394,18 @@ void homekit_sync_thermostat(CN105Controller &cn105)
         }
     }
 
-    // Current temperature
+    // Current temperature — when the averaging blend is feeding the pump,
+    // report its effective (offset-applied) value so Apple Home matches what
+    // the pump is actually controlling on; otherwise the pump's own reported
+    // room temp (which already echoes any single-source feed).
     if (s_currentTemp) {
+        float room = s.roomTemp;
+        RoomAvg::Status av = RoomAvg::status();
+        if (av.feeding && !std::isnan(av.effective)) room = av.effective;
         const hap_val_t *cur = hap_char_get_val(s_currentTemp);
-        if (forceSync || !cur || fabsf(cur->f - s.roomTemp) > 0.1f) {
-            LOG_DEBUG("[HK:Thermo] sync currentTemp: %.1f C", s.roomTemp);
-            hap_val_t v = { .f = s.roomTemp };
+        if (forceSync || !cur || fabsf(cur->f - room) > 0.1f) {
+            LOG_DEBUG("[HK:Thermo] sync currentTemp: %.1f C", room);
+            hap_val_t v = { .f = room };
             hap_char_update_val(s_currentTemp, &v);
         }
     }

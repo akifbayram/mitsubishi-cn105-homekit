@@ -229,6 +229,41 @@ void SettingsStore::begin() {
     if (_settings.roomStaleTimeoutS < 30) _settings.roomStaleTimeoutS = 30;
     if (_settings.roomStaleTimeoutS > 3600) _settings.roomStaleTimeoutS = 3600;
 
+    // roomMode / roomSingle / roomMembers / roomOffsets — the blending model.
+    // All keys are ADDITIVE over the <= 0.2.4 layout: absent keys are seeded
+    // from the legacy roomSrc so an OTA upgrade keeps feeding from the same
+    // source, and the legacy keys keep being written (see save()) so a
+    // downgrade also keeps working. Sanitized on load, same as modeMask.
+    {
+        uint8_t val = 0;
+        nvs_get_u8(_handle, "roomMode", &val);
+        _settings.roomMode = (val == 1) ? 1 : 0;
+    }
+    {
+        // Seed from the (already sanitized) legacy enum when never written:
+        // INTERNAL->internal bit, BLE->first BLE slot, LINK->link bit.
+        uint8_t seed = (_settings.roomSource == SL2_ROOMSRC_LINK) ? ROOM_MEMBER_LINK
+                     : (_settings.roomSource == SL2_ROOMSRC_BLE)  ? ROOM_MEMBER_BLE0
+                                                                  : ROOM_MEMBER_INTERNAL;
+        uint8_t val = seed;
+        nvs_get_u8(_handle, "roomSingle", &val);
+        _settings.roomSingle = (val < ROOM_MEMBER_COUNT) ? val : seed;
+    }
+    {
+        uint8_t val = (uint8_t)(1u << _settings.roomSingle);  // pre-check the current source
+        nvs_get_u8(_handle, "roomMembers", &val);
+        _settings.roomMembers = val & (uint8_t)((1u << ROOM_MEMBER_COUNT) - 1);
+    }
+    {
+        int8_t offs[ROOM_MEMBER_COUNT] = {0};
+        size_t len = sizeof(offs);
+        if (nvs_get_blob(_handle, "roomOffs", offs, &len) == ESP_OK && len == sizeof(offs)) {
+            for (int i = 0; i < ROOM_MEMBER_COUNT; i++)
+                _settings.roomOffsets[i] = std::clamp(offs[i],
+                    (int8_t)-ROOM_OFFSET_MAX_TENTHS, ROOM_OFFSET_MAX_TENTHS);
+        }
+    }
+
 #ifdef BLE_ENABLE
     // bleEnabled — bool stored as uint8_t
     // First-boot default honors the -DBLE_SENSOR_DEFAULT_ON build flag; a stored
@@ -255,6 +290,32 @@ void SettingsStore::begin() {
         }
     }
 
+    // bleSensors — named multi-sensor list, one blob. When the key has never
+    // been written (<= 0.2.4 upgrade), slot 0 is seeded from the legacy
+    // single-sensor address so the sensor survives the OTA. NUL-termination is
+    // forced on load: the blob crossed a firmware boundary.
+    {
+        BleSensorCfg list[ROOM_MAX_BLE_SENSORS] = {};
+        size_t len = sizeof(list);
+        if (nvs_get_blob(_handle, "bleList", list, &len) == ESP_OK && len == sizeof(list)) {
+            for (int i = 0; i < ROOM_MAX_BLE_SENSORS; i++) {
+                list[i].addr[sizeof(list[i].addr) - 1] = '\0';
+                list[i].name[sizeof(list[i].name) - 1] = '\0';
+                _settings.bleSensors[i] = list[i];
+            }
+        } else if (_settings.bleSensorAddr[0]) {
+            // Same size both sides (bleSensorAddr is NUL-terminated) — plain copy.
+            memcpy(_settings.bleSensors[0].addr, _settings.bleSensorAddr,
+                   sizeof(_settings.bleSensors[0].addr));
+            strncpy(_settings.bleSensors[0].name, "Remote Sensor",
+                    sizeof(_settings.bleSensors[0].name) - 1);
+        }
+        // Invariant both paths share: the legacy key mirrors slot 0. Same
+        // size both sides, source NUL-terminated above — plain copy.
+        memcpy(_settings.bleSensorAddr, _settings.bleSensors[0].addr,
+               sizeof(_settings.bleSensorAddr));
+    }
+
     LOG_INFO("[Settings] BLE: enabled=%s addr=%s feed=%s timeout=%us",
              _settings.bleEnabled ? "ON" : "OFF",
              strlen(_settings.bleSensorAddr) > 0 ? _settings.bleSensorAddr : "(none)",
@@ -262,9 +323,33 @@ void SettingsStore::begin() {
              _settings.roomStaleTimeoutS);
 #endif
 
-    LOG_INFO("[Settings] Loaded: logLevel=%d poll=%lums name=%s unit=%s",
+    // roomSource is derived state from here on — recompute so a stored value
+    // that predates the blending model can't disagree with roomMode/roomSingle.
+    _settings.roomSource = room_source_derived(_settings);
+
+    LOG_INFO("[Settings] Loaded: logLevel=%d poll=%lums name=%s unit=%s room mode=%u single=%u members=0x%02X",
              _settings.logLevel, (unsigned long)_settings.pollMs, _settings.deviceName,
-             _settings.useFahrenheit ? "F" : "C");
+             _settings.useFahrenheit ? "F" : "C",
+             _settings.roomMode, _settings.roomSingle, _settings.roomMembers);
+}
+
+uint8_t room_single_from_legacy(uint8_t src) {
+    if (src == SL2_ROOMSRC_LINK) return ROOM_MEMBER_LINK;
+    if (src == SL2_ROOMSRC_BLE) {
+#ifdef BLE_ENABLE
+        for (int i = 0; i < ROOM_MAX_BLE_SENSORS; i++)
+            if (settings.get().bleSensors[i].addr[0]) return ROOM_MEMBER_BLE0 + i;
+#endif
+        return ROOM_MEMBER_BLE0;
+    }
+    return ROOM_MEMBER_INTERNAL;
+}
+
+uint8_t room_source_derived(const DeviceSettings &s) {
+    if (s.roomMode != 0) return SL2_ROOMSRC_INTERNAL;   // averaging: defined mapping
+    if (s.roomSingle == ROOM_MEMBER_LINK) return SL2_ROOMSRC_LINK;
+    if (s.roomSingle >= ROOM_MEMBER_BLE0) return SL2_ROOMSRC_BLE;
+    return SL2_ROOMSRC_INTERNAL;
 }
 
 void SettingsStore::save() {
@@ -279,11 +364,24 @@ void SettingsStore::save() {
     nvs_set_u8(_handle, "wifiChgPend", _settings.wifiChangePending ? 1 : 0);
     nvs_set_u8(_handle, "vaneConfig", _settings.vaneConfig);
     nvs_set_u8(_handle, "modeMask", _settings.modeMask);
+    // Legacy roomSrc stays written (derived) so the dial and a downgrade to
+    // the pre-averaging firmware keep their source.
+    _settings.roomSource = room_source_derived(_settings);
     nvs_set_u8(_handle, "roomSrc", _settings.roomSource);
     nvs_set_u16(_handle, "roomTimeout", _settings.roomStaleTimeoutS);
+    nvs_set_u8(_handle, "roomMode", _settings.roomMode);
+    nvs_set_u8(_handle, "roomSingle", _settings.roomSingle);
+    nvs_set_u8(_handle, "roomMembers", _settings.roomMembers);
+    nvs_set_blob(_handle, "roomOffs", _settings.roomOffsets, sizeof(_settings.roomOffsets));
 #ifdef BLE_ENABLE
     nvs_set_u8(_handle, "bleOn", _settings.bleEnabled ? 1 : 0);
+    // Legacy single-sensor key mirrors slot 0 (downgrade compatibility).
+    // Same size both sides, always NUL-terminated by the setters.
+    memcpy(_settings.bleSensorAddr, _settings.bleSensors[0].addr,
+           sizeof(_settings.bleSensorAddr));
+    _settings.bleSensorAddr[sizeof(_settings.bleSensorAddr) - 1] = '\0';
     nvs_set_str(_handle, "bleAddr", _settings.bleSensorAddr);
+    nvs_set_blob(_handle, "bleList", _settings.bleSensors, sizeof(_settings.bleSensors));
 #endif
     nvs_commit(_handle);
     _generation++;

@@ -31,6 +31,7 @@
 #include "homekit_services.h"
 #include "web_server.h"
 #include "link_sensor.h"
+#include "room_avg.h"
 
 #ifdef BLE_ENABLE
 #include "ble_sensor.h"
@@ -469,6 +470,9 @@ extern "C" void app_main(void)
         //    still supports a dial-sourced room temperature) ────────────────
         if (webUIStarted && now - lastLinkSensorLoop >= 1000) {
             LinkSensor::loop(cn105);
+            // Average-mode blend, after both source loops so it sees this
+            // tick's readings.
+            RoomAvg::loop(cn105);
             lastLinkSensorLoop = now;
         }
 

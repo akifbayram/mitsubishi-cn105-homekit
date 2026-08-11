@@ -22,6 +22,26 @@
 // resetting to the default.
 inline constexpr uint8_t SETTINGS_SCHEMA_VERSION = 1;
 
+// ── Room-sensor blending ────────────────────────────────────────────────────
+// Stable member-bit assignment shared by roomMembers, the roomOffsets index,
+// the web UI, and NVS. Never renumber: the mask and offsets persist.
+//   bit 0        = heat pump internal thermistor
+//   bit 1        = Serin Link dial sensor
+//   bit 2 + i    = BLE sensor slot i
+inline constexpr int ROOM_MAX_BLE_SENSORS = 4;
+inline constexpr int ROOM_MEMBER_INTERNAL = 0;
+inline constexpr int ROOM_MEMBER_LINK     = 1;
+inline constexpr int ROOM_MEMBER_BLE0     = 2;
+inline constexpr int ROOM_MEMBER_COUNT    = ROOM_MEMBER_BLE0 + ROOM_MAX_BLE_SENSORS;
+inline constexpr int8_t ROOM_OFFSET_MAX_TENTHS = 99;   // ±9.9 °C
+
+// One configured BLE sensor. addr empty = free slot. Fixed-size so the whole
+// list round-trips NVS as a single blob.
+struct BleSensorCfg {
+    char addr[18];   // "AA:BB:CC:DD:EE:FF" or "" (empty slot)
+    char name[24];   // user-assigned display name
+};
+
 struct DeviceSettings {
     LogLevel logLevel    = LOG_LEVEL_INFO;
     uint32_t pollMs      = 2000;
@@ -35,13 +55,33 @@ struct DeviceSettings {
     uint8_t  modeMask = MODE_CAP_ALL; // MODE_CAP_* bits — operating modes this unit supports (mode_caps.h)
     // Which source drives the heat pump's room temperature. Outside the BLE
     // ifdef on purpose: a build without BLE still chooses Internal vs Link.
+    // DERIVED from (roomMode, roomSingle) on every save — kept stored so the
+    // Serin Link dial (sl2_room_src) and a firmware downgrade keep working.
     uint8_t  roomSource = 0;              // enum sl2_room_src
     uint16_t roomStaleTimeoutS = 600;     // Seconds before a source is stale (30-3600)
+    // Blending model. Single mode reproduces the legacy one-source behavior;
+    // Average mode feeds the equal-weight mean of the checked members.
+    uint8_t  roomMode = 0;                // 0 = single, 1 = average
+    uint8_t  roomSingle = 0;              // single-mode pick, ROOM_MEMBER_* bit index
+    uint8_t  roomMembers = 0;             // average-mode membership bitmask
+    int8_t   roomOffsets[ROOM_MEMBER_COUNT] = {0};  // tenths °C, ±ROOM_OFFSET_MAX_TENTHS
 #ifdef BLE_ENABLE
     bool     bleEnabled = false;          // Master BLE on/off (lazy NimBLE init)
+    // Legacy single-sensor key, kept in lockstep with bleSensors[0].addr so a
+    // downgrade to <= the pre-averaging firmware keeps its sensor.
     char     bleSensorAddr[18] = "";      // "AA:BB:CC:DD:EE:FF" or empty
+    BleSensorCfg bleSensors[ROOM_MAX_BLE_SENSORS] = {};
 #endif
 };
+
+// (roomMode, roomSingle) -> the legacy sl2_room_src enum the dial speaks.
+// Averaging maps to Internal by contract (the dial has no "average" concept).
+uint8_t room_source_derived(const DeviceSettings &s);
+
+// The inverse, for legacy-enum writers (dial edit, old web command): a pick
+// is a single-mode selection; BLE maps to the first CONFIGURED slot (slot 0
+// may be empty after a remove).
+uint8_t room_single_from_legacy(uint8_t src);
 
 class SettingsStore {
 public:

@@ -23,6 +23,7 @@
 #endif
 #include "espnow_link.h"
 #include "link_sensor.h"
+#include "room_avg.h"
 
 static const char *TAG = "web_ws";
 
@@ -108,6 +109,22 @@ esp_err_t WebUI::handleWebSocket(httpd_req_t *req) {
 // ══════════════════════════════════════════════════════════════════════════════
 // WebSocket message dispatcher
 // ══════════════════════════════════════════════════════════════════════════════
+
+// One availability rule per member bit, shared by the roomSingle accept test
+// and the roomMembers bit-strip so the two can't drift apart: Link needs a
+// sensing dial, a BLE bit needs its slot configured, internal always exists
+// (though it is never a blend member — the members handler strips it anyway).
+static bool roomMemberAvailable(int bit) {
+    if (bit == ROOM_MEMBER_LINK) return LinkSensor::hasSensor();
+    if (bit >= ROOM_MEMBER_BLE0) {
+#ifdef BLE_ENABLE
+        return BleSensor::isConfigured(bit - ROOM_MEMBER_BLE0);
+#else
+        return false;
+#endif
+    }
+    return bit == ROOM_MEMBER_INTERNAL;
+}
 
 void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
     char cmd[16] = {0};
@@ -314,7 +331,10 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
         if (jsonGetInt(msg, "roomSource", &roomSourceVal)) {
             if (roomSourceVal >= SL2_ROOMSRC_INTERNAL && roomSourceVal <= SL2_ROOMSRC_LINK &&
                 !(roomSourceVal == SL2_ROOMSRC_LINK && !LinkSensor::hasSensor())) {
-                settings.get().roomSource = (uint8_t)roomSourceVal;
+                // Legacy enum command (kept for a cached pre-averaging UI):
+                // an explicit pick is a single-mode selection.
+                settings.get().roomMode   = 0;
+                settings.get().roomSingle = room_single_from_legacy((uint8_t)roomSourceVal);
                 settings.save();
                 LOG_INFO("Config roomSource=%d", roomSourceVal);
             }
@@ -324,9 +344,113 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
             pushState();
         }
 
+        // ── Blending model (averaging rework). Writes are echoed with ONE
+        //    pushState at the end, on accept AND reject, same contract as
+        //    roomSource: the UI paints optimistically and self-corrects.
+        //    Saves coalesce the same way — one NVS commit per message. ──
+        bool roomSave = false;   // an accepted room-model write needs a save
+        bool roomPush = false;   // any room/BLE key was seen (ack even rejects)
+
+        int roomModeVal;
+        if (jsonGetInt(msg, "roomMode", &roomModeVal)) {
+            roomPush = true;
+            if (roomModeVal == 0 || roomModeVal == 1) {
+                settings.get().roomMode = (uint8_t)roomModeVal;
+                roomSave = true;
+                LOG_INFO("Config roomMode=%d", roomModeVal);
+            }
+        }
+
+        int roomSingleVal;
+        if (jsonGetInt(msg, "roomSingle", &roomSingleVal)) {
+            roomPush = true;
+            if (roomSingleVal >= 0 && roomSingleVal < ROOM_MEMBER_COUNT &&
+                roomMemberAvailable(roomSingleVal)) {
+                settings.get().roomSingle = (uint8_t)roomSingleVal;
+                roomSave = true;
+                LOG_INFO("Config roomSingle=%d", roomSingleVal);
+            }
+        }
+
+        int roomMembersVal;
+        if (jsonGetInt(msg, "roomMembers", &roomMembersVal)) {
+            roomPush = true;
+            uint8_t m = (uint8_t)roomMembersVal & (uint8_t)((1u << ROOM_MEMBER_COUNT) - 1);
+            // Strip bits with nothing behind them so a stray client can't
+            // check a ghost member. Internal is stripped too: it is never a
+            // blend member (see room_avg.cpp) and the UI offers no checkbox.
+            for (int bit = 0; bit < ROOM_MEMBER_COUNT; bit++) {
+                if (bit == ROOM_MEMBER_INTERNAL || !roomMemberAvailable(bit))
+                    m &= (uint8_t)~(1u << bit);
+            }
+            settings.get().roomMembers = m;
+            roomSave = true;
+            LOG_INFO("Config roomMembers=0x%02X", m);
+        }
+
+        int roomOffIdx;
+        if (jsonGetInt(msg, "roomOffIdx", &roomOffIdx)) {
+            roomPush = true;
+            int v = 0;
+            if (jsonGetInt(msg, "roomOffVal", &v) &&
+                roomOffIdx >= 0 && roomOffIdx < ROOM_MEMBER_COUNT) {
+                v = std::clamp(v, (int)-ROOM_OFFSET_MAX_TENTHS, (int)ROOM_OFFSET_MAX_TENTHS);
+                settings.get().roomOffsets[roomOffIdx] = (int8_t)v;
+                roomSave = true;
+                LOG_INFO("Config roomOff[%d]=%d", roomOffIdx, v);
+            }
+        }
+
+#ifdef BLE_ENABLE
+        // The sensor-list commands save inside BleSensor (setSensor owns the
+        // readings/scan side effects) — they only need the ack push here.
+        char addMac[18];
+        if (jsonGetString(msg, "bleAddMac", addMac, sizeof(addMac))) {
+            roomPush = true;
+            // Re-adding a known MAC updates that sensor; otherwise take the
+            // first free slot. Full list -> tell the client, nothing changes.
+            int slot = -1;
+            for (int i = ROOM_MAX_BLE_SENSORS - 1; i >= 0; i--) {
+                if (!settings.get().bleSensors[i].addr[0]) slot = i;
+                if (strcasecmp(settings.get().bleSensors[i].addr, addMac) == 0) { slot = i; break; }
+            }
+            if (slot < 0) {
+                sendWsText(httpd_req_to_sockfd(req),
+                           "{\"type\":\"error\",\"msg\":\"Sensor list is full\"}");
+            } else {
+                char addName[24] = "";
+                jsonGetString(msg, "bleAddName", addName, sizeof(addName));
+                char defName[24];
+                snprintf(defName, sizeof(defName), "Sensor %d", slot + 1);
+                bool keepStored = settings.get().bleSensors[slot].name[0] != '\0';
+                BleSensor::setSensor(slot, addMac,
+                                     addName[0] ? addName : (keepStored ? nullptr : defName));
+                LOG_INFO("Config bleAdd slot=%d mac=%s", slot, addMac);
+            }
+        }
+
+        int delIdx;
+        if (jsonGetInt(msg, "bleDelIdx", &delIdx)) {
+            roomPush = true;
+            BleSensor::setSensor(delIdx, "", nullptr);
+            LOG_INFO("Config bleDel slot=%d", delIdx);
+        }
+
+        int renIdx;
+        if (jsonGetInt(msg, "bleRenIdx", &renIdx)) {
+            roomPush = true;
+            char renName[24];
+            if (jsonGetString(msg, "bleRenName", renName, sizeof(renName)) && renName[0])
+                BleSensor::renameSensor(renIdx, renName);
+        }
+#endif
+
+        if (roomSave) settings.save();
         if (changed) {
             settings.save();
             // Push updated state to reflect new config values
+            pushState();
+        } else if (roomPush) {
             pushState();
         }
 
@@ -530,8 +654,12 @@ void WebUI::pushState() {
     char escSsid[65];
     jsonEscape(ssid, escSsid, sizeof(escSsid));
 
-    char buf[1792];
-    int n = snprintf(buf, sizeof(buf),
+    // Heap, not stack: the averaging rework (per-sensor list + blend status)
+    // outgrew what pushState may burn on the httpd task's stack.
+    constexpr size_t bufSz = 3584;
+    char *buf = (char *)malloc(bufSz);
+    if (!buf) return;
+    int n = snprintf(buf, bufSz,
         "{\"type\":\"state\""
         ",\"power\":%s"
         ",\"mode\":\"%s\""
@@ -572,23 +700,23 @@ void WebUI::pushState() {
     );
 
     if (st.outsideTempValid) {
-        jsonAppend(buf, sizeof(buf), &n, ",\"outsideTemp\":%.1f", st.outsideTemp);
+        jsonAppend(buf, bufSz, &n, ",\"outsideTemp\":%.1f", st.outsideTemp);
     } else {
-        jsonAppend(buf, sizeof(buf), &n, ",\"outsideTemp\":null");
+        jsonAppend(buf, bufSz, &n, ",\"outsideTemp\":null");
     }
 
     // Error code
     if (st.hasError) {
-        jsonAppend(buf, sizeof(buf), &n, ",\"errorCode\":%u", st.errorCode);
+        jsonAppend(buf, bufSz, &n, ",\"errorCode\":%u", st.errorCode);
     } else {
-        jsonAppend(buf, sizeof(buf), &n, ",\"errorCode\":null");
+        jsonAppend(buf, bufSz, &n, ",\"errorCode\":null");
     }
 
     // Runtime hours
     if (st.runtimeValid) {
-        jsonAppend(buf, sizeof(buf), &n, ",\"runtime\":%.1f", st.runtimeHours);
+        jsonAppend(buf, bufSz, &n, ",\"runtime\":%.1f", st.runtimeHours);
     } else {
-        jsonAppend(buf, sizeof(buf), &n, ",\"runtime\":null");
+        jsonAppend(buf, bufSz, &n, ",\"runtime\":null");
     }
 
     // Heap + reboot/connectivity health. resetReason/crashCount make a silent
@@ -596,7 +724,7 @@ void WebUI::pushState() {
     // of the 12-line log ring before a client can reconnect); wifiDrops/
     // cn105Drops/epoch add connectivity health (epoch 0 = wall clock not
     // SNTP-synced yet).
-    jsonAppend(buf, sizeof(buf), &n,
+    jsonAppend(buf, bufSz, &n,
         ",\"heapFree\":%lu"
         ",\"heapMin\":%lu"
         ",\"heapBlock\":%lu"
@@ -616,7 +744,7 @@ void WebUI::pushState() {
     );
 
     // Dual setpoint thresholds
-    jsonAppend(buf, sizeof(buf), &n,
+    jsonAppend(buf, bufSz, &n,
         ",\"heatThresh\":%.1f"
         ",\"coolThresh\":%.1f",
         cfg.heatingThreshold,
@@ -629,7 +757,7 @@ void WebUI::pushState() {
         char macStr[18];
         snprintf(macStr, sizeof(macStr), "%02X:%02X:%02X:%02X:%02X:%02X",
                  rm[0],rm[1],rm[2],rm[3],rm[4],rm[5]);
-        jsonAppend(buf, sizeof(buf), &n,
+        jsonAppend(buf, bufSz, &n,
             ",\"remoteBonded\":%s,\"remoteLive\":%s,\"remoteMac\":\"%s\""
             ",\"remotePairing\":%s,\"remotePairSecs\":%d,\"remotePairResult\":\"%s\"",
             espnowLink.isBonded() ? "true" : "false",
@@ -643,17 +771,17 @@ void WebUI::pushState() {
         if (espnowLink.getDialDetail(dd)) {
             // remoteCertState: sl2_cert_state_t — 0 NONE (unprovisioned dial,
             // the common home-built case) / 1 PRESENT / 2 INVALID / 3 OK.
-            jsonAppend(buf, sizeof(buf), &n,
+            jsonAppend(buf, bufSz, &n,
                 ",\"remoteLastSeen\":%ld,\"remoteSyncing\":%s,\"remoteCertState\":%u",
                 (long)dd.lastSeenSec, dd.syncing ? "true" : "false",
                 (unsigned)dd.certState);
             if (dd.rssi != 0)
-                jsonAppend(buf, sizeof(buf), &n, ",\"remoteRssi\":%d", dd.rssi);
+                jsonAppend(buf, bufSz, &n, ",\"remoteRssi\":%d", dd.rssi);
             if (dd.haveInfo && dd.model[0]) {
                 char escModel[64], escFw[48];
                 jsonEscape(dd.model, escModel, sizeof(escModel));
                 jsonEscape(dd.fw, escFw, sizeof(escFw));
-                jsonAppend(buf, sizeof(buf), &n,
+                jsonAppend(buf, bufSz, &n,
                     ",\"remoteModel\":\"%s\",\"remoteFw\":\"%s\"", escModel, escFw);
             }
         }
@@ -666,7 +794,7 @@ void WebUI::pushState() {
     bool hkReady = homekit_is_started();
     int hkControllers = homekit_get_controller_count();
 
-    jsonAppend(buf, sizeof(buf), &n,
+    jsonAppend(buf, bufSz, &n,
         ",\"logLevel\":%d"
         ",\"pollInterval\":%lu"
         ",\"tempUnit\":\"%s\""
@@ -709,7 +837,7 @@ void WebUI::pushState() {
         if (!std::isnan(linkT)) snprintf(linkTStr, sizeof(linkTStr), "%.2f", linkT);
         if (!std::isnan(linkH)) snprintf(linkHStr, sizeof(linkHStr), "%.0f", linkH);
 
-        jsonAppend(buf, sizeof(buf), &n,
+        jsonAppend(buf, bufSz, &n,
             ",\"roomSource\":%d"
             ",\"roomStatus\":%d"
             ",\"bleTimeout\":%u"
@@ -730,8 +858,47 @@ void WebUI::pushState() {
             (unsigned long)linkAge);
     }
 
+    {
+        // Blending model + last blend pass. Everything the card needs to
+        // render modes/exclusions/banners rides here — no client inference.
+        const RoomAvg::Status av = RoomAvg::status();
+        char effStr[8] = "null";
+        if (!std::isnan(av.effective)) snprintf(effStr, sizeof(effStr), "%.2f", av.effective);
+        jsonAppend(buf, bufSz, &n,
+            ",\"roomMode\":%u"
+            ",\"roomSingle\":%u"
+            ",\"roomMembers\":%u"
+            ",\"avgFeeding\":%s"
+            ",\"avgFallback\":%s"
+            ",\"effTemp\":%s"
+            ",\"spread\":%.2f"
+            ",\"effAge\":%lu"
+            ",\"contrib\":%u"
+            ",\"exclStale\":%u"
+            ",\"exclOff\":%u",
+            (unsigned)cfg.roomMode,
+            (unsigned)cfg.roomSingle,
+            (unsigned)cfg.roomMembers,
+            av.feeding ? "true" : "false",
+            av.fallback ? "true" : "false",
+            effStr,
+            av.spread,
+            (unsigned long)(av.effAgeMs == UINT32_MAX ? 0 : av.effAgeMs),
+            (unsigned)av.contributors,
+            (unsigned)av.exclStale,
+            (unsigned)av.exclOff);
+        jsonAppend(buf, bufSz, &n, ",\"roomOffs\":[");
+        for (int i = 0; i < ROOM_MEMBER_COUNT; i++)
+            jsonAppend(buf, bufSz, &n, "%s%d", i ? "," : "", (int)cfg.roomOffsets[i]);
+        jsonAppend(buf, bufSz, &n, "]");
+    }
+
 #ifdef BLE_ENABLE
     {
+        // Legacy flat slot-0 fields, duplicated by bleSensors[0] below. Kept
+        // deliberately: a cached pre-averaging index.html renders from these
+        // after an OTA (same compat window as the roomSource command), and
+        // the diagnostics copy embeds bleAddr. Drop once that window closes.
         float bleT = BleSensor::temperature();
         float bleH = BleSensor::humidity();
         int8_t bleB = BleSensor::battery();
@@ -744,7 +911,7 @@ void WebUI::pushState() {
 
         const char* sType = BleSensor::sensorType();
 
-        jsonAppend(buf, sizeof(buf), &n,
+        jsonAppend(buf, bufSz, &n,
             ",\"bleEnabled\":%s"
             ",\"bleTemp\":%s"
             ",\"bleHumidity\":%s"
@@ -773,12 +940,45 @@ void WebUI::pushState() {
             sType ? "\"" : "", sType ? sType : "null", sType ? "\"" : ""
         );
     }
+
+    {
+        // Named sensor list — one entry per configured slot, slot index
+        // included so member bits and offsets line up client-side.
+        jsonAppend(buf, bufSz, &n, ",\"bleSensors\":[");
+        bool first = true;
+        for (int i = 0; i < ROOM_MAX_BLE_SENSORS; i++) {
+            if (!BleSensor::isConfigured(i)) continue;
+            float t = BleSensor::temperature(i);
+            float h = BleSensor::humidity(i);
+            uint32_t age = BleSensor::lastUpdateAge(i);
+            char tS[8] = "null", hS[8] = "null";
+            if (!std::isnan(t)) snprintf(tS, sizeof(tS), "%.2f", t);
+            if (!std::isnan(h)) snprintf(hS, sizeof(hS), "%.0f", h);
+            char escSensName[50];
+            jsonEscape(settings.get().bleSensors[i].name, escSensName, sizeof(escSensName));
+            const char* ty = BleSensor::sensorType(i);
+            jsonAppend(buf, bufSz, &n,
+                "%s{\"i\":%d,\"addr\":\"%s\",\"name\":\"%s\",\"type\":%s%s%s"
+                ",\"temp\":%s,\"hum\":%s,\"batt\":%d,\"rssi\":%d,\"age\":%lu"
+                ",\"active\":%s,\"stale\":%s}",
+                first ? "" : ",", i,
+                settings.get().bleSensors[i].addr, escSensName,
+                ty ? "\"" : "", ty ? ty : "null", ty ? "\"" : "",
+                tS, hS, (int)BleSensor::battery(i), BleSensor::rssi(i),
+                (unsigned long)(age == UINT32_MAX ? 0 : age),
+                BleSensor::isActive(i) ? "true" : "false",
+                BleSensor::isStale(i) ? "true" : "false");
+            first = false;
+        }
+        jsonAppend(buf, bufSz, &n, "]");
+    }
 #endif
 
-    jsonAppend(buf, sizeof(buf), &n, "}");
+    jsonAppend(buf, bufSz, &n, "}");
 
-    if (n >= (int)sizeof(buf)) {
-        LOG_WARN("pushState buffer truncated (%d >= %zu), skipping send", n, sizeof(buf));
+    if (n >= (int)bufSz) {
+        LOG_WARN("pushState buffer truncated (%d >= %zu), skipping send", n, bufSz);
+        free(buf);
         return;
     }
 
@@ -786,6 +986,7 @@ void WebUI::pushState() {
         httpd_sess_update_lru_counter(_server, wsFds[i]);
         sendWsText(wsFds[i], buf);
     }
+    free(buf);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
