@@ -970,7 +970,18 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
         <button class="save-btn" id="fwInstallBtn" onclick="installUpdate()">Install</button>
         <a id="fwNotesLink" class="fw-notes" href="#" target="_blank" rel="noopener" style="display:none">What's new</a>
       </div>
+      <div id="fwStableRow" style="display:none;margin-top:9px">
+        <button class="btn-secondary" id="fwStableBtn" onclick="returnToStable()">Return to stable</button>
+        <p class="setting-caption">Downgrading may reset stored settings.</p>
+      </div>
       <p class="setting-caption">Checks the release server for a newer build, then installs it over the air.</p>
+      <div class="inset-row" id="fwBetaRow" style="padding-left:0;padding-right:0;border-bottom:none">
+        <div><div class="lbl">Beta updates</div><div class="sub">Get pre-release builds early. They may be unstable.</div></div>
+        <label class="ios-toggle">
+          <input type="checkbox" id="fwBetaToggle" onchange="toggleBetaChannel()" aria-label="Receive beta updates">
+          <span class="ios-toggle-slider"></span>
+        </label>
+      </div>
     </div>
     <div id="otaProgress" style="display:none;margin-top:12px">
       <div class="ota-bar-wrap"><div class="ota-bar" id="otaBar"></div></div>
@@ -2102,6 +2113,19 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       configureSliders();
     }
 
+    // The update channel is device state, so the toggle follows the device
+    // rather than this browser. The daily auto-check waits for it to arrive:
+    // checking before we know the channel would check the wrong one.
+    if(s.betaChannel!==undefined){
+      betaChannel=!!s.betaChannel;
+      $('fwBetaToggle').checked=betaChannel;
+      if(fwAutoCheckDue){
+        fwAutoCheckDue=false;
+        localStorage.setItem('fwAutoCheckAt',String(Date.now()));
+        setTimeout(function(){checkForUpdate(true)},3000);
+      }
+    }
+
     if(s.deviceName){
       $('devName').textContent=s.deviceName;
       document.title=s.deviceName;
@@ -3003,19 +3027,58 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   // ── Update Check (manual, via serin-cn105 manifest) ───────────────────────
   var BOARD_FW_ID='{{BOARD_FW_ID}}';
   var UPDATE_MANIFEST_URL='{{UPDATE_MANIFEST_URL}}';
+  var UPDATE_MANIFEST_BETA_URL='{{UPDATE_MANIFEST_BETA_URL}}';
   var RUNNING_FW_VER='{{FW_VERSION}}';
-  var fwLatest=null;
+  var fwLatest=null;          // the build the Install button would write
+  var fwStable=null;          // stable's build, kept for the way back off a beta
+  var betaChannel=false;      // mirrors settings.betaChannel from the device
+  var fwAutoCheckDue=false;   // daily silent check, fired once cfg has landed
 
+  // ── ver-compare:start
+  // Semver-with-prerelease ordering. Extracted and tested by
+  // test/version_compare/; the same contract is implemented in
+  // serin-labs.github.io/assets/js/flash-console.js (compareVersions).
+  //
+  // git describe gives PROJECT_VER, so a build between tags arrives as
+  // 0.2.5-7-gabc1234 and a dirty tree as ...-dirty. That tail is stripped
+  // BEFORE the prerelease split — otherwise 0.2.6-beta.1-3-gabc1234 parses its
+  // git tail as prerelease identifiers and sorts below 0.2.6-beta.1.
   function normVer(v){return String(v||'').replace(/^v/,'')}
-  function isCleanVer(v){return /^\d+(\.\d+)*$/.test(v)}
+
+  function parseVer(s){
+    var v=normVer(s),dev=false,m;
+    if(/-dirty$/.test(v)){dev=true;v=v.replace(/-dirty$/,'')}
+    if((m=v.match(/^(.*)-\d+-g[0-9a-f]{7,}$/))){dev=true;v=m[1]}
+    var i=v.indexOf('-');
+    var core=(i<0?v:v.slice(0,i)).split('.').map(function(x){return parseInt(x,10)||0});
+    var pre=i<0?null:v.slice(i+1).split('.').map(function(x){
+      return /^\d+$/.test(x)?parseInt(x,10):x;
+    });
+    return {core:core,pre:pre,dev:dev};
+  }
+
   function cmpVer(a,b){
-    var pa=a.split('.'),pb=b.split('.');
-    for(var i=0;i<Math.max(pa.length,pb.length);i++){
-      var x=parseInt(pa[i]||'0',10),y=parseInt(pb[i]||'0',10);
-      if(x!==y) return x<y?-1:1;
+    var A=parseVer(a),B=parseVer(b),i,n=Math.max(A.core.length,B.core.length);
+    for(i=0;i<n;i++){
+      var x=A.core[i]||0,y=B.core[i]||0;
+      if(x!==y)return x<y?-1:1;
+    }
+    // Semver §11: a version with a prerelease sorts below the same core without.
+    if(!A.pre&&!B.pre)return 0;
+    if(!A.pre)return 1;
+    if(!B.pre)return -1;
+    n=Math.max(A.pre.length,B.pre.length);
+    for(i=0;i<n;i++){
+      var p=A.pre[i],q=B.pre[i];
+      if(p===undefined)return -1;
+      if(q===undefined)return 1;
+      var pn=typeof p==='number',qn=typeof q==='number';
+      if(pn!==qn)return pn?-1:1;
+      if(p!==q)return p<q?-1:1;
     }
     return 0;
   }
+  // ── ver-compare:end
 
   // Show the managed-update controls only on builds with a manifest baked in.
   // The indexOf guard keeps it hidden when viewing the raw unsubstituted file.
@@ -3024,10 +3087,43 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   // still does no GitHub I/O): only a found update surfaces in the UI.
   if(BOARD_FW_ID&&UPDATE_MANIFEST_URL&&BOARD_FW_ID.indexOf('{{')<0){
     $('fwUpdateCheck').style.display='block';
-    if(Date.now()-(+localStorage.getItem('fwAutoCheckAt')||0)>86400e3){
-      localStorage.setItem('fwAutoCheckAt',String(Date.now()));
-      setTimeout(function(){checkForUpdate(true)},3000);
-    }
+    // A build with no beta manifest baked in has no channel to offer.
+    if(!UPDATE_MANIFEST_BETA_URL||UPDATE_MANIFEST_BETA_URL.indexOf('{{')>=0)
+      $('fwBetaRow').style.display='none';
+    // Armed here, fired by the cfg handler once the channel is known.
+    if(Date.now()-(+localStorage.getItem('fwAutoCheckAt')||0)>86400e3) fwAutoCheckDue=true;
+  }
+
+  function fetchManifest(url){
+    return fetch(url+'?t='+Date.now()).then(function(r){
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      return r.json();
+    });
+  }
+
+  // This board's entry in one manifest, or null when the manifest has nothing
+  // for us. `version` is reported separately from `build` so a manifest that
+  // names a release we cannot install still says so instead of going quiet.
+  function readManifest(man,url,channel){
+    var out={version:'',build:null,channel:channel};
+    if(!man||!Array.isArray(man.builds))return out;
+    var v=normVer(man.version||'');
+    if(!/^\d/.test(v))return out;
+    out.version=v;
+    var b=null;
+    man.builds.forEach(function(x){if(x.board===BOARD_FW_ID)b=x});
+    if(!b||!b.sha256)return out;
+    var part=null;
+    (b.parts||[]).forEach(function(p){if(p.path&&p.path.indexOf('firmware.bin')>=0)part=p});
+    if(!part)return out;
+    out.build={
+      version:v,
+      binUrl:url.slice(0,url.lastIndexOf('/')+1)+part.path,
+      sha256:String(b.sha256).toLowerCase(),
+      channel:channel,
+      notes:(man.release_url&&/^https?:\/\//.test(man.release_url))?man.release_url:''
+    };
+    return out;
   }
 
   window.checkForUpdate=function(silent){
@@ -3039,47 +3135,94 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       res.textContent='Checking…';
       row.style.display='none';
     }
-    fwLatest=null;
-    fetch(UPDATE_MANIFEST_URL+'?t='+Date.now()).then(function(r){
-      if(!r.ok) throw new Error('HTTP '+r.status);
-      return r.json();
-    }).then(function(man){
-      var latest=normVer(man.version||'');
-      if(!isCleanVer(latest)) throw new Error('no release info');
-      var build=null;
-      (man.builds||[]).forEach(function(b){if(b.board===BOARD_FW_ID)build=b});
-      if(!build) throw new Error('no build for this board');
+    fwLatest=null;fwStable=null;
+    // A missing beta manifest is "no beta right now", not a failed check: the
+    // directory does not exist until the first prerelease is published.
+    var betaReq=(betaChannel&&UPDATE_MANIFEST_BETA_URL&&UPDATE_MANIFEST_BETA_URL.indexOf('{{')<0)
+      ? fetchManifest(UPDATE_MANIFEST_BETA_URL).catch(function(){return null})
+      : Promise.resolve(null);
+    Promise.all([fetchManifest(UPDATE_MANIFEST_URL),betaReq]).then(function(m){
+      // Cleared on every check, including silent ones: only renderNoUpdate
+      // puts it back, so a stale offer can never outlive the state that made it.
+      $('fwStableRow').style.display='none';
+      var st=readManifest(m[0],UPDATE_MANIFEST_URL,'stable');
+      var bt=readManifest(m[1],UPDATE_MANIFEST_BETA_URL,'beta');
+      fwStable=st.build;
+      if(!st.version&&!bt.version) throw new Error('no release info');
+
+      // The channel offers whichever manifest names the higher version, so a
+      // stable release supersedes a beta with no new beta being cut.
+      var best=st.build;
+      if(bt.build&&(!best||cmpVer(bt.build.version,best.version)>0)) best=bt.build;
+
       var cur=normVer(RUNNING_FW_VER);
-      var devBuild=!isCleanVer(cur);
+      // A build between tags (git-describe tail) or an unparseable version.
+      // 0.2.6-beta.1 is a real release and must NOT count as a dev build.
+      var devBuild=parseVer(cur).dev||!/^\d/.test(cur);
+
+      // Highest version any manifest named, installable or not.
+      var named=st.version;
+      if(bt.version&&(!named||cmpVer(bt.version,named)>0)) named=bt.version;
+
       // Only declare "up to date" when we can compare a clean running version.
       // Dev builds fall through so a detected release can still be installed.
-      if(!devBuild&&cmpVer(latest,cur)<=0){
-        if(!silent) res.textContent='Up to date · v'+cur;
+      if(!devBuild&&named&&cmpVer(named,cur)<=0){ renderNoUpdate(cur,silent); return; }
+      if(!best){
+        if(named){
+          res.style.display='block';
+          res.textContent='v'+named+' available — manifest missing install data, install manually below.';
+        } else if(!silent) res.textContent='Check failed: no build for this board';
         return;
       }
-      var part=null;
-      (build.parts||[]).forEach(function(p){if(p.path&&p.path.indexOf('firmware.bin')>=0)part=p});
-      if(!part||!build.sha256){
-        res.style.display='block';
-        res.textContent='v'+latest+' available — manifest missing install data, install manually below.';
-        return;
-      }
-      var base=UPDATE_MANIFEST_URL.slice(0,UPDATE_MANIFEST_URL.lastIndexOf('/')+1);
-      fwLatest={version:latest,binUrl:base+part.path,sha256:String(build.sha256).toLowerCase()};
+
+      fwLatest=best;
+      var tag=best.channel==='beta'?' · beta':'';
       res.style.display='block';
-      res.textContent=devBuild?('Release v'+latest+' available (running dev build)'):('Version '+latest+' available');
+      res.textContent=devBuild
+        ?('Release v'+best.version+tag+' available (running dev build)')
+        :('Version '+best.version+tag+' available');
       res.classList.add('avail');
       $('fwBadge').style.display='';
-      $('fwInstallBtn').textContent='Install v'+latest;
+      $('fwInstallBtn').textContent='Install v'+best.version+tag;
       $('fwInstallBtn').disabled=false;
       var notes=$('fwNotesLink');
-      if(man.release_url&&/^https?:\/\//.test(man.release_url)){notes.href=man.release_url;notes.style.display='block'}
+      if(best.notes){notes.href=best.notes;notes.style.display='block'}
       else{notes.style.display='none'}
       btn.style.display='none';
       row.style.display='block';
     }).catch(function(e){
       if(!silent) res.textContent='Check failed: '+e.message;
     }).then(function(){btn.disabled=false});
+  };
+
+  // Three ways to have nothing to install: current; ahead of stable on a
+  // prerelease with the channel still on (stable will pass it eventually); or
+  // ahead with the channel off, which is the one that needs a way back.
+  function renderNoUpdate(cur,silent){
+    var res=$('fwCheckResult'),row=$('fwStableRow');
+    row.style.display='none';
+    if(parseVer(cur).pre&&!betaChannel&&fwStable&&cmpVer(fwStable.version,cur)<0){
+      res.style.display='block';
+      res.textContent="You're on a pre-release build.";
+      $('fwStableBtn').textContent='Return to stable · v'+fwStable.version;
+      $('fwStableBtn').disabled=false;
+      row.style.display='block';
+      return;
+    }
+    if(!silent)res.textContent='Up to date · v'+cur;
+  }
+
+  window.toggleBetaChannel=function(){
+    var on=$('fwBetaToggle').checked;
+    if(!send({cmd:'config',betaChannel:on})){
+      $('fwBetaToggle').checked=!on;
+      return;
+    }
+    betaChannel=on;
+    // Re-check on both edges: switching on should surface a waiting beta at
+    // once, and switching off is what reveals the way back to stable.
+    $('fwCheckBtn').style.display='';
+    checkForUpdate();
   };
 
   // Hide the footer support link when the build doesn't provide a URL
@@ -3089,30 +3232,40 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     if(a&&(!h||h.indexOf('{{')>=0)) a.style.display='none';
   })();
 
-  window.installUpdate=function(){
-    if(!fwLatest) return;
-    var btn=$('fwInstallBtn');
+  // `down` is the deliberate backwards flash: same transport, same hash check,
+  // different words. There is no version gate in web_ota.cpp to bypass — it
+  // enforces chip/project identity and the SHA-256, and nothing else.
+  function runInstall(target,down){
+    if(!target) return;
+    var btn=down?$('fwStableBtn'):$('fwInstallBtn');
     if(btn.disabled) return;
-    if(!confirm('Download and install v'+fwLatest.version+'? The device will restart.')) return;
-    btn.disabled=true;
+    if(!confirm(down
+      ?('Return to stable v'+target.version+'? The device will restart, and stored settings may not survive a downgrade.')
+      :('Download and install v'+target.version+'? The device will restart.'))) return;
+    $('fwInstallBtn').disabled=true;
+    $('fwStableBtn').disabled=true;
     var res=$('fwCheckResult');
-    res.textContent='Downloading v'+fwLatest.version+'...';
-    fetch(fwLatest.binUrl+'?t='+Date.now()).then(function(r){
+    res.textContent='Downloading v'+target.version+'...';
+    fetch(target.binUrl+'?t='+Date.now()).then(function(r){
       if(!r.ok) throw new Error('HTTP '+r.status);
       return r.arrayBuffer();
     }).then(function(buf){
       return sha256Hex(buf).then(function(hash){
-        if(hash&&hash!==fwLatest.sha256) throw new Error('checksum mismatch — aborted');
+        if(hash&&hash!==target.sha256) throw new Error('checksum mismatch — aborted');
         res.textContent=hash?'Checksum verified. Installing...':'Installing... (device will verify checksum)';
         // Always send the manifest hash so the device verifies the received
         // bytes even when the browser cannot (crypto.subtle needs https).
-        flashBuffer(buf,fwLatest.sha256);
+        flashBuffer(buf,target.sha256);
       });
     }).catch(function(e){
-      res.textContent='Install failed: '+e.message;
-      btn.disabled=false;
+      res.textContent=(down?'Return to stable failed: ':'Install failed: ')+e.message;
+      $('fwInstallBtn').disabled=false;
+      $('fwStableBtn').disabled=false;
     });
-  };
+  }
+
+  window.installUpdate=function(){runInstall(fwLatest,false)};
+  window.returnToStable=function(){runInstall(fwStable,true)};
 
   // ── About card: device info, events, diagnostics ───────────────────────────
   var deviceInfo=null, lastEvents=null, lastState=null;

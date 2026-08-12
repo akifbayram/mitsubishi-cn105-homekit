@@ -95,6 +95,17 @@ jobs:
           echo "tag=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "number=${VERSION#v}" >> "$GITHUB_OUTPUT"
 
+          # A hyphen in the tag is what makes it a prerelease: v0.2.6-beta.1.
+          # Betas publish into firmware/homekit/beta/ and never touch stable,
+          # so the web installer keeps serving the stable manifest.
+          if [[ "${VERSION}" == *-* ]]; then
+            echo "channel=beta" >> "$GITHUB_OUTPUT"
+            echo "dir=firmware/homekit/beta" >> "$GITHUB_OUTPUT"
+          else
+            echo "channel=stable" >> "$GITHUB_OUTPUT"
+            echo "dir=firmware/homekit" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Checkout serin-cn105
         uses: actions/checkout@v6
         with:
@@ -103,40 +114,61 @@ jobs:
           path: serin-cn105
 
       - name: Deploy firmware files
+        env:
+          CHANNEL: ${{ steps.version.outputs.channel }}
+          CHANNEL_DIR: ${{ steps.version.outputs.dir }}
         run: |
           cd serin-cn105
 
-          # Remove old firmware directories. esp32-devkit and esp32c3-mini are
-          # no longer built (see the matrix above) but are still listed here on
-          # purpose: this is what unpublishes the broken 8 MB-header binaries
-          # that v0.2.4 left in the distribution repo.
-          rm -rf firmware/homekit/nanoc6 \
-                 firmware/homekit/m5atoms3-lite \
-                 firmware/homekit/esp32-devkit \
-                 firmware/homekit/esp32c3-mini
+          if [ "${CHANNEL}" = "beta" ]; then
+            # Beta owns only its own directory: one prerelease is kept at a
+            # time, and stable is never touched by a beta tag.
+            rm -rf "${CHANNEL_DIR}"
+            mkdir -p "${CHANNEL_DIR}"
+          else
+            # Named board directories, NOT a glob. Two reasons: this is what
+            # unpublishes the broken 8 MB-header esp32-devkit and esp32c3-mini
+            # binaries v0.2.4 left behind (they are no longer built — see the
+            # matrix above), and a glob here would delete firmware/homekit/beta
+            # along with them, silently unpublishing the beta channel on every
+            # stable release.
+            rm -rf firmware/homekit/nanoc6 \
+                   firmware/homekit/m5atoms3-lite \
+                   firmware/homekit/esp32-devkit \
+                   firmware/homekit/esp32c3-mini
 
-          # Remove legacy single merged bins if they exist
-          rm -f firmware/homekit/*.bin
+            # Remove legacy single merged bins if they exist. A file glob, so
+            # it cannot match the beta directory either.
+            rm -f firmware/homekit/*.bin
+          fi
 
           # Copy new firmware files
           for name in nanoc6 m5atoms3-lite; do
-            mkdir -p firmware/homekit/${name}
-            cp ../artifacts/firmware-${name}/* firmware/homekit/${name}/
+            mkdir -p "${CHANNEL_DIR}/${name}"
+            cp ../artifacts/firmware-${name}/* "${CHANNEL_DIR}/${name}/"
           done
 
       - name: Generate manifest.json
         env:
           VERSION: ${{ steps.version.outputs.number }}
           TAG: ${{ steps.version.outputs.tag }}
+          CHANNEL: ${{ steps.version.outputs.channel }}
+          CHANNEL_DIR: ${{ steps.version.outputs.dir }}
         run: |
           sha() { sha256sum "artifacts/firmware-$1/firmware.bin" | cut -d' ' -f1; }
           SHA_NANOC6=$(sha nanoc6)
           SHA_M5ATOMS3=$(sha m5atoms3-lite)
 
-          cat > serin-cn105/firmware/homekit/manifest.json << EOF
+          # parts[].path stays relative: it resolves against the manifest's own
+          # directory in both consumers (the device's update check and the web
+          # installer), so the same shape works on either channel.
+          # "channel" is informational — each consumer knows which channel it is
+          # on from the URL it fetched, and nothing branches on this key.
+          cat > "serin-cn105/${CHANNEL_DIR}/manifest.json" << EOF
           {
             "name": "Mitsubishi HomeKit Controller",
             "version": "${VERSION}",
+            "channel": "${CHANNEL}",
             "release_url": "https://github.com/akifbayram/mitsubishi-cn105-homekit/releases/tag/${TAG}",
             "new_install_prompt_erase": true,
             "builds": [
@@ -166,18 +198,20 @@ jobs:
           }
           EOF
 
-          python3 -m json.tool serin-cn105/firmware/homekit/manifest.json > /dev/null
-          echo "manifest OK"
+          python3 -m json.tool "serin-cn105/${CHANNEL_DIR}/manifest.json" > /dev/null
+          echo "manifest OK (${CHANNEL})"
 
       - name: Commit and push to serin-cn105
         env:
           VERSION: ${{ steps.version.outputs.number }}
+          CHANNEL: ${{ steps.version.outputs.channel }}
         run: |
           cd serin-cn105
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Covers both channels: beta/ lives under firmware/homekit/.
           git add firmware/homekit/
-          git commit -m "chore: update homekit firmware to ${VERSION}"
+          git commit -m "chore: update homekit ${CHANNEL} firmware to ${VERSION}"
           git push
 
   release:
@@ -204,5 +238,8 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           name: ${{ github.ref_name }}
+          # This job runs parallel to deploy, so it cannot read that job's
+          # version-step outputs — it re-derives the same rule from the tag.
+          prerelease: ${{ contains(github.ref_name, '-') }}
           generate_release_notes: true
           files: release/firmware-*.bin

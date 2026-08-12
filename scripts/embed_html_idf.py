@@ -112,6 +112,7 @@ def main() -> None:
     parser.add_argument("--fw-version", default="0.0.0-dev", help="Firmware version from git/CMake")
     parser.add_argument("--board-fw-id", default="", help="serin-cn105 firmware dir name; empty hides update check")
     parser.add_argument("--update-manifest-url", default="", help="Manifest URL for update check; empty disables")
+    parser.add_argument("--update-manifest-beta-url", default="", help="Beta channel manifest URL; empty hides the beta toggle")
     parser.add_argument("--support-url", default="", help="Help & Support link in the footer; empty hides it")
     args = parser.parse_args()
 
@@ -124,6 +125,7 @@ def main() -> None:
         "FW_VERSION": args.fw_version,
         "BOARD_FW_ID": args.board_fw_id,
         "UPDATE_MANIFEST_URL": args.update_manifest_url,
+        "UPDATE_MANIFEST_BETA_URL": args.update_manifest_beta_url,
         "SUPPORT_URL": args.support_url,
     }
 

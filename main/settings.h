@@ -49,6 +49,7 @@ struct DeviceSettings {
     float    heatingThreshold = 20.0f;  // AUTO mode heating target
     float    coolingThreshold = 25.0f;  // AUTO mode cooling target
     bool     useFahrenheit = false;     // Web UI display unit
+    bool     betaChannel = false;      // Update check also reads the beta manifest
     char     setupCode[9] = "";        // HomeKit pairing code (8 digits)
     bool     wifiChangePending = false; // True after WiFi creds changed via web UI (shorter fallback timeout)
     uint8_t  vaneConfig = 2;          // 0=no vanes, 1=vertical only, 2=vertical+horizontal

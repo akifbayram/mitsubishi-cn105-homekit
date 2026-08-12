@@ -75,6 +75,13 @@ if(NOT DEFINED UPDATE_MANIFEST_URL)
     set(UPDATE_MANIFEST_URL "https://raw.githubusercontent.com/Serin-Labs/serin-cn105/main/firmware/homekit/manifest.json")
 endif()
 
+# The opt-in beta channel's manifest — same shape as stable, one directory down.
+# -DUPDATE_MANIFEST_BETA_URL="" hides the beta toggle and leaves the update
+# check reading stable only.
+if(NOT DEFINED UPDATE_MANIFEST_BETA_URL)
+    set(UPDATE_MANIFEST_BETA_URL "https://raw.githubusercontent.com/Serin-Labs/serin-cn105/main/firmware/homekit/beta/manifest.json")
+endif()
+
 set(BOARD_FW_ID "")
 if(DEFINED BOARD_PROFILE_NANOC6)
     set(BOARD_FW_ID "nanoc6")
@@ -178,6 +185,7 @@ add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/web_ui.html.gz
         --fw-version "${PROJECT_VER}"
         --board-fw-id "${BOARD_FW_ID}"
         --update-manifest-url "${UPDATE_MANIFEST_URL}"
+        --update-manifest-beta-url "${UPDATE_MANIFEST_BETA_URL}"
         --support-url "${BRAND_SUPPORT_URL}"
     DEPENDS ${PROJECT_DIR}/web/index.html ${PROJECT_DIR}/scripts/embed_html_idf.py
     COMMENT "Generating web_ui.html.gz"

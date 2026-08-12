@@ -262,6 +262,14 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
             changed = true;
         }
 
+        // Board-independent, so deliberately outside any BLE_ENABLE block.
+        bool betaVal;
+        if (jsonGetBool(msg, "betaChannel", &betaVal)) {
+            settings.get().betaChannel = betaVal;
+            LOG_INFO("Config betaChannel=%s", betaVal ? "ON" : "OFF");
+            changed = true;
+        }
+
         char nameVal[32];
         if (jsonGetString(msg, "deviceName", nameVal, sizeof(nameVal))) {
             // Trim leading whitespace
@@ -786,6 +794,7 @@ void WebUI::pushState() {
         ",\"logLevel\":%d"
         ",\"pollInterval\":%lu"
         ",\"tempUnit\":\"%s\""
+        ",\"betaChannel\":%s"
         ",\"vaneConfig\":%d"
         ",\"modeMask\":%d"
         ",\"modeMaskBoot\":%d"
@@ -798,6 +807,7 @@ void WebUI::pushState() {
         (int)cfg.logLevel,
         (unsigned long)cfg.pollMs,
         cfg.useFahrenheit ? "F" : "C",
+        cfg.betaChannel ? "true" : "false",
         (int)cfg.vaneConfig,
         (int)cfg.modeMask,
         (int)(hkReady ? homekit_get_boot_mode_mask() : cfg.modeMask),

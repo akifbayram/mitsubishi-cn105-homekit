@@ -207,6 +207,15 @@ void SettingsStore::begin() {
         _settings.useFahrenheit = (val != 0);
     }
 
+    // betaChannel — bool stored as uint8_t. A missing key leaves val at 0, so
+    // an existing install reads the struct default and stays on stable; that
+    // is why no schema bump is needed for this field.
+    {
+        uint8_t val = 0;
+        nvs_get_u8(_handle, "betaChan", &val);
+        _settings.betaChannel = (val != 0);
+    }
+
     // setupCode — string
     {
         size_t len = sizeof(_settings.setupCode);
@@ -414,6 +423,7 @@ void SettingsStore::save() {
     nvs_set_blob(_handle, "heatThresh", &_settings.heatingThreshold, sizeof(float));
     nvs_set_blob(_handle, "coolThresh", &_settings.coolingThreshold, sizeof(float));
     nvs_set_u8(_handle, "useFahr", _settings.useFahrenheit ? 1 : 0);
+    nvs_set_u8(_handle, "betaChan", _settings.betaChannel ? 1 : 0);
     nvs_set_str(_handle, "setupCode", _settings.setupCode);
     nvs_set_u8(_handle, "wifiChgPend", _settings.wifiChangePending ? 1 : 0);
     nvs_set_u8(_handle, "vaneConfig", _settings.vaneConfig);
