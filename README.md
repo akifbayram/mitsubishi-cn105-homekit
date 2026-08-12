@@ -21,8 +21,8 @@ Controls Mitsubishi mini split heat pumps via the CN105 serial connector, compat
 - **Native Apple HomeKit** — pairs directly with Apple Home; no cloud, bridge hardware, or Home Assistant required
 - **Web UI** — real-time control, diagnostics, and log streaming
 - **Browser-based flashing** — no development tools needed ([web flasher](https://serin-labs.com/flash))
-- **Room temperature sources** — use the heat pump's own sensor, a BLE sensor, or a paired Serin Link, switchable from the web UI
-- **BLE remote temperature sensor** — Govee, Xiaomi (PVVX), SwitchBot, BTHome v2, with auto-detection
+- **Room temperature sources** — feed the heat pump its own sensor, one of up to four BLE thermometers, or a paired Serin Link, or average several of them
+- **BLE remote temperature sensors** — Govee, Xiaomi (PVVX), SwitchBot, BTHome v2, with auto-detection and a per-sensor calibration offset
 - **Serin Link** — optional physical dial with a display for control and live status over an encrypted wireless link
 - **OTA firmware updates** — SHA256 verification, wrong-image rejection, and automatic rollback
 - **Dual setpoint Auto mode** — independent heating and cooling thresholds
@@ -232,19 +232,26 @@ The priority order between these states is a pure, host-tested policy (`main/sle
 
 Wall-mounted mini split units measure temperature at ceiling height near the return air intake, which usually reads warmer than the living space. Feeding the heat pump a reading from lower in the room gives it something better to work with.
 
-Three sources can supply that reading, selectable from the **Room Sensor** card in the web UI:
+These sources can supply that reading, all managed from the **Room Sensor** card in the web UI:
 
 | Source | Reading from | Requires |
 |--------|--------------|----------|
-| **Heat Pump Sensor** | The unit's own internal thermistor | Nothing; always available, and the fallback for the other two |
-| **Remote Sensor** | A BLE temperature sensor placed in the room | A board with Bluetooth and a configured sensor MAC |
+| **Heat Pump Sensor** | The unit's own internal thermistor | Nothing; always available, and the fallback for every other source |
+| **Remote Sensor** | A BLE thermometer placed in the room, up to 4 of them | A board with Bluetooth and at least one configured sensor |
 | **Serin Link** | The temperature sensor inside a paired dial | A paired Serin Link whose hardware reports sensing capability |
 
-Only sources the unit can actually serve are listed. The selected source is forwarded to the heat pump every 20 seconds. If it goes quiet past the stale timeout (default 10 minutes, adjustable from 30 seconds to 1 hour), the heat pump reverts to its own thermistor and the card flags the source as *stale*. The selection is kept, so it recovers when readings resume.
+Only sources the unit can actually serve are listed. The card runs in one of two modes:
+
+- **Single** — one source feeds the heat pump. Tap a row to switch.
+- **Average** — check any number of remote sources and the firmware feeds their equal-weight mean, with each sensor's offset applied before the average is taken.
+
+Whichever mode is active, the resulting value is forwarded to the heat pump every 20 seconds. A source that goes quiet past the stale timeout (default 10 minutes, adjustable from 30 seconds to 1 hour) is dropped: in Average mode it leaves the blend until it returns, and when no remote source is left the heat pump goes back to its own thermistor. The selection is kept either way, so it recovers when readings resume.
+
+The heat pump's own sensor is never blended with a live remote reading. The CN105 echoes back whatever value it is fed as the room temperature, so the thermistor is unobservable while an override is active; checking nothing simply leaves the unit on its own sensor.
 
 ### Remote Sensor (BLE)
 
-The firmware listens for BLE advertisements from a configured sensor. No Bluetooth pairing needed, just power on the sensor. It also shows up in Apple Home as its own accessory (separate from the climate tile) reporting temperature, humidity, and battery level. Home shows a low-battery warning when the cell drops to 20% or below.
+The firmware listens for BLE advertisements from the configured sensors. No Bluetooth pairing needed, just power the sensor on. The first sensor in the list also shows up in Apple Home as its own accessory (separate from the climate tile) reporting temperature, humidity, and battery level. Home shows a low-battery warning when the cell drops to 20% or below.
 
 #### Supported Sensors
 
@@ -265,10 +272,13 @@ The firmware auto-detects the sensor type from the BLE advertisement format.
 
 The **Room Sensor** card carries the BLE settings on boards with Bluetooth:
 
-- **Source rows** — one tappable row per available source, each showing its live reading, health dot, and how long ago it last reported. Tap to switch.
-- **Enable Remote Sensor** — turn BLE scanning on or off
-- **Sensor MAC** — enter the sensor's BLE address, or press **Scan** to discover nearby sensors with their live temperature and humidity
+- **Single / Average** — pick between one feeding source and a blend of several
+- **Headline** — what the heat pump currently sees, the sensors behind it, and why (equal average, one sensor, fallback, or a spread warning when the contributors disagree)
+- **Source rows** — one row per available source, each showing its live reading, battery, signal, and how long ago it last reported. Tap to select in Single mode, check to include in Average mode.
+- **Add Sensor…** — scan for nearby thermometers with their live temperature and humidity, or *Enter address manually…* to type a MAC. Up to 4 sensors; each can be renamed after the room it sits in, or removed.
+- **Enable Remote Sensors** — turn BLE scanning on or off
 - **Sensor Timeout** — how long a source may go quiet before it counts as stale (30–3600 s)
+- **Advanced — sensor offsets** — a calibration offset per sensor (±9.9 °C, entered in the display unit), applied to each reading before it is used or averaged
 - **Indicators** — green (healthy), orange (stale or no data yet), gray (not configured)
 
 ## Serin Link
@@ -319,7 +329,7 @@ The page is organised into cards:
 - **Climate** — Off/Heat/Cool/Auto/Dry/Fan selector (power is integrated as Off), target temperature at 0.5°C precision, and in Auto a dual-setpoint range slider for independent heat/cool thresholds
 - **Airflow** — fan speed (Auto, Quiet, Low, Med, High, Max), vertical vane, horizontal vane, swing
 - **Heat Pump · CN105** — link status plus compressor frequency, outside temp, runtime hours, error codes, and sub mode/stage
-- **Room Sensor** — room temperature source selection, BLE sensor readings and configuration, stale timeout (see [Room Temperature](#room-temperature))
+- **Room Sensor** — single or averaged room temperature sources, BLE sensor list, readings, offsets, stale timeout (see [Room Temperature](#room-temperature))
 - **Network · Wi-Fi** — current network and uptime, a scan list of nearby networks, credential entry with trial-before-save, and *Forget Wi-Fi…* under **Advanced**
 - **HomeKit** — pairing status, controller count, setup code with copy button, QR code, and reset pairing
 - **Link** — paired dial model, firmware, signal, last seen; pair, cancel, and forget (see [Serin Link](#serin-link))
@@ -336,7 +346,7 @@ Under **Unit Capabilities**, unchecking a mode your unit doesn't have hides it h
 
 ## HomeKit Details
 
-The device pairs as a HomeKit bridge. The thermostat appears as one accessory behind it, and a configured BLE sensor as a second, distinct accessory. Every service reports a connection state, so the Home app marks an accessory "Not Responding" when the CN105 link or BLE sensor drops. Which services are published depends on [Unit Capabilities](#web-ui); a cooling-only unit exposes no Heat mode and no Dry switch.
+The device pairs as a HomeKit bridge. The thermostat appears as one accessory behind it, and the first configured BLE sensor as a second, distinct accessory (the sensor accessory predates the multi-sensor list and still tracks slot 0 only). Every service reports a connection state, so the Home app marks an accessory "Not Responding" when the CN105 link or BLE sensor drops. Which services are published depends on [Unit Capabilities](#web-ui); a cooling-only unit exposes no Heat mode and no Dry switch.
 
 Triggering **Identify** from the Home app flashes the status LED white, which is the quickest way to tell two units apart. The web UI's **Flash LED** button and `POST /identify` do the same thing.
 
