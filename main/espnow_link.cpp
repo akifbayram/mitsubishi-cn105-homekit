@@ -68,6 +68,36 @@ static bool             s_started = false;
 // actual save(), not every loop tick.
 static uint32_t         s_capsGen = 0;
 
+/* Serin root Ed25519 pubkey for device-cert verification. File-static because
+ * sl2_link_t holds the pointer, not a copy (sl2_link.h: "adopter keeps the
+ * storage alive"). See the call site in begin() for why it is a build input. */
+static void apply_dial_root_pub(sl2_link_t *l) {
+#ifdef SL2_DIAL_ROOT_PUB_HEX
+    static uint8_t rootPub[32];
+    const char *hex = SL2_DIAL_ROOT_PUB_HEX;
+    if (strlen(hex) != 64) {
+        LOG_ERROR("SL2_DIAL_ROOT_PUB_HEX must be 64 hex chars (got %u) — "
+                  "cert verification stays off", (unsigned)strlen(hex));
+        return;
+    }
+    for (int i = 0; i < 32; i++) {
+        unsigned byte;
+        if (sscanf(hex + i * 2, "%2x", &byte) != 1) {
+            LOG_ERROR("SL2_DIAL_ROOT_PUB_HEX is not hex at offset %d — "
+                      "cert verification stays off", i * 2);
+            return;
+        }
+        rootPub[i] = (uint8_t)byte;
+    }
+    sl2_link_set_root_pub(l, rootPub);
+    LOG_INFO("Serin Link v2: dial certificates verified against the Serin root");
+#else
+    (void)l;
+    LOG_INFO("Serin Link v2: no Serin root key in this build — dial "
+             "certificates are reported as unverified");
+#endif
+}
+
 /* Cross-task mailbox. The sl2 core is single-context by contract (sl2_link.h):
  * only loop() — on the main task — may mutate s_link. The web (httpd) and
  * console (REPL) tasks request mutations through these flags instead of
@@ -343,15 +373,21 @@ static bool h_get_state(void *, sl2_hvac_state_t *out) {
     /* Remote-sensor low-battery latch: ON at <=10%, clear only at >=15% so a
      * cell hovering at the threshold doesn't flap the home-face chip. */
     static bool s_battLatch = false;
-    if (BleSensor::isEnabled() && BleSensor::isActive()) {
-        int8_t b = BleSensor::battery();
+    /* Read the FED slot explicitly. room_dc above is the pump echoing back
+     * whatever that slot sent, so humidity and battery have to come from the
+     * same sensor — the no-arg accessors would be a second lookup that can
+     * name a different slot, which put one sensor's humidity beside another's
+     * temperature on the dial's home face. */
+    const int fedSlot = BleSensor::feedSlot();
+    if (fedSlot >= 0 && BleSensor::isActive(fedSlot)) {
+        int8_t b = BleSensor::battery(fedSlot);
         if (b >= 0) {
             if (b <= 10)      s_battLatch = true;
             else if (b >= 15) s_battLatch = false;
         }
         /* Forward remote-sensor humidity (%RH) to the dial. NAN = sensor has no
          * humidity channel, so leave room_hum_pct at SL2_HUM_NA. */
-        float rh = BleSensor::humidity();
+        float rh = BleSensor::humidity(fedSlot);
         if (!std::isnan(rh)) {
             if (rh < 0.0f)        rh = 0.0f;
             else if (rh > 100.0f) rh = 100.0f;
@@ -405,15 +441,15 @@ static bool h_apply(void *, uint16_t mask, const struct sl2_cmd_pkt *cmd) {
  * later. The edit is separate: is_edit is only true for a long-enough frame
  * carrying something other than the NOEDIT sentinel (core-verified, see
  * sl2_link.h), but the VALUE still needs validating here — it crossed the
- * air. Reject anything past the three known sources, and reject LINK
- * specifically when this same packet's flags say the dial has no sensing
- * hardware to offer (feed() above already applied those flags, so
- * hasSensor() reflects this packet, not a stale one). */
+ * air. RoomAvg::legacySrcSelectable() is the same test the web UI applies:
+ * it rejects anything past the three known sources, LINK when this same
+ * packet's flags say the dial has no sensing hardware to offer (feed() above
+ * already applied those flags, so the check reflects this packet, not a stale
+ * one), and BLE when no slot is configured. */
 static void h_room_sensor(void *, const uint8_t src_mac[6],
                           const struct sl2_dial_sensor_pkt *p, bool is_edit) {
     LinkSensor::feed(src_mac, p);
-    if (is_edit && p->want_src <= SL2_ROOMSRC_LINK &&
-        (p->want_src != SL2_ROOMSRC_LINK || LinkSensor::hasSensor())) {
+    if (is_edit && RoomAvg::legacySrcSelectable(p->want_src)) {
         auto &st = settings.get();
         // The dial speaks the legacy enum: an explicit pick is a single-mode
         // selection, so an edit also drops out of averaging.
@@ -704,6 +740,18 @@ void EspnowLink::begin(CN105Controller *ctrl) {
     s_hvac.wifi_setup = h_wifi_setup;
 
     sl2_link_init(&s_link, &s_port, &s_crypto, &s_hvac);
+
+    /* Serin device-cert verification (wire spec §10c). Without this call
+     * l->root_pub stays NULL and dial_cert_apply() short-circuits every cert
+     * to PRESENT — SL2_CERT_OK is unreachable and no signature is ever
+     * checked, so a factory dial and a counterfeit read identically. The root
+     * is a PUBLIC key, but it belongs to Serin fulfillment rather than to the
+     * open firmware, so it arrives at build time:
+     *   idf.py build -DSL2_DIAL_ROOT_PUB_HEX=<64 hex chars>
+     * A build without it reports "Unverified", which is the honest answer —
+     * it genuinely cannot tell the two apart. */
+    apply_dial_root_pub(&s_link);
+
     if (!sl2_link_start(&s_link)) { LOG_ERROR("sl2_link_start failed"); return; }
     s_started = true;
 

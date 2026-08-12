@@ -69,6 +69,12 @@ static portMUX_TYPE s_trialMux = portMUX_INITIALIZER_UNLOCKED;
 static struct {
     bool active = false;
     bool commitPending = false;          // GOT_IP landed — loop() must persist
+    // The deadline passed with no previous credentials to fall back to, so the
+    // radio is still retrying THESE credentials. A join that lands late is
+    // still a join on the submitted network and must be persisted — without
+    // this the device comes up online but with nothing in NVS, and the next
+    // power cycle strands it in the fallback AP.
+    bool lateCommit = false;
     char newSsid[33] = {}, newPass[65] = {};
     char oldSsid[33] = {}, oldPass[65] = {};
     bool haveOld = false;
@@ -131,7 +137,9 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
             s_pendingJoin = false;
             s_expectDisconnect = false;   // never let a lost event swallow a later real drop
             portENTER_CRITICAL(&s_trialMux);
-            if (s_trial.active) s_trial.commitPending = true;  // loop() persists on the main task
+            // loop() persists on the main task. lateCommit keeps the window
+            // open past the deadline when there was nothing to revert to.
+            if (s_trial.active || s_trial.lateCommit) s_trial.commitPending = true;
             portEXIT_CRITICAL(&s_trialMux);
             if (s_wifiEventGroup) {
                 xEventGroupSetBits(s_wifiEventGroup, CONNECTED_BIT);
@@ -240,10 +248,12 @@ bool WifiManager::connect(const char* ssid, const char* password)
             // Boot path / re-apply of current network: nothing to commit or revert.
             s_trial.active = false;
             s_trial.commitPending = false;
+            s_trial.lateCommit = false;
             s_trial.result = WIFI_TRIAL_IDLE;
         } else {
             s_trial.active = true;
             s_trial.commitPending = false;
+            s_trial.lateCommit = false;   // this trial supersedes any earlier one
             strncpy(s_trial.newSsid, ssid, sizeof(s_trial.newSsid) - 1);
             s_trial.newSsid[sizeof(s_trial.newSsid) - 1] = '\0';
             strncpy(s_trial.newPass, pw, sizeof(s_trial.newPass) - 1);
@@ -311,6 +321,7 @@ void WifiManager::loop()
     portENTER_CRITICAL(&s_trialMux);
     bool active = s_trial.active;
     bool commit = s_trial.commitPending;
+    bool late = s_trial.lateCommit;
     bool expired = active && !commit && (int64_t)nowMs >= s_trial.deadlineMs;
     bool haveOld = s_trial.haveOld;
     char newSsid[sizeof(s_trial.newSsid)], newPass[sizeof(s_trial.newPass)];
@@ -320,16 +331,18 @@ void WifiManager::loop()
     memcpy(oldSsid, s_trial.oldSsid, sizeof(oldSsid));
     memcpy(oldPass, s_trial.oldPass, sizeof(oldPass));
     portEXIT_CRITICAL(&s_trialMux);
-    if (!active) return;
+    if (!active && !late) return;
 
     if (commit) {
         saveCredentials(newSsid, newPass);
         portENTER_CRITICAL(&s_trialMux);
         s_trial.active = false;
         s_trial.commitPending = false;
+        s_trial.lateCommit = false;
         s_trial.result = WIFI_TRIAL_SUCCESS;
         portEXIT_CRITICAL(&s_trialMux);
-        LOG_INFO("Trial join succeeded — credentials committed (SSID: %s)", newSsid);
+        LOG_INFO("Trial join %s — credentials committed (SSID: %s)",
+                 late ? "landed after the deadline" : "succeeded", newSsid);
         return;
     }
 
@@ -337,6 +350,9 @@ void WifiManager::loop()
         portENTER_CRITICAL(&s_trialMux);
         s_trial.active = false;
         s_trial.result = WIFI_TRIAL_FAILED;  // latched until the next connect()
+        // Nothing to revert to means the radio keeps retrying these very
+        // credentials, so a later GOT_IP still belongs to this trial.
+        s_trial.lateCommit = !haveOld;
         portEXIT_CRITICAL(&s_trialMux);
         s_pendingJoin = false;
         if (haveOld) {
@@ -345,8 +361,9 @@ void WifiManager::loop()
             applyStaConfig(oldSsid, oldPass);
             esp_wifi_connect();
         } else {
-            LOG_WARN("Trial join to '%s' failed — no previous credentials to restore",
-                     newSsid);
+            LOG_WARN("Trial join to '%s' has not landed in %lus — still retrying; "
+                     "credentials will be saved if it connects",
+                     newSsid, (unsigned long)(TRIAL_TIMEOUT_MS / 1000));
         }
     }
 }

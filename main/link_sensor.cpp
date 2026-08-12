@@ -9,6 +9,8 @@
 #include <cstring>
 #include <cmath>
 #include <atomic>
+#include <algorithm>
+#include <cstdint>
 
 static const char *TAG = "link_sensor";
 
@@ -107,6 +109,13 @@ void LinkSensor::loop(CN105Controller &cn105) {
     tempDc  = s_tempDc;
     lastUpd = s_lastUpdate;
     taskEXIT_CRITICAL(&s_mux);
+
+    // Calibration offset applies in Single mode too, not just in the Average
+    // blend. Both are tenths °C, so this stays in integer space — and folding
+    // it in before room_feed_step() means the 0.5 °C change grid and the
+    // keepalive both track the corrected value.
+    tempDc = (int16_t)std::clamp((int)tempDc + room_offset_dc(settings.get(), ROOM_MEMBER_LINK),
+                                 (int)INT16_MIN, (int)INT16_MAX);
 
     bool     selected    = (settings.get().roomMode == 0) &&
                            (settings.get().roomSingle == ROOM_MEMBER_LINK);

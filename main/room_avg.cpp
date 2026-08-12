@@ -1,6 +1,7 @@
 #include "room_avg.h"
 #include "room_feed.h"
 #include "settings.h"
+#include "sl2_proto.h"   // sl2_room_src, for legacySrcSelectable()
 #include "link_sensor.h"
 #include "ble_config.h"
 #ifdef BLE_ENABLE
@@ -55,7 +56,7 @@ void RoomAvg::loop(CN105Controller &cn105) {
     float sum = 0, mn = 0, mx = 0;
     int   n   = 0;
     auto contribute = [&](int bit, float t, uint32_t ageMs) {
-        t += st.roomOffsets[bit] / 10.0f;
+        t = room_apply_offset(st, bit, t);   // same rule the single-source paths use
         sum += t;
         mn = n ? std::min(mn, t) : t;
         mx = n ? std::max(mx, t) : t;
@@ -138,4 +139,25 @@ RoomAvg::Status RoomAvg::status() {
 
 bool RoomAvg::isFeeding() {
     return status().feeding;
+}
+
+bool RoomAvg::memberAvailable(int bit) {
+    if (bit == ROOM_MEMBER_LINK) return LinkSensor::hasSensor();
+    if (bit >= ROOM_MEMBER_BLE0) {
+#ifdef BLE_ENABLE
+        return BleSensor::isConfigured(bit - ROOM_MEMBER_BLE0);
+#else
+        return false;
+#endif
+    }
+    return bit == ROOM_MEMBER_INTERNAL;
+}
+
+bool RoomAvg::legacySrcSelectable(uint8_t src) {
+    if (src == SL2_ROOMSRC_INTERNAL) return true;
+    if (src == SL2_ROOMSRC_LINK) return memberAvailable(ROOM_MEMBER_LINK);
+    if (src != SL2_ROOMSRC_BLE) return false;   // past the three known sources
+    for (int i = 0; i < ROOM_MAX_BLE_SENSORS; i++)
+        if (memberAvailable(ROOM_MEMBER_BLE0 + i)) return true;
+    return false;
 }

@@ -43,16 +43,25 @@ namespace BleSensor {
     const char* sensorType(int idx); // Detected type (nullptr if unknown)
     bool     isConfigured(int idx);  // Slot has a valid address
 
-    // Legacy no-arg accessors = slot 0, the "primary" sensor (HomeKit sensor
-    // accessory, dial battery TLV — both predate the multi-sensor list).
-    inline float    temperature()   { return temperature(0); }
-    inline float    humidity()      { return humidity(0); }
-    inline int8_t   battery()       { return battery(0); }
-    inline int      rssi()          { return rssi(0); }
-    inline bool     isActive()      { return isActive(0); }
-    inline bool     isStale()       { return isStale(0); }
-    inline uint32_t lastUpdateAge() { return lastUpdateAge(0); }
-    inline const char* sensorType() { return sensorType(0); }
+    // The one sensor that stands for "the remote sensor" where only one can be
+    // named: the slot feeding the heat pump when there is one, else the first
+    // configured slot. -1 when nothing is configured. Slot 0 is NOT that
+    // sensor — it can be empty while slots 1..3 hold real ones, and pinning
+    // these consumers to it made the HomeKit accessory disappear on a
+    // slot-0 delete and sent the dial one sensor's humidity beside another's
+    // temperature.
+    int      primarySlot();
+
+    // No-arg accessors follow primarySlot() (HomeKit sensor accessory, dial
+    // battery TLV — both predate the multi-sensor list and can only show one).
+    inline float    temperature()   { return temperature(primarySlot()); }
+    inline float    humidity()      { return humidity(primarySlot()); }
+    inline int8_t   battery()       { return battery(primarySlot()); }
+    inline int      rssi()          { return rssi(primarySlot()); }
+    inline bool     isActive()      { return isActive(primarySlot()); }
+    inline bool     isStale()       { return isStale(primarySlot()); }
+    inline uint32_t lastUpdateAge() { return lastUpdateAge(primarySlot()); }
+    inline const char* sensorType() { return sensorType(primarySlot()); }
 
     bool     isReverted();    // Stale watchdog handed the HP back to its internal sensor
     // Which slot the single-mode feed reads from; -1 when averaging or a
@@ -70,7 +79,7 @@ namespace BleSensor {
     void     setSensor(int idx, const char* mac, const char* name);
     void     renameSensor(int idx, const char* name);
     inline void setAddr(const char* mac) { setSensor(0, mac, nullptr); }  // legacy web cmd
-    const char* getAddr();               // slot 0 address (legacy call sites)
+    const char* getAddr();               // primarySlot() address, "" when none
 
     // Discovery scan
     void startDiscovery();

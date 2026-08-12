@@ -222,8 +222,17 @@ bool WifiRecovery::wifiChangeFailed() const {
     // could fire); the _changeFailed clock covers what the trial can't see, a
     // change left pending across a reboot that never joins (trial state
     // resets at boot).
+    //
+    // The trial latch is deliberately never cleared — the recovery portal
+    // polls /wifi-status to report the verdict, and main.cpp reads it as an
+    // edge. But "wifi_err" on the dial is a live fault light, not a history
+    // entry: once the reverted network is back the unit is healthy and the
+    // dial must stop showing a fault. Gate the latch on still being off the
+    // air; if the revert also fails, we stay disconnected and it keeps
+    // showing.
     return _changeFailed ||
-           WifiManager::getTrialState() == WifiManager::WIFI_TRIAL_FAILED;
+           (WifiManager::getTrialState() == WifiManager::WIFI_TRIAL_FAILED &&
+            !WifiManager::isConnected());
 }
 
 void WifiRecovery::activateNow() {

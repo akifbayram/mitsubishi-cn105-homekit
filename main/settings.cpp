@@ -64,10 +64,36 @@ void SettingsStore::runKeyMigrations() {
     // is erased only once roomSrc has been confirmed written, so a failed
     // write (full/corrupt NVS, power loss mid-write) leaves bleFeed in place
     // to retry next boot instead of silently losing the BLE feed.
+    //
+    // bleFeed only ever MEANT "feed from BLE" alongside a configured sensor —
+    // it defaulted to 1 and was rewritten on every save(), so a unit that
+    // never paired a thermometer still carries bleFeed=1. Mapping that
+    // straight through would name BLE as the room source on almost every
+    // upgrading unit, pointing at an empty slot. Ask NVS whether a sensor was
+    // ever stored (this runs before any field load, so _settings is not
+    // populated yet) and only carry the BLE feed forward if one was.
     {
         uint8_t legacyFeed;
         if (nvs_get_u8(_handle, "bleFeed", &legacyFeed) == ESP_OK) {
-            uint8_t src = legacyFeed ? SL2_ROOMSRC_BLE : SL2_ROOMSRC_INTERNAL;
+            bool haveSensor = false;
+            {
+                char addr[18] = {0};
+                size_t len = sizeof(addr);
+                if (nvs_get_str(_handle, "bleAddr", addr, &len) == ESP_OK && addr[0])
+                    haveSensor = true;
+                BleSensorCfg list[ROOM_MAX_BLE_SENSORS] = {};
+                size_t blen = sizeof(list);
+                if (!haveSensor &&
+                    nvs_get_blob(_handle, "bleList", list, &blen) == ESP_OK &&
+                    blen == sizeof(list)) {
+                    for (int i = 0; i < ROOM_MAX_BLE_SENSORS && !haveSensor; i++) {
+                        list[i].addr[sizeof(list[i].addr) - 1] = '\0';
+                        if (list[i].addr[0]) haveSensor = true;
+                    }
+                }
+            }
+            uint8_t src = (legacyFeed && haveSensor) ? SL2_ROOMSRC_BLE
+                                                     : SL2_ROOMSRC_INTERNAL;
             if (nvs_set_u8(_handle, "roomSrc", src) == ESP_OK) {
                 nvs_erase_key(_handle, "bleFeed");
                 migrated = true;
@@ -229,41 +255,11 @@ void SettingsStore::begin() {
     if (_settings.roomStaleTimeoutS < 30) _settings.roomStaleTimeoutS = 30;
     if (_settings.roomStaleTimeoutS > 3600) _settings.roomStaleTimeoutS = 3600;
 
-    // roomMode / roomSingle / roomMembers / roomOffsets — the blending model.
-    // All keys are ADDITIVE over the <= 0.2.4 layout: absent keys are seeded
-    // from the legacy roomSrc so an OTA upgrade keeps feeding from the same
-    // source, and the legacy keys keep being written (see save()) so a
-    // downgrade also keeps working. Sanitized on load, same as modeMask.
-    {
-        uint8_t val = 0;
-        nvs_get_u8(_handle, "roomMode", &val);
-        _settings.roomMode = (val == 1) ? 1 : 0;
-    }
-    {
-        // Seed from the (already sanitized) legacy enum when never written:
-        // INTERNAL->internal bit, BLE->first BLE slot, LINK->link bit.
-        uint8_t seed = (_settings.roomSource == SL2_ROOMSRC_LINK) ? ROOM_MEMBER_LINK
-                     : (_settings.roomSource == SL2_ROOMSRC_BLE)  ? ROOM_MEMBER_BLE0
-                                                                  : ROOM_MEMBER_INTERNAL;
-        uint8_t val = seed;
-        nvs_get_u8(_handle, "roomSingle", &val);
-        _settings.roomSingle = (val < ROOM_MEMBER_COUNT) ? val : seed;
-    }
-    {
-        uint8_t val = (uint8_t)(1u << _settings.roomSingle);  // pre-check the current source
-        nvs_get_u8(_handle, "roomMembers", &val);
-        _settings.roomMembers = val & (uint8_t)((1u << ROOM_MEMBER_COUNT) - 1);
-    }
-    {
-        int8_t offs[ROOM_MEMBER_COUNT] = {0};
-        size_t len = sizeof(offs);
-        if (nvs_get_blob(_handle, "roomOffs", offs, &len) == ESP_OK && len == sizeof(offs)) {
-            for (int i = 0; i < ROOM_MEMBER_COUNT; i++)
-                _settings.roomOffsets[i] = std::clamp(offs[i],
-                    (int8_t)-ROOM_OFFSET_MAX_TENTHS, ROOM_OFFSET_MAX_TENTHS);
-        }
-    }
-
+    // The BLE sensor list loads BEFORE the blending model below, which needs
+    // it: seeding roomSingle from the legacy roomSrc means answering "which
+    // BLE slot?", and room_single_from_legacy() can only answer that once the
+    // slots are in _settings. Loading it after would make every upgrading
+    // unit look like it had no sensors.
 #ifdef BLE_ENABLE
     // bleEnabled — bool stored as uint8_t
     // First-boot default honors the -DBLE_SENSOR_DEFAULT_ON build flag; a stored
@@ -323,6 +319,59 @@ void SettingsStore::begin() {
              _settings.roomStaleTimeoutS);
 #endif
 
+    // roomMode / roomSingle / roomMembers / roomOffsets — the blending model.
+    // All keys are ADDITIVE over the <= 0.2.4 layout: absent keys are seeded
+    // from the legacy roomSrc so an OTA upgrade keeps feeding from the same
+    // source, and the legacy keys keep being written (see save()) so a
+    // downgrade also keeps working. Sanitized on load, same as modeMask.
+    {
+        uint8_t val = 0;
+        nvs_get_u8(_handle, "roomMode", &val);
+        _settings.roomMode = (val == 1) ? 1 : 0;
+    }
+    {
+        // Seed from the (already sanitized) legacy enum when never written.
+        // room_single_from_legacy() is the availability-aware mapping: BLE
+        // resolves to the first CONFIGURED slot, and to internal when there
+        // is none — 0.2.4 wrote bleFeed=1 by default whether or not a sensor
+        // was ever paired, so a bare "BLE -> slot 0" seed would point most
+        // upgrading units at an empty slot.
+        uint8_t seed = room_single_from_legacy(_settings.roomSource);
+        uint8_t val = seed;
+        nvs_get_u8(_handle, "roomSingle", &val);
+        if (val >= ROOM_MEMBER_COUNT) val = seed;
+        // A STORED pick can name an empty BLE slot too — written by an
+        // earlier build, or left behind when a downgrade dropped the sensor
+        // list. Same ghost, same fix: the pump would sit on its internal
+        // thermistor while the UI showed a remote source. Link is
+        // deliberately not checked here: a bonded dial advertises its sensing
+        // hardware only after boot, so its availability isn't knowable yet
+        // and demoting it would drop a valid selection on every restart.
+        if (val >= ROOM_MEMBER_BLE0) {
+            bool configured = false;
+#ifdef BLE_ENABLE
+            int i = val - ROOM_MEMBER_BLE0;
+            configured = (i < ROOM_MAX_BLE_SENSORS) && _settings.bleSensors[i].addr[0];
+#endif
+            if (!configured) val = seed;
+        }
+        _settings.roomSingle = val;
+    }
+    {
+        uint8_t val = (uint8_t)(1u << _settings.roomSingle);  // pre-check the current source
+        nvs_get_u8(_handle, "roomMembers", &val);
+        _settings.roomMembers = val & (uint8_t)((1u << ROOM_MEMBER_COUNT) - 1);
+    }
+    {
+        int8_t offs[ROOM_MEMBER_COUNT] = {0};
+        size_t len = sizeof(offs);
+        if (nvs_get_blob(_handle, "roomOffs", offs, &len) == ESP_OK && len == sizeof(offs)) {
+            for (int i = 0; i < ROOM_MEMBER_COUNT; i++)
+                _settings.roomOffsets[i] = std::clamp(offs[i],
+                    (int8_t)-ROOM_OFFSET_MAX_TENTHS, ROOM_OFFSET_MAX_TENTHS);
+        }
+    }
+
     // roomSource is derived state from here on — recompute so a stored value
     // that predates the blending model can't disagree with roomMode/roomSingle.
     _settings.roomSource = room_source_derived(_settings);
@@ -340,7 +389,12 @@ uint8_t room_single_from_legacy(uint8_t src) {
         for (int i = 0; i < ROOM_MAX_BLE_SENSORS; i++)
             if (settings.get().bleSensors[i].addr[0]) return ROOM_MEMBER_BLE0 + i;
 #endif
-        return ROOM_MEMBER_BLE0;
+        // "BLE" with no configured slot is not a selection, it's a ghost:
+        // feedSlot() would arm the feed state machine on a sensor that does
+        // not exist while the UI reported a remote source. Fall back to the
+        // one source that always exists. Callers that can reject instead of
+        // demote should gate on RoomAvg::legacySrcSelectable() first.
+        return ROOM_MEMBER_INTERNAL;
     }
     return ROOM_MEMBER_INTERNAL;
 }

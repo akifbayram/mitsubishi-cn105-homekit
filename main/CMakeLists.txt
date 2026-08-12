@@ -113,6 +113,17 @@ if(BLE_DISABLE)
     target_compile_definitions(${COMPONENT_TARGET} PRIVATE BLE_DISABLE=1)
 endif()
 
+# ── Serin device-cert root (wire spec §10c) ──────────────────────────────────
+# The PUBLIC Ed25519 key dial certificates are signed by, as 64 hex chars:
+#   idf.py build -DSL2_DIAL_ROOT_PUB_HEX=<64 hex chars>
+# Absent (the default for open builds), the link reports every dial cert as
+# "Unverified" — honest, because without the root it cannot tell a factory
+# dial from a counterfeit. See apply_dial_root_pub() in espnow_link.cpp.
+if(DEFINED SL2_DIAL_ROOT_PUB_HEX)
+    target_compile_definitions(${COMPONENT_TARGET} PRIVATE
+        SL2_DIAL_ROOT_PUB_HEX="${SL2_DIAL_ROOT_PUB_HEX}")
+endif()
+
 # ── Brand defaults (overridable via -DBRAND_NAME=... on cmake command line) ──
 if(NOT DEFINED BRAND_NAME)
     set(BRAND_NAME "Mini Split")

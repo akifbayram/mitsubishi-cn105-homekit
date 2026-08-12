@@ -34,4 +34,17 @@ namespace RoomAvg {
 
     Status status();     // last loop()'s snapshot (any task)
     bool   isFeeding();  // shorthand for status().feeding
+
+    /* Is there anything behind this member bit right now? Link needs a dial
+     * that has advertised sensing hardware, a BLE bit needs its slot
+     * configured, internal always exists. One rule, shared by every writer —
+     * the web roomSingle/roomMembers commands, the legacy roomSource command,
+     * and the dial's own source edit — so a selection can never name a source
+     * that isn't there while the UI claims otherwise. */
+    bool memberAvailable(int bit);
+
+    /* The same test in the legacy sl2_room_src vocabulary the dial and the
+     * pre-averaging web UI still speak. BLE is available when ANY slot is
+     * configured; room_single_from_legacy() then picks which one. */
+    bool legacySrcSelectable(uint8_t src);
 }

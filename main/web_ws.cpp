@@ -110,21 +110,9 @@ esp_err_t WebUI::handleWebSocket(httpd_req_t *req) {
 // WebSocket message dispatcher
 // ══════════════════════════════════════════════════════════════════════════════
 
-// One availability rule per member bit, shared by the roomSingle accept test
-// and the roomMembers bit-strip so the two can't drift apart: Link needs a
-// sensing dial, a BLE bit needs its slot configured, internal always exists
-// (though it is never a blend member — the members handler strips it anyway).
-static bool roomMemberAvailable(int bit) {
-    if (bit == ROOM_MEMBER_LINK) return LinkSensor::hasSensor();
-    if (bit >= ROOM_MEMBER_BLE0) {
-#ifdef BLE_ENABLE
-        return BleSensor::isConfigured(bit - ROOM_MEMBER_BLE0);
-#else
-        return false;
-#endif
-    }
-    return bit == ROOM_MEMBER_INTERNAL;
-}
+// The availability rule now lives in RoomAvg (room_avg.h) so the legacy
+// roomSource command and the dial's own source edit apply the same test.
+static inline bool roomMemberAvailable(int bit) { return RoomAvg::memberAvailable(bit); }
 
 void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
     char cmd[16] = {0};
@@ -321,16 +309,16 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
 
         // roomSource is not BLE-specific (Internal/Link don't need BLE at
         // all) so it's validated and saved unconditionally, outside the
-        // #ifdef above. Same acceptance test as Task 14's h_room_sensor()
-        // (espnow_link.cpp) so the dial and the web UI can't disagree: reject
-        // out-of-range values and reject Link specifically when no bonded
-        // dial has advertised sensing hardware — a stored "Link" with no
-        // dial would silently leave the pump on its internal sensor while
-        // the UI claimed otherwise.
+        // #ifdef above. Same acceptance test as h_room_sensor()
+        // (espnow_link.cpp) so the dial and the web UI can't disagree —
+        // RoomAvg::legacySrcSelectable() is that one test. It rejects
+        // out-of-range values, Link with no sensing dial, and BLE with no
+        // configured slot; any of those would silently leave the pump on its
+        // internal sensor while the UI claimed otherwise.
         int roomSourceVal;
         if (jsonGetInt(msg, "roomSource", &roomSourceVal)) {
-            if (roomSourceVal >= SL2_ROOMSRC_INTERNAL && roomSourceVal <= SL2_ROOMSRC_LINK &&
-                !(roomSourceVal == SL2_ROOMSRC_LINK && !LinkSensor::hasSensor())) {
+            if (roomSourceVal >= 0 && roomSourceVal <= UINT8_MAX &&
+                RoomAvg::legacySrcSelectable((uint8_t)roomSourceVal)) {
                 // Legacy enum command (kept for a cached pre-averaging UI):
                 // an explicit pick is a single-mode selection.
                 settings.get().roomMode   = 0;

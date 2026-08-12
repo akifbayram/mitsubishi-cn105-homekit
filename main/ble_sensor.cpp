@@ -122,6 +122,19 @@ int BleSensor::feedSlot() {
     return idx < ROOM_MAX_BLE_SENSORS ? idx : -1;
 }
 
+// The sensor that stands for "the remote sensor" to consumers that can only
+// show one (see ble_sensor.h). Prefer the one actually driving the pump; in
+// Average mode, or with a non-BLE source selected, fall back to the first
+// configured slot so the HomeKit accessory keeps existing instead of
+// appearing and vanishing with the room-source setting.
+int BleSensor::primarySlot() {
+    int fed = feedSlot();
+    if (fed >= 0 && settings.get().bleSensors[fed].addr[0]) return fed;
+    for (int i = 0; i < ROOM_MAX_BLE_SENSORS; i++)
+        if (settings.get().bleSensors[i].addr[0]) return i;
+    return -1;
+}
+
 // One home for the freshness rule shared by loop()/isActive()/isStale().
 static bool freshAt(uint32_t lastUpdate, uint32_t now, uint32_t staleMs) {
     return lastUpdate > 0 && (now - lastUpdate) < staleMs;
@@ -496,18 +509,24 @@ void BleSensor::loop(CN105Controller &cn105) {
     }
 
     if (feed && active && cn105.isConnected() && !std::isnan(temp)) {
+        // Calibration offset applies here, not just in the Average blend — a
+        // user who corrects a sensor that reads high expects the heat pump to
+        // see the corrected value in either mode. Applied before the change
+        // test so the 0.5 C grid quantizes what the HP will actually see.
+        float feedTemp = room_apply_offset(settings.get(),
+                                           ROOM_MEMBER_BLE0 + slot, temp);
         // Resend on the keepalive cadence, or as soon as the value the HP will
         // actually see (quantizeRemoteTemp: 0.5 C grid + clamp) changes —
         // rate-limited so a reading jittering across a grid boundary can't
         // spam the UART
         bool changed = std::isnan(s_lastSentTemp) ||
-                       CN105Controller::quantizeRemoteTemp(temp) !=
+                       CN105Controller::quantizeRemoteTemp(feedTemp) !=
                        CN105Controller::quantizeRemoteTemp(s_lastSentTemp);
         uint32_t interval = changed ? BLE_RESEND_MIN_MS : BLE_KEEPALIVE_MS;
         if (now - s_lastKeepalive >= interval) {
-            cn105.sendRemoteTemperature(temp);
+            cn105.sendRemoteTemperature(feedTemp);
             s_lastKeepalive = now;
-            s_lastSentTemp  = temp;
+            s_lastSentTemp  = feedTemp;
         }
     }
 
@@ -636,7 +655,9 @@ void BleSensor::renameSensor(int idx, const char* name) {
 }
 
 const char* BleSensor::getAddr() {
-    return settings.get().bleSensors[0].addr;
+    int idx = primarySlot();
+    static const char kNone[] = "";
+    return idx >= 0 ? settings.get().bleSensors[idx].addr : kNone;
 }
 
 void BleSensor::startDiscovery() {

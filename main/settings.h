@@ -80,8 +80,19 @@ uint8_t room_source_derived(const DeviceSettings &s);
 
 // The inverse, for legacy-enum writers (dial edit, old web command): a pick
 // is a single-mode selection; BLE maps to the first CONFIGURED slot (slot 0
-// may be empty after a remove).
+// may be empty after a remove), or to internal when none is configured.
 uint8_t room_single_from_legacy(uint8_t src);
+
+// A member's calibration offset, in tenths °C. Every path that feeds the heat
+// pump goes through these — the Average blend AND both single-source paths —
+// so an offset means the same thing in either mode. Out-of-range bits read as
+// no offset rather than off the end of the array.
+inline int room_offset_dc(const DeviceSettings &s, int bit) {
+    return (bit >= 0 && bit < ROOM_MEMBER_COUNT) ? s.roomOffsets[bit] : 0;
+}
+inline float room_apply_offset(const DeviceSettings &s, int bit, float t) {
+    return t + room_offset_dc(s, bit) / 10.0f;
+}
 
 class SettingsStore {
 public:
