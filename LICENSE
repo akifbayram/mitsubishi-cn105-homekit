@@ -1,0 +1,46 @@
+MIT License
+
+Copyright (c) 2026 Mehmet Bayram
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+================================================================================
+Third-party components
+================================================================================
+
+This firmware links and/or vendors the following, each under its own license:
+
+  Monocypher (main/sl2_monocypher/)          CC0-1.0 or BSD-2-Clause
+    Ed25519/SHA-512 + X25519 subset, unmodified from upstream @ 1830c06d.
+    https://github.com/LoupVaillant/Monocypher
+
+  esp-homekit-sdk (components/esp-homekit-sdk, submodule)
+    Espressif's HomeKit ADK integration. See that repository's LICENSE; the
+    Apple HomeKit ADK it builds on carries Apple's own terms.
+    https://github.com/espressif/esp-homekit-sdk
+
+  ESP-IDF and Espressif managed components                Apache-2.0
+    esp_wifi, esp_http_server, NimBLE, mdns, led_strip, json_parser,
+    json_generator, jsmn.
+
+  libsodium                                               ISC
+    Pulled in by esp-homekit-sdk for HAP pair-setup/verify.
+
+  mbedTLS                                                 Apache-2.0

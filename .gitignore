@@ -4,7 +4,11 @@ build_*/
 sdkconfig
 sdkconfig.old
 managed_components/
-dependencies.lock
+# dependencies.lock IS tracked: main/idf_component.yml pins only led_strip,
+# and the esp-homekit-sdk manifest leaves espressif/mdns unbounded, so without
+# the lock a release build resolves whatever satisfies those ranges that day —
+# the tagged binary would not be built from the component set that was tested.
+# Regenerate deliberately (delete it, build, review the diff, commit).
 
 # Auto-generated HTML headers (built from web/*.html by scripts/embed_html_idf.py)
 include/

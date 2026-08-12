@@ -30,16 +30,16 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # Published boards only. The esp32c3-mini and esp32-devkit profiles
+        # still build from source (see sdkconfig.defaults.esp32c3 / .esp32) but
+        # are no longer released, so they are not verified here either.
         include:
           - target: esp32c6
             name: nanoc6
+            profile_flag: -DBOARD_PROFILE_NANOC6=1
           - target: esp32s3
             name: m5atoms3-lite
             profile_flag: -DBOARD_PROFILE_M5ATOMS3_LITE=1
-          - target: esp32
-            name: esp32-devkit
-          - target: esp32c3
-            name: esp32c3-mini
 
     steps:
       - name: Checkout
@@ -50,7 +50,12 @@ jobs:
       - name: Build (${{ matrix.name }})
         uses: espressif/esp-idf-ci-action@v1
         with:
-          esp_idf_version: v5.5
+          # Exact patch, not the v5.5 branch tip. 5.5.4 is what
+          # dependencies.lock records and what the bench units run, and the
+          # NimBLE security-manager overrides in sdkconfig.defaults exist
+          # specifically because 5.5.4 changed how ble_sm compiles out — this
+          # is a real axis of variation, so pin it.
+          esp_idf_version: v5.5.4
           target: ${{ matrix.target }}
           command: |
             idf.py set-target ${{ matrix.target }}

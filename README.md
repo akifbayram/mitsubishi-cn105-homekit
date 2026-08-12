@@ -65,11 +65,8 @@ For a full parts list with purchase links, see the [parts guide](https://serin-l
 |-------|--------|--------------|:--------:|:---------------:|
 | M5Stack NanoC6 (ESP32-C6) | `esp32c6` | `-DBOARD_PROFILE_NANOC6=1` (default) | ✅ | ✅ |
 | M5Stack Atom S3 Lite (ESP32-S3) | `esp32s3` | `-DBOARD_PROFILE_M5ATOMS3_LITE=1` | ✅ | ✅ |
-| ESP32-C3 SuperMini / XIAO | `esp32c3` | `-DBOARD_PROFILE_ESP32C3_MINI=1` | ✅ | ❌ |
-| Generic ESP32 DevKit | `esp32` | `-DBOARD_PROFILE_ESP32_DEVKIT=1` | ✅ | ❌ |
-| ESP32-S3 DevKitC-1 | `esp32s3` | `-DBOARD_PROFILE_ESP32S3_DEVKIT=1` | ❌ | ❌ |
 
-**Prebuilt** means the release CI publishes binaries for that board to the [web flasher](https://serin-labs.com/flash). **Hardware-tested** means it has been run against a real heat pump. Untested profiles are expected to work but have not been verified.
+**Prebuilt** means the release CI publishes binaries for that board to the [web flasher](https://serin-labs.com/flash). **Hardware-tested** means it has been run against a real heat pump. Other profiles ship in `main/boards/` and build from source, but are unpublished and unverified — flash them with `idf.py flash`.
 
 Build with the target and the profile flag together:
 

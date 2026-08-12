@@ -1,0 +1,11 @@
+# ESP32-C3 SuperMini / XIAO ESP32C3 — 4 MB flash.
+#
+# The base sdkconfig.defaults declares 8 MB and partitions.csv (a table ending
+# at 0x800000) because the AtomS3 Lite has 8 MB. Inheriting that here produced
+# an image whose header claimed 8 MB on a 4 MB part: esptool writes only below
+# 0x10000 so the flash appeared to succeed, and then the bootloader refused to
+# boot it — "Detected size(4096k) smaller than the size in the binary image
+# header(8192k). Probe failed." Build for what the board actually has.
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=n
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_4mb.csv"

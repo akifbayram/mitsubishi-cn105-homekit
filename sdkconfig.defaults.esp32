@@ -1,3 +1,10 @@
 CONFIG_BT_ENABLED=n
 # Override the 160 MHz default — dual-core, mains-powered.
 CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+
+# Generic ESP32 DevKitC — 4 MB flash. Same trap as the C3 (see
+# sdkconfig.defaults.esp32c3): the 8 MB base default produced an image the
+# bootloader refuses on a 4 MB part.
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=n
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_4mb.csv"
