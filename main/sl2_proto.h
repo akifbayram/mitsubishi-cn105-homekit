@@ -98,7 +98,15 @@ enum {  /* sl2_state_pkt.flags */
 };
 enum {  /* sl2_state_pkt.flags2 */
     SL2_SF2_SENSOR_BATT_LOW = 1u << 0,
-    /* bits 1-7 spare */
+    /* Remote screen gate (HA presence switch on the controller). Two bits so a
+     * zero-filled legacy/unconfigured sender reads as "no gate declared" and
+     * the dial keeps its own idle behavior — one bit couldn't tell "no gate"
+     * from "gate on". CTL set: OFF clear = someone present (dial never sleeps
+     * darker than glance); OFF set = room empty (dial sleeps at its dim
+     * threshold and re-sleeps after local wakes). */
+    SL2_SF2_SCREEN_CTL      = 1u << 1,
+    SL2_SF2_SCREEN_OFF      = 1u << 2,
+    /* bits 3-7 spare */
 };
 
 struct __attribute__((packed)) sl2_state_pkt {
@@ -270,16 +278,48 @@ enum {  /* sl2_caps_pkt.features — telemetry/services the controller offers */
     SL2_FEAT_ENERGY         = 1u << 8,
     SL2_FEAT_WIFI_SETUP     = 1u << 9,  /* accepts WIFI_SETUP (on-demand setup AP) */
     SL2_FEAT_LINK_SENSOR    = 1u << 10, /* accepts DIAL_SENSOR as a room source */
-    /* bits 11-15 spare */
+    SL2_FEAT_SCREEN         = 1u << 11, /* runs a screen gate (SL2_SF2_SCREEN_*)
+                                         * and wants SL2_DSF_SCREEN_* status back */
+    /* bits 12-15 spare */
 };
 
 /* vane axis descriptor byte: low nibble = n_pos (0 = axis absent),
- * bit4 = supports auto, bit5 = supports swing. */
+ * bit4 = supports auto, bit5 = supports swing, bit6 = SPLIT_TOP (below).
+ * bit7 spare. */
 #define SL2_VANECAP(n_pos, has_auto, has_swing) \
     (uint8_t)(((n_pos) & 0x0F) | ((has_auto) ? 0x10 : 0) | ((has_swing) ? 0x20 : 0))
+
+/* OR into SL2_VANECAP(): the TOP position (n_pos) is a vendor "split/wide"
+ * PSEUDO-position, not an angle in the axis's physical travel.
+ *
+ * Mitsubishi's horizontal vane reports 6 to mean "split" — louvres fanned
+ * apart — and a receiver that draws it as a sixth angle is simply wrong. Until
+ * this bit existed the wire could not say so: SL2_VANECAP(6, ...) meant "six
+ * angles" to one adapter and "five angles plus split" to another, and each end
+ * carried its own private 6. Senders that predate the bit are read by the
+ * legacy rule below, so declaring it is an improvement, never a requirement. */
+#define SL2_VANECAP_SPLIT_TOP 0x40
+
+/* The position a pre-SPLIT_TOP sender means by "split". Only ever consulted
+ * when the bit is absent AND the axis declares at least this many positions —
+ * every shipping head with a split is the Mitsubishi horizontal axis. */
+#define SL2_VANE_SPLIT_LEGACY 6
+
 static inline uint8_t sl2_vanecap_npos(uint8_t v)      { return v & 0x0F; }
 static inline bool    sl2_vanecap_has_auto(uint8_t v)  { return (v & 0x10) != 0; }
 static inline bool    sl2_vanecap_has_swing(uint8_t v) { return (v & 0x20) != 0; }
+static inline bool    sl2_vanecap_split_top(uint8_t v) {
+    return (v & SL2_VANECAP_SPLIT_TOP) != 0;
+}
+
+/* The wire position that means "split" on this axis, or 0 when it has none.
+ * One rule, shared by every adapter, so the magic 6 lives here and nowhere
+ * else. */
+static inline uint8_t sl2_vanecap_split_pos(uint8_t v) {
+    uint8_t n = sl2_vanecap_npos(v);
+    if (sl2_vanecap_split_top(v)) return n;
+    return n >= SL2_VANE_SPLIT_LEGACY ? SL2_VANE_SPLIT_LEGACY : 0;
+}
 
 struct __attribute__((packed)) sl2_caps_pkt {
     uint8_t  type;           /* SL2_PKT_CAPS */
@@ -422,7 +462,13 @@ struct __attribute__((packed)) sl2_dial_info_pkt {
 enum {  /* sl2_dial_sensor_pkt.flags */
     SL2_DSF_HAS_SENSOR = 1u << 0,  /* dial has sensing hardware (reading may
                                     * still be absent — see temp_dc) */
-    /* bits 1-7 spare */
+    /* Screen status report, gated on SL2_FEAT_SCREEN in CAPS. VALID+ON is the
+     * same two-bit scheme as SL2_SF2_SCREEN_*: a zero-filled legacy dial reads
+     * as "does not report", never as "screen off". ON covers every lit state
+     * (dimmed and the glance face included); only display-sleep clears it. */
+    SL2_DSF_SCREEN_VALID = 1u << 1,
+    SL2_DSF_SCREEN_ON    = 1u << 2,
+    /* bits 3-7 spare */
 };
 
 enum sl2_room_src {

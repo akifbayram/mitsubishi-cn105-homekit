@@ -119,6 +119,16 @@ static inline bool sl2_info_put_energy(uint8_t *buf, size_t cap, size_t *off,
     return sl2_tlv_put(buf, cap, off, SL2_TLV_ENERGY, v, 6);
 }
 
+/* 0x0B ROOM_SRC: u8 applied_src (enum sl2_room_src); u8 status
+ * (enum sl2_room_status). applied_src names the SELECTED source even when
+ * status is STALE — a reader that renders only applied_src shows a dead feed
+ * as a live one (wire spec §10d). */
+static inline bool sl2_info_put_room_src(uint8_t *buf, size_t cap, size_t *off,
+                                         uint8_t applied_src, uint8_t status) {
+    uint8_t v[2] = { applied_src, status };
+    return sl2_tlv_put(buf, cap, off, SL2_TLV_ROOM_SRC, v, 2);
+}
+
 /* ── COMPRESSOR value tables (Mitsubishi; wire spec §9) ──────────────────
  * Adapters whose HVAC layer reports these states as strings (e.g. ESPHome
  * cn105 text sensors) map them back to the wire codes here. ASCII

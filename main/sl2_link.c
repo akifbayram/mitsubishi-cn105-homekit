@@ -89,6 +89,10 @@ static void build_state(sl2_link_t *l, struct sl2_state_pkt *p) {
     if (s.setup_ap)         p->flags |= SL2_SF_SETUP_AP;
     if (s.wifi_err)         p->flags |= SL2_SF_WIFI_ERR;
     if (s.sensor_batt_low) p->flags2 |= SL2_SF2_SENSOR_BATT_LOW;
+    if (s.screen_ctl) {
+        p->flags2 |= SL2_SF2_SCREEN_CTL;
+        if (s.screen_off) p->flags2 |= SL2_SF2_SCREEN_OFF;
+    }
     p->mode = s.mode; p->action = s.action; p->fan = s.fan;
     p->vane_v = s.vane_v; p->vane_h = s.vane_h; p->preset = s.preset;
     p->fault = s.fault;
@@ -342,16 +346,24 @@ void sl2_link_on_recv(sl2_link_t *l, const uint8_t src[6], const uint8_t dst[6],
         }
         break;
     case SL2_PKT_DIAL_SENSOR:
-        if (len >= SL2_DIAL_SENSOR_MIN_LEN && l->hvac->room_sensor) {
+        if (len >= SL2_DIAL_SENSOR_MIN_LEN) {
             struct sl2_dial_sensor_pkt p;
             sl2_decode_pkt(&p, sizeof p, data, len);
-            /* want_src is only present on a long-enough frame. The tolerant
-             * decode zero-fills it otherwise, and 0 is Internal — so gate on
-             * LENGTH, never on the decoded value. */
-            const bool has_want =
-                (size_t)len > offsetof(struct sl2_dial_sensor_pkt, want_src);
-            const bool is_edit = has_want && p.want_src != SL2_ROOMSRC_NOEDIT;
-            l->hvac->room_sensor(l->hvac->ctx, src, &p, is_edit);
+            /* Screen status is core state, not adapter policy: stash it in
+             * the runtime slot (surfaced via dial_view) whether or not a
+             * room_sensor hook is wired. Tracks the LAST frame verbatim, so
+             * a dial that stops reporting reads unknown, never stale-off. */
+            d->screen_valid = (p.flags & SL2_DSF_SCREEN_VALID) != 0;
+            d->screen_on    = (p.flags & SL2_DSF_SCREEN_ON) != 0;
+            if (l->hvac->room_sensor) {
+                /* want_src is only present on a long-enough frame. The
+                 * tolerant decode zero-fills it otherwise, and 0 is Internal
+                 * — so gate on LENGTH, never on the decoded value. */
+                const bool has_want =
+                    (size_t)len > offsetof(struct sl2_dial_sensor_pkt, want_src);
+                const bool is_edit = has_want && p.want_src != SL2_ROOMSRC_NOEDIT;
+                l->hvac->room_sensor(l->hvac->ctx, src, &p, is_edit);
+            }
         }
         d->last_probe_ms = now;   /* a sensor report proves liveness */
         break;
@@ -620,6 +632,8 @@ bool sl2_link_dial_view(sl2_link_t *l, int idx, sl2_dial_view_t *out) {
     memcpy(out->fw, d->fw, sizeof out->fw);
     out->caps_seq = d->peer_caps_seq;
     out->cert_state = d->cert_state;
+    out->screen_valid = d->screen_valid;
+    out->screen_on = d->screen_on;
     return true;
 }
 

@@ -41,6 +41,11 @@ typedef struct {
     int16_t  set_high_dc;     /* SL2_DC_NA when n/a */
     uint8_t  room_hum_pct;    /* SL2_HUM_NA when not reported */
     uint8_t  hum_set_pct;     /* SL2_HUM_NA when n/a */
+    bool     screen_ctl;      /* adapter runs a screen gate (SL2_SF2_SCREEN_CTL);
+                               * false = both wire bits stay clear and dials
+                               * keep their own idle behavior */
+    bool     screen_off;      /* the gate currently says the room is empty
+                               * (SL2_SF2_SCREEN_OFF); ignored unless screen_ctl */
 } sl2_hvac_state_t;
 
 /* hvac_link policy for adapters whose platform lacks a native link-health
@@ -114,6 +119,8 @@ typedef struct {
                                        * (diagnostics); meaningful iff
                                        * cert_state != SL2_CERT_NONE */
     uint8_t  cert_state;      /* sl2_cert_state_t */
+    bool     screen_valid;    /* dial's last DIAL_SENSOR carried screen status */
+    bool     screen_on;       /* ...and the panel was lit (dim/glance count) */
 } sl2_dial_rt_t;
 
 typedef enum { SL2_PAIR_OFF = 0, SL2_PAIR_WINDOW, SL2_PAIR_CONFIRM } sl2_pair_state_t;
@@ -212,6 +219,8 @@ typedef struct {
     char     fw[16];
     uint8_t  caps_seq;        /* dial's applied caps_seq */
     uint8_t  cert_state;      /* sl2_cert_state_t */
+    bool     screen_valid;    /* dial reports screen status (SL2_DSF_SCREEN_VALID) */
+    bool     screen_on;       /* panel lit; meaningful iff screen_valid */
 } sl2_dial_view_t;
 
 bool sl2_link_dial_view(sl2_link_t *l, int idx, sl2_dial_view_t *out);

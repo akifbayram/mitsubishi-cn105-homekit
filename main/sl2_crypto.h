@@ -2,12 +2,15 @@
  * sl2_crypto.h — crypto hooks for the Serin Link core.
  *
  * The core never calls a crypto library directly; adopters supply these hooks.
- * Reference bindings: libsodium (espressif/libsodium managed component — the
- * Serin controller already depends on it; note mbedTLS has NO Ed25519, so the
- * dial also binds libsodium for signatures while keeping mbedTLS for X25519/
- * HKDF if it prefers). All functions return 0 on success.
+ * Reference bindings: the dial binds libsodium (espressif/libsodium managed
+ * component) and the ESPHome controller binds a vendored Monocypher — an
+ * ESPHome image can hold only one libsodium and it belongs to noise-c. Either
+ * way mbedTLS is not enough on its own: it has NO Ed25519, so it can cover
+ * X25519/HKDF but never signatures. All functions return 0 on success.
  *
- * Ed25519 secret keys use the libsodium convention: 64 bytes = seed || pubkey.
+ * Ed25519 secret keys are 64 bytes = seed || pubkey — the de-facto standard
+ * ref10 layout that libsodium and Monocypher both produce, so a key written by
+ * one binding is readable by the other.
  */
 #pragma once
 #include <stdint.h>
@@ -20,7 +23,7 @@ extern "C" {
 
 #define SL2_X25519_LEN     32
 #define SL2_ED25519_PUB    32
-#define SL2_ED25519_PRIV   64   /* libsodium secret-key format */
+#define SL2_ED25519_PRIV   64   /* ref10 secret-key format: seed||pub */
 #define SL2_ED25519_SIG    64
 #define SL2_LMK_LEN        16
 

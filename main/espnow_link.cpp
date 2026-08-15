@@ -310,8 +310,20 @@ static uint8_t vanev_from_sl2(uint8_t v) {
 }
 /* horizontal axis: positions 1..5 match CN105, SPLIT (0x08) is advertised as
  * one extra sl2 position, swing = 0x0C. CN105 wide vane has no AUTO —
- * incoming 0 falls back to CENTER. */
-static constexpr uint8_t SL2_WVANE_POS_SPLIT = 6;   // also the n_pos in CAPS
+ * incoming 0 falls back to CENTER.
+ *
+ * This head's split sits at position 6, and that is OUR fact about OUR axis —
+ * it stays a constant here rather than aliasing the shared header's
+ * SL2_VANE_SPLIT_LEGACY, which is a compatibility fallback for receivers that
+ * predate SL2_VANECAP_SPLIT_TOP, not an authority over what a sender encodes.
+ * A modern receiver reads the position out of the CAPS byte we declare below
+ * (sl2_vanecap_split_pos); an older one falls back to the legacy constant, so
+ * the two must land on the same position — asserted, not assumed. It used to
+ * be this 6 and a bare `case 6:` in the dial's sl2_ui_map.h, two magic sixes
+ * in two repositories with nothing pinning them together at all. */
+static constexpr uint8_t SL2_WVANE_POS_SPLIT = 6;
+static_assert(SL2_WVANE_POS_SPLIT == SL2_VANE_SPLIT_LEGACY,
+              "a pre-SPLIT_TOP dial would read this head's split as a different position");
 static uint8_t vaneh_to_sl2(uint8_t cn) {
     if (cn == CN105_WVANE_SWING) return SL2_VANE_SWING;
     if (cn == CN105_WVANE_SPLIT) return SL2_WVANE_POS_SPLIT;
@@ -480,7 +492,11 @@ static bool h_get_caps(void *, struct sl2_caps_pkt *out) {
     out->fan_flags = SL2_FAN_HAS_AUTO;
     uint8_t vc = settings.get().vaneConfig;
     out->vane_v = (vc >= 1) ? SL2_VANECAP(5, true, true) : 0;
-    out->vane_h = (vc >= 2) ? SL2_VANECAP(SL2_WVANE_POS_SPLIT, false, true) : 0;
+    /* SPLIT_TOP: the top position is the vendor split, not a sixth angle. A
+     * dial that predates the bit reads the same axis via the legacy rule, so
+     * declaring it changes nothing today and removes the guess tomorrow. */
+    out->vane_h = (vc >= 2) ? (uint8_t)(SL2_VANECAP(SL2_WVANE_POS_SPLIT, false, true) |
+                                        SL2_VANECAP_SPLIT_TOP) : 0;
     out->set_min_dc = sl2_c_to_dc(CN105_TEMP_MIN);
     out->set_max_dc = sl2_c_to_dc(CN105_TEMP_MAX);
     out->set_step_dc = 5;                   // 0.5 °C, the CN105 enhanced-mode step
