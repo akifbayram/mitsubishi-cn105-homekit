@@ -216,8 +216,12 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
         // control means). The explicit clear (both web-UI fields left empty;
         // presence-triggered like bleDelIdx below) is applied LAST so a
         // message carrying clear + coordinates deterministically clears.
-        float lat, lon;
-        int duskOff, dawnOff, ceilPct, nightLocClearVal;
+        // Zero-init: the jsonGet* helpers only write on success and every read
+        // below is guarded by its *Set flag, but GCC 14.2 on xtensa loses that
+        // correlation once the helpers inline into std::clamp and trips
+        // -Werror=maybe-uninitialized (riscv/c6 doesn't).
+        float lat = 0, lon = 0;
+        int duskOff = 0, dawnOff = 0, ceilPct = 0, nightLocClearVal = 0;
         bool latSet   = jsonGetFloat(msg, "nightLat", &lat);
         bool lonSet   = jsonGetFloat(msg, "nightLon", &lon);
         bool duskSet  = jsonGetInt(msg, "nightDuskOff", &duskOff);
