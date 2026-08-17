@@ -1,6 +1,7 @@
 #include "improv_serial.h"
 #include "wifi_manager.h"
 #include "wifi_recovery.h"
+#include "espnow_link.h"
 #include "branding.h"
 #include "board_profile.h"
 #include "logging.h"
@@ -13,6 +14,7 @@
 
 #include "sdkconfig.h"
 #if defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG)
+#include <driver/usb_serial_jtag.h>
 #include <driver/usb_serial_jtag_vfs.h>
 #elif defined(CONFIG_ESP_CONSOLE_UART)
 #include <driver/uart_vfs.h>
@@ -75,8 +77,16 @@ static uint8_t    s_frame_idx  = 0;
 static uint8_t    s_csum_acc   = 0;
 
 // ── Frame encoder ─────────────────────────────────────────────────────────────
+// The Improv Serial checksum covers EVERY frame byte before it, the six
+// "IMPROV" literal bytes included: the browser SDK sums the whole line and
+// ESPHome's build_rpc_response does the same. sum("IMPROV") = 0x1DD, so the
+// literal contributes 0xDD. Omitting it (as this file originally did, both
+// directions) made every frame off by 0xDD: the device discarded all
+// spec-correct hosts and the browser SDK discarded every frame the device sent.
+static constexpr uint8_t IMPROV_HDR_SUM = ('I' + 'M' + 'P' + 'R' + 'O' + 'V') & 0xFF;  // 0xDD
+
 static void write_frame(uint8_t type, const uint8_t* data, uint8_t len) {
-    uint8_t checksum = 0x01 + type + len;
+    uint8_t checksum = IMPROV_HDR_SUM + 0x01 + type + len;
     // Leading '\n': guarantees the IMPROV header starts a fresh line so the
     // browser SDK — which re-syncs its byte parser on '\n' and discards non-IMPROV
     // runs up to the next newline — can lock onto the frame even while other tasks
@@ -105,10 +115,15 @@ static void send_error(uint8_t error) {
 }
 
 // ── Command handlers ──────────────────────────────────────────────────────────
+// An RPC result's data is [command, total, len1, str1, len2, str2, ...] where
+// `total` covers everything after itself. The browser SDK reads data[1] as that
+// total and walks length-prefixed strings from data[2]; without the total byte
+// (as this file originally sent) it walks the first string's bytes as lengths
+// and decodes garbage. buf[1] is reserved here and back-filled once known.
 static void handle_get_device_info() {
     const char* strings[4] = { BRAND_NAME, FW_VERSION, BOARD_NAME, s_device_name };
     uint8_t buf[255];
-    uint8_t pos = 1;
+    uint8_t pos = 2;
     buf[0] = CMD_GET_DEVICE_INFO;
     for (int i = 0; i < 4; i++) {
         uint8_t l = (uint8_t)strlen(strings[i]);
@@ -117,6 +132,7 @@ static void handle_get_device_info() {
         memcpy(buf + pos, strings[i], l);
         pos += l;
     }
+    buf[1] = pos - 2;
     write_frame(PKT_RPC_RESULT, buf, pos);
 }
 
@@ -126,7 +142,7 @@ static void handle_scan_wifi() {
 
     for (int i = 0; i < count; i++) {
         uint8_t buf[80];
-        uint8_t pos = 1;
+        uint8_t pos = 2;
         buf[0] = CMD_SCAN_WIFI;
 
         uint8_t sl = (uint8_t)strlen(nets[i].ssid);
@@ -142,12 +158,13 @@ static void handle_scan_wifi() {
         buf[pos++] = rl; memcpy(buf + pos, rssi_str, rl);     pos += rl;
         buf[pos++] = al; memcpy(buf + pos, auth, al);          pos += al;
 
+        buf[1] = pos - 2;
         write_frame(PKT_RPC_RESULT, buf, pos);
     }
 
-    // Zero-string terminator signals end-of-list
-    uint8_t term = CMD_SCAN_WIFI;
-    write_frame(PKT_RPC_RESULT, &term, 1);
+    // Zero-total terminator signals end-of-list
+    uint8_t term[2] = { CMD_SCAN_WIFI, 0 };
+    write_frame(PKT_RPC_RESULT, term, 2);
 }
 
 static void handle_wifi_settings(const uint8_t* data, uint8_t len) {
@@ -191,9 +208,10 @@ static void handle_wifi_settings(const uint8_t* data, uint8_t len) {
 
         uint8_t resp[40];
         resp[0] = CMD_WIFI_SETTINGS;
-        resp[1] = url_len;
-        memcpy(resp + 2, url, url_len);
-        write_frame(PKT_RPC_RESULT, resp, 2 + url_len);
+        resp[1] = 1 + url_len;   // total: the one length-prefixed string below
+        resp[2] = url_len;
+        memcpy(resp + 3, url, url_len);
+        write_frame(PKT_RPC_RESULT, resp, 3 + url_len);
 
         LOG_INFO("[Improv] Provisioned, IP: %s", ip);
     } else {
@@ -206,11 +224,18 @@ static void handle_wifi_settings(const uint8_t* data, uint8_t len) {
 
 // ── Frame reader ──────────────────────────────────────────────────────────────
 static void dispatch_frame() {
-    if (s_frame_type != PKT_RPC || s_frame_len < 1) return;
+    // An RPC frame's data is [command, dataLen, ...payload]: the browser SDK
+    // always sends the dataLen byte, even for commands with no payload.
+    // Handlers get the payload with both prefix bytes stripped.
+    if (s_frame_type != PKT_RPC || s_frame_len < 2) return;
+    if (s_frame_data[1] != s_frame_len - 2) {
+        send_error(ERR_INVALID_RPC);
+        return;
+    }
     switch (s_frame_data[0]) {
         case CMD_GET_CURRENT_STATE: send_current_state(s_cur_state);                               break;
         case CMD_GET_DEVICE_INFO:   handle_get_device_info();                                       break;
-        case CMD_WIFI_SETTINGS:     handle_wifi_settings(s_frame_data + 1, s_frame_len - 1);       break;
+        case CMD_WIFI_SETTINGS:     handle_wifi_settings(s_frame_data + 2, s_frame_len - 2);       break;
         case CMD_SCAN_WIFI:         handle_scan_wifi();                                             break;
         default:                    send_error(ERR_UNKNOWN_RPC);                                    break;
     }
@@ -225,7 +250,7 @@ static void process_byte(uint8_t b) {
         case SYNC_O:    s_parse = (b == 'O') ? SYNC_V    : SYNC_I; return;
         case SYNC_V:    s_parse = (b == 'V') ? WAIT_VER  : SYNC_I; return;
         case WAIT_VER:
-            s_csum_acc = b; s_parse = WAIT_TYPE; return;
+            s_csum_acc = IMPROV_HDR_SUM + b; s_parse = WAIT_TYPE; return;
         case WAIT_TYPE:
             s_frame_type = b; s_csum_acc += b; s_parse = WAIT_LEN; return;
         case WAIT_LEN:
@@ -285,12 +310,61 @@ static void improv_task(void* /*arg*/) {
     vTaskDelete(nullptr);
 }
 
+// ── Console RX plumbing ───────────────────────────────────────────────────────
+// On USB-Serial-JTAG consoles a non-blocking stdin read NEVER polls the
+// hardware: the VFS sizes the fetch from usb_serial_jtag_get_read_bytes_available(),
+// which returns 0 unless the USJ *driver* is installed (only the driver's
+// interrupt drains the RX FIFO into a ring buffer). Without it, fgetc(stdin)
+// under O_NONBLOCK returns EOF forever, the FIFO stays full, and the host's
+// writes are NAKed — Improv transmitted fine but could not hear a single byte.
+// So while Improv owns the console, install the driver and route the VFS
+// through it; on stop, put both back so the ESP-NOW REPL's own
+// esp_console_new_repl_usb_serial_jtag() finds the console exactly as it
+// expects (its install fails on an already-installed driver).
+// UART consoles (plain esp32/c3) need none of this: their no-driver VFS read
+// polls the UART FIFO directly.
+#if defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG)
+static bool s_usj_driver_ours = false;
+
+static void improv_console_rx_attach(void) {
+    if (usb_serial_jtag_is_driver_installed()) return;  // REPL got here first
+    usb_serial_jtag_driver_config_t cfg = USB_SERIAL_JTAG_DRIVER_CONFIG_DEFAULT();
+    if (usb_serial_jtag_driver_install(&cfg) == ESP_OK) {
+        usb_serial_jtag_vfs_use_driver();
+        s_usj_driver_ours = true;
+    } else {
+        LOG_WARN("[Improv] USB-Serial-JTAG driver install failed; RX unavailable");
+    }
+}
+
+static void improv_console_rx_detach(void) {
+    if (!s_usj_driver_ours) return;
+    usb_serial_jtag_vfs_use_nonblocking();
+    usb_serial_jtag_driver_uninstall();
+    s_usj_driver_ours = false;
+}
+#else
+static void improv_console_rx_attach(void) {}
+static void improv_console_rx_detach(void) {}
+#endif
+
 // ── Public API ────────────────────────────────────────────────────────────────
 void improv_serial_start(const char* deviceName) {
     if (s_task_handle) return;
+    // Guarded beside the resource, not at the call site: Improv and the
+    // ESP-NOW REPL share the single console, and starting both deadlocks
+    // app_main. The REPL is deferred until WiFi is up + AP down, so on the
+    // recovery-AP path it normally hasn't started — but if it has, refuse
+    // outright rather than run half-alive on its driver (and rather than
+    // making its own install fail later on ours).
+    if (espnow_console_started()) {
+        LOG_INFO("[Improv] Skipped: ESP-NOW console owns serial");
+        return;
+    }
     strncpy(s_device_name, deviceName, sizeof(s_device_name) - 1);
     s_device_name[sizeof(s_device_name) - 1] = '\0';
     improv_set_console_raw(true);   // binary-clean console for the framed protocol
+    improv_console_rx_attach();     // and one that can actually receive
     // 6144: handle_scan_wifi puts ~720B of ScannedNetwork on the stack and
     // scanNetworks adds ~1.8KB of wifi_ap_record_t — 4096 left no headroom.
     xTaskCreate(improv_task, "improv", 6144, nullptr, tskIDLE_PRIORITY + 1, &s_task_handle);
@@ -304,5 +378,6 @@ void improv_serial_stop() {
     // so the task has finished sending its last response well before this fires.
     vTaskDelay(pdMS_TO_TICKS(100));
     // s_task_handle is cleared by the task itself before vTaskDelete
+    improv_console_rx_detach();     // leave the console as the REPL expects it
     improv_set_console_raw(false);  // restore CR/CRLF for the REPL / serial monitor
 }

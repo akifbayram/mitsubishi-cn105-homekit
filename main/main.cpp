@@ -193,6 +193,11 @@ extern "C" void app_main(void)
     WifiManager::init(apName, apName, BRAND_AP_PASSWORD);
 
     // ── 7. Load saved WiFi credentials and connect ───────────────────────
+    // joinStarted is connect()'s own answer, NOT WifiManager::hasCredentials():
+    // that reads NVS, which is empty during a build-time-credentials trial
+    // join (connect() persists nothing until GOT_IP), and step 8 gates on
+    // "was a join started", not "does NVS hold credentials".
+    bool joinStarted = false;
     {
         char ssid[33] = {};
         char pass[65] = {};
@@ -202,11 +207,11 @@ extern "C" void app_main(void)
         strncpy(ssid, WIFI_SSID, sizeof(ssid) - 1);
         strncpy(pass, WIFI_PASSWORD, sizeof(pass) - 1);
         LOG_INFO("Using build-time WiFi credentials (SSID: %s)", ssid);
-        WifiManager::connect(ssid, pass);
+        joinStarted = WifiManager::connect(ssid, pass);
 #else
         if (WifiManager::loadCredentials(ssid, sizeof(ssid), pass, sizeof(pass))) {
             LOG_INFO("Loaded WiFi credentials (SSID: %s)", ssid);
-            WifiManager::connect(ssid, pass);
+            joinStarted = WifiManager::connect(ssid, pass);
         } else {
             LOG_WARN("No WiFi credentials found — will start recovery AP");
         }
@@ -214,12 +219,17 @@ extern "C" void app_main(void)
     }
 
     // ── 8. Wait for WiFi with timeout ────────────────────────────────────
-    LOG_INFO("Waiting for WiFi connection (timeout 15s)...");
-    bool wifiOk = WifiManager::waitForConnection(15000);
-    if (wifiOk) {
-        LOG_INFO("WiFi connected");
-    } else {
-        LOG_WARN("WiFi connection timed out");
+    // Only when a join is actually in flight. With nothing to wait for, this
+    // wait used to delay the recovery AP — and the Improv listener inside it —
+    // until t=15s on a fresh flash, past the web flasher's 10s handshake
+    // budget.
+    if (joinStarted) {
+        LOG_INFO("Waiting for WiFi connection (timeout 15s)...");
+        if (WifiManager::waitForConnection(15000)) {
+            LOG_INFO("WiFi connected");
+        } else {
+            LOG_WARN("WiFi connection timed out");
+        }
     }
 
     // ── 9. HomeKit init (deferred) ─────────────────────────────────────
