@@ -397,6 +397,10 @@ button.wifi-row:active{background:var(--surface3);}
 .pw-toggle .icon-eye-off{display:none;}
 .pw-field.pw-visible~.pw-toggle .icon-eye{display:none;}
 .pw-field.pw-visible~.pw-toggle .icon-eye-off{display:block;}
+/* Focus ring on the rounded wrap, not the square inner input — text inputs
+   match :focus-visible on any focus, so a tap would draw a bare rectangle */
+.pw-wrap:focus-within{outline:2px solid var(--accent);outline-offset:2px;}
+.pw-field:focus-visible{outline:none;}
 .wifi-stack{display:flex;flex-direction:column;gap:9px;margin-top:14px;}
 
 /* ===== Buttons ===== */

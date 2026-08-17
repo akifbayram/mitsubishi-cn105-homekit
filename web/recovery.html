@@ -139,6 +139,10 @@ body{
 .pw-toggle .icon-eye-off{display:none;}
 .pw-field.pw-visible~.pw-toggle .icon-eye{display:none;}
 .pw-field.pw-visible~.pw-toggle .icon-eye-off{display:block;}
+/* Focus ring on the rounded wrap, not the square inner input — text inputs
+   match :focus-visible on any focus, so a tap would draw a bare rectangle */
+.pw-wrap:focus-within{outline:2px solid var(--accent);outline-offset:2px;}
+.pw-field:focus-visible{outline:none;}
 /* Clear the top of the frame when a focused field scrolls above the keyboard */
 #pickerBlock{scroll-margin-top:12px;}
 
