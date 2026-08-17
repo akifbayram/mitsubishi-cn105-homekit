@@ -21,6 +21,7 @@ idf_component_register(
          "ble_sensor.cpp"
          "homekit_sensor_accessory.cpp"
          "espnow_link.cpp"
+         "solar.cpp"
          "sl2_link.c"
          "link_sensor.cpp"
          "room_avg.cpp"

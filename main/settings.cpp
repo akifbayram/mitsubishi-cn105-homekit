@@ -200,6 +200,32 @@ void SettingsStore::begin() {
         }
     }
 
+    // latitude / longitude — night gate location, floats stored as blobs.
+    // No clamp on load: writes are clamped at the web edge, and an
+    // out-of-range stray only mis-times twilight, it can't crash the math.
+    {
+        float val = NAN;
+        size_t len = sizeof(val);
+        if (nvs_get_blob(_handle, "nightLat", &val, &len) == ESP_OK && len == sizeof(float))
+            _settings.latitude = val;
+        val = NAN; len = sizeof(val);
+        if (nvs_get_blob(_handle, "nightLon", &val, &len) == ESP_OK && len == sizeof(float))
+            _settings.longitude = val;
+    }
+
+    // night ceiling — u8 percent
+    {
+        uint8_t v = 20;
+        if (nvs_get_u8(_handle, "nightCeil", &v) == ESP_OK) _settings.nightCeilPct = v;
+    }
+    // night gate edge offsets — minutes, i16
+    {
+        int16_t v = 0;
+        if (nvs_get_i16(_handle, "nightDuskOff", &v) == ESP_OK) _settings.nightDuskOffMin = v;
+        v = 0;
+        if (nvs_get_i16(_handle, "nightDawnOff", &v) == ESP_OK) _settings.nightDawnOffMin = v;
+    }
+
     // useFahrenheit — bool stored as uint8_t
     {
         uint8_t val = 0;
@@ -422,6 +448,11 @@ void SettingsStore::save() {
     nvs_set_str(_handle, "deviceName", _settings.deviceName);
     nvs_set_blob(_handle, "heatThresh", &_settings.heatingThreshold, sizeof(float));
     nvs_set_blob(_handle, "coolThresh", &_settings.coolingThreshold, sizeof(float));
+    nvs_set_blob(_handle, "nightLat", &_settings.latitude, sizeof(float));
+    nvs_set_blob(_handle, "nightLon", &_settings.longitude, sizeof(float));
+    nvs_set_u8(_handle, "nightCeil", _settings.nightCeilPct);
+    nvs_set_i16(_handle, "nightDuskOff", _settings.nightDuskOffMin);
+    nvs_set_i16(_handle, "nightDawnOff", _settings.nightDawnOffMin);
     nvs_set_u8(_handle, "useFahr", _settings.useFahrenheit ? 1 : 0);
     nvs_set_u8(_handle, "betaChan", _settings.betaChannel ? 1 : 0);
     nvs_set_str(_handle, "setupCode", _settings.setupCode);

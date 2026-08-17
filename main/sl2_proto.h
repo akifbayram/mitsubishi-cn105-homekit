@@ -106,7 +106,15 @@ enum {  /* sl2_state_pkt.flags2 */
      * threshold and re-sleeps after local wakes). */
     SL2_SF2_SCREEN_CTL      = 1u << 1,
     SL2_SF2_SCREEN_OFF      = 1u << 2,
-    /* bits 3-7 spare */
+    /* Sun-down gate: the sender computes solar elevation from its UTC clock
+     * + configured lat/long and reports the FACT "sun below civil twilight
+     * (< -6 deg)". Policy (whether/how much to dim) stays on the dial. Two
+     * bits for the same reason as the screen gate above: a zero-filled
+     * legacy/unclocked/unlocated sender must read as "no gate computed",
+     * which one bit couldn't say. */
+    SL2_SF2_NIGHT_CTL       = 1u << 3,
+    SL2_SF2_NIGHT           = 1u << 4,
+    /* bits 5-7 spare */
 };
 
 struct __attribute__((packed)) sl2_state_pkt {
@@ -128,7 +136,12 @@ struct __attribute__((packed)) sl2_state_pkt {
     uint8_t  room_hum_pct;  /* 0..100; SL2_HUM_NA = not reported */
     uint8_t  hum_set_pct;   /* 0..100; SL2_HUM_NA = n/a */
     uint8_t  flags2;        /* SL2_SF2_* */
-    uint8_t  reserved[1];   /* senders zero-fill, receivers ignore */
+    uint8_t  night_ceil;    /* night wake-brightness ceiling %, 1..100; 0 =
+                             * none declared (legacy zero-fill, or the sender
+                             * has no opinion) -> receiver uses its default.
+                             * Only meaningful under SL2_SF2_NIGHT_CTL; was
+                             * the reserved[1] byte, claimed per the growth
+                             * policy above. */
     uint16_t epoch;         /* random per-boot replay token; 0 = sender has no
                              * epoch support. Dials echo the latest value in
                              * CMD/WIFI_SETUP (spec 3b). */

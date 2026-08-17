@@ -275,7 +275,7 @@ The **Room Sensor** card carries the BLE settings on boards with Bluetooth:
 - **Add Sensor…** — scan for nearby thermometers with their live temperature and humidity, or *Enter address manually…* to type a MAC. Up to 4 sensors; each can be renamed after the room it sits in, or removed.
 - **Enable Remote Sensors** — turn BLE scanning on or off
 - **Sensor Timeout** — how long a source may go quiet before it counts as stale (30–3600 s)
-- **Advanced — sensor offsets** — a calibration offset per sensor (±9.9 °C, entered in the display unit), applied to each reading before it is used or averaged
+- **Manage Sensors** — rename or remove a sensor, and set a calibration offset per sensor (±9.9 °C, entered in the display unit), applied to each reading before it is used or averaged
 - **Indicators** — green (healthy), orange (stale or no data yet), gray (not configured)
 
 ## Serin Link

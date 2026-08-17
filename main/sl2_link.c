@@ -93,6 +93,11 @@ static void build_state(sl2_link_t *l, struct sl2_state_pkt *p) {
         p->flags2 |= SL2_SF2_SCREEN_CTL;
         if (s.screen_off) p->flags2 |= SL2_SF2_SCREEN_OFF;
     }
+    if (s.night_ctl) {
+        p->flags2 |= SL2_SF2_NIGHT_CTL;
+        if (s.night) p->flags2 |= SL2_SF2_NIGHT;
+        p->night_ceil = s.night_ceil_pct;   /* 0 = no opinion */
+    }
     p->mode = s.mode; p->action = s.action; p->fan = s.fan;
     p->vane_v = s.vane_v; p->vane_h = s.vane_h; p->preset = s.preset;
     p->fault = s.fault;

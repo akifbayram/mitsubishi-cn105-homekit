@@ -42,6 +42,8 @@
 #include "status_led.h"
 #include "ble_config.h"
 #include "link_sensor.h"
+#include "solar.h"
+#include "time_sync.h"
 #ifdef BLE_ENABLE
 #include "ble_sensor.h"
 #endif
@@ -381,6 +383,18 @@ static bool h_get_state(void *, sl2_hvac_state_t *out) {
     out->set_high_dc = SL2_DC_NA;
     out->room_hum_pct = SL2_HUM_NA;
     out->hum_set_pct  = SL2_HUM_NA;
+    /* Sun gate: pure function of the SNTP clock + configured location, so
+     * recomputing on every ~1 Hz STATE build is cheaper than caching. Loses
+     * its fix (reboot before SNTP, location cleared) -> CTL drops and dials
+     * fail bright. */
+    const solar_gate_t sg = solar_gate_off(time_sync_epoch(),
+                                           settings.get().latitude,
+                                           settings.get().longitude,
+                                           settings.get().nightDuskOffMin,
+                                           settings.get().nightDawnOffMin);
+    out->night_ctl = (sg != SOLAR_NO_FIX);
+    out->night     = (sg == SOLAR_NIGHT);
+    out->night_ceil_pct = settings.get().nightCeilPct;
 #ifdef BLE_ENABLE
     /* Remote-sensor low-battery latch: ON at <=10%, clear only at >=15% so a
      * cell hovering at the threshold doesn't flap the home-face chip. */

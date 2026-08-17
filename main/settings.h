@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <nvs_flash.h>
@@ -48,6 +49,19 @@ struct DeviceSettings {
     char     deviceName[32] = BRAND_NAME;
     float    heatingThreshold = 20.0f;  // AUTO mode heating target
     float    coolingThreshold = 25.0f;  // AUTO mode cooling target
+    // Night gate location (solar.h). NAN = unset: the SL2 night bits are
+    // never asserted until the user sets a location in the web UI.
+    float    latitude  = NAN;
+    float    longitude = NAN;
+    // Night wake-brightness ceiling the paired dials dim to, percent (5..60
+    // at the web edge; wire allows 1..100). Declared on every STATE while the
+    // gate runs, so "default" is simply this value's default.
+    uint8_t  nightCeilPct = 20;
+    // Night gate edge offsets, minutes (±180, clamped at the web edge).
+    // Positive dusk = night starts later after civil dusk; positive dawn =
+    // night ends later after civil dawn. 0/0 = raw civil twilight.
+    int16_t  nightDuskOffMin = 0;
+    int16_t  nightDawnOffMin = 0;
     bool     useFahrenheit = false;     // Web UI display unit
     bool     betaChannel = false;      // Update check also reads the beta manifest
     char     setupCode[9] = "";        // HomeKit pairing code (8 digits)

@@ -46,6 +46,14 @@ typedef struct {
                                * keep their own idle behavior */
     bool     screen_off;      /* the gate currently says the room is empty
                                * (SL2_SF2_SCREEN_OFF); ignored unless screen_ctl */
+    bool     night_ctl;       /* adapter computes a sun gate (SL2_SF2_NIGHT_CTL);
+                               * false = both wire bits stay clear and dials
+                               * keep their daytime brightness behavior */
+    bool     night;           /* sun below civil twilight (SL2_SF2_NIGHT);
+                               * ignored unless night_ctl */
+    uint8_t  night_ceil_pct;  /* night wake-brightness ceiling %, 1..100;
+                               * 0 = no opinion (dial uses its default).
+                               * Ignored unless night_ctl */
 } sl2_hvac_state_t;
 
 /* hvac_link policy for adapters whose platform lacks a native link-health

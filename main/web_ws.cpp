@@ -210,6 +210,37 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
             settings.save();
         }
 
+        // Night gate: gather every field first, save once — the batching
+        // idiom heatThresh/coolThresh use above. Offsets clamp to ±180 min
+        // (beyond three hours "offset from twilight" stops being what the
+        // control means). The explicit clear (both web-UI fields left empty;
+        // presence-triggered like bleDelIdx below) is applied LAST so a
+        // message carrying clear + coordinates deterministically clears.
+        float lat, lon;
+        int duskOff, dawnOff, ceilPct, nightLocClearVal;
+        bool latSet   = jsonGetFloat(msg, "nightLat", &lat);
+        bool lonSet   = jsonGetFloat(msg, "nightLon", &lon);
+        bool duskSet  = jsonGetInt(msg, "nightDuskOff", &duskOff);
+        bool dawnSet  = jsonGetInt(msg, "nightDawnOff", &dawnOff);
+        bool ceilSet  = jsonGetInt(msg, "nightCeil", &ceilPct);
+        bool clearSet = jsonGetInt(msg, "nightLocClear", &nightLocClearVal);
+        if (latSet || lonSet || duskSet || dawnSet || ceilSet || clearSet) {
+            if (latSet)  settings.get().latitude  = std::clamp(lat, -90.0f, 90.0f);
+            if (lonSet)  settings.get().longitude = std::clamp(lon, -180.0f, 180.0f);
+            if (duskSet) settings.get().nightDuskOffMin = (int16_t)std::clamp(duskOff, -180, 180);
+            if (dawnSet) settings.get().nightDawnOffMin = (int16_t)std::clamp(dawnOff, -180, 180);
+            if (ceilSet) settings.get().nightCeilPct = (uint8_t)std::clamp(ceilPct, 5, 60);
+            if (clearSet) {
+                settings.get().latitude  = NAN;
+                settings.get().longitude = NAN;
+            }
+            settings.save();
+            LOG_INFO("Set night: lat=%.4f lon=%.4f dusk=%+d dawn=%+d%s",
+                     settings.get().latitude, settings.get().longitude,
+                     settings.get().nightDuskOffMin, settings.get().nightDawnOffMin,
+                     clearSet ? " (location cleared)" : "");
+        }
+
         // Immediately push state with wanted values so the client doesn't
         // have to wait up to 1s for the next periodic push (which may
         // carry stale values if it was already in-flight).
@@ -746,6 +777,21 @@ void WebUI::pushState() {
         cfg.heatingThreshold,
         cfg.coolingThreshold
     );
+
+    // Night gate location. NAN (unset) must serialize as JSON null, never
+    // the literal "nan" — pre-format into buffers so the format string can
+    // stay a plain %s either way.
+    {
+        // NAN serializes as null — same conditional-append shape as
+        // outsideTemp/errorCode above.
+        if (std::isnan(cfg.latitude))  jsonAppend(buf, bufSz, &n, ",\"nightLat\":null");
+        else                           jsonAppend(buf, bufSz, &n, ",\"nightLat\":%.4f", cfg.latitude);
+        if (std::isnan(cfg.longitude)) jsonAppend(buf, bufSz, &n, ",\"nightLon\":null");
+        else                           jsonAppend(buf, bufSz, &n, ",\"nightLon\":%.4f", cfg.longitude);
+        jsonAppend(buf, bufSz, &n, ",\"nightDuskOff\":%d,\"nightDawnOff\":%d,\"nightCeil\":%d",
+                   (int)cfg.nightDuskOffMin, (int)cfg.nightDawnOffMin,
+                   (int)cfg.nightCeilPct);
+    }
 
     // ── ESP-NOW remote (Dial) status ──────────────────────────────────────
     {
