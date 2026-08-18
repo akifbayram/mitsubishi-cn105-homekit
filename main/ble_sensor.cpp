@@ -3,6 +3,7 @@
 #ifdef BLE_ENABLE
 
 #include "ble_sensor.h"
+#include "ble_pair.h"
 #include "settings.h"
 #include "sl2_proto.h"
 #include "logging.h"
@@ -79,6 +80,7 @@ static std::atomic<bool> s_pendingClear{false};   // Deferred clearRemoteTempera
 // an HCI response and permanently stall the web server.
 static std::atomic<bool> s_pendingRestart{false};
 static std::atomic<bool> s_bleEnabled{false};      // Mirror of settings.bleEnabled
+static std::atomic<bool> s_pairMode{false};        // BlePair window open (ble_pair.cpp)
 
 // ── Keepalive state (main task only) ────────────────────────────────────────
 static uint32_t s_lastKeepalive = 0;
@@ -143,7 +145,7 @@ static bool freshAt(uint32_t lastUpdate, uint32_t now, uint32_t staleMs) {
 // A scan should be running whenever there's a target to track or a discovery
 // window open (callers also check NimBLE is up and BLE enabled)
 static bool wantScan() {
-    return targetConfigured() || s_discoveryMode.load();
+    return targetConfigured() || s_discoveryMode.load() || s_pairMode.load();
 }
 
 // ── MAC format validator: "AA:BB:CC:DD:EE:FF" (any case) ───────────────────
@@ -225,15 +227,18 @@ static int gap_event_cb(struct ble_gap_event *event, void *arg) {
         snprintf(addrStr, sizeof(addrStr), "%02x:%02x:%02x:%02x:%02x:%02x",
             addr[5], addr[4], addr[3], addr[2], addr[1], addr[0]);
 
-        // Discovery mode: decode any sensor-type device for the results list so
-        // the user can confirm the right device by its temperature/humidity
-        if (s_discoveryMode.load()) {
+        // Discovery and proximity pairing both want any sensor-type device,
+        // not just configured targets. Decode once and fan out.
+        if (s_discoveryMode.load() || s_pairMode.load()) {
             SensorReading r;
             const char* type = decodeAdvertisement(disc->data, disc->length_data, addrStr, r);
             if (type) {
                 char name[24];
                 extractDeviceName(disc->data, disc->length_data, name, sizeof(name));
-                addDiscoveryResult(addrStr, name, type, disc->rssi, r.temp, r.hum);
+                if (s_discoveryMode.load())
+                    addDiscoveryResult(addrStr, name, type, disc->rssi, r.temp, r.hum);
+                if (s_pairMode.load())
+                    BlePair::observeAdvert(addrStr, disc->rssi, !std::isnan(r.temp), name, type);
             }
         }
 
@@ -428,6 +433,31 @@ bool BleSensor::isBleEnabled() {
     return s_bleEnabled.load();
 }
 
+void BleSensor::setPairMode(bool on) {
+    if (s_pairMode.exchange(on) == on) return;
+    // Duty profile changes with the mode; let loop() apply it rather than
+    // touching NimBLE from the caller's task.
+    s_pendingRestart.store(true);
+    LOG_INFO("BLE pair mode %s", on ? "opened" : "closed");
+}
+
+void BleSensor::setBleEnabledTransient(bool on) {
+    if (s_bleEnabled.exchange(on) == on) return;
+    // NimBLE bring-up/teardown is deferred to loop(), same as setBleEnabled().
+    s_pendingSync.store(true);
+    // Turning BLE off does not clear roomSingle, so a BLE slot can still be the
+    // selected room source here — and once s_bleEnabled is false, loop()
+    // returns early past both the feed and the stale watchdog. Without this the
+    // pump would be left chasing a temperature that can never update again, and
+    // would stay that way across reboots. Hand it back to its internal
+    // thermistor, exactly as setBleEnabled(false) does.
+    if (!on && feedSlot() >= 0) {
+        s_pendingClear.store(true);
+        s_staleReverted.store(false);
+    }
+    LOG_INFO("BLE %s (transient, not persisted)", on ? "enabled" : "disabled");
+}
+
 void BleSensor::loop(CN105Controller &cn105) {
     // NimBLE follows the enable toggle (flipped from the httpd task): bring the
     // stack up or tear it down here, then let the restart drain below own the
@@ -488,8 +518,9 @@ void BleSensor::loop(CN105Controller &cn105) {
 
     // Radio duty: hunt hard until every configured sensor's readings flow,
     // then back off (see ScanProfile)
-    ScanProfile want = (allConfiguredActive && !s_discoveryMode.load()) ? ScanProfile::TRACK
-                                                                        : ScanProfile::SEARCH;
+    ScanProfile want = (allConfiguredActive && !s_discoveryMode.load() && !s_pairMode.load())
+                       ? ScanProfile::TRACK
+                       : ScanProfile::SEARCH;
     if (s_scanProfile.exchange(want) != want) s_pendingRestart.store(true);
 
     // Deferred scan stop+restart (enable, address change, profile switch, discovery)
@@ -548,6 +579,31 @@ int8_t   BleSensor::battery(int idx)     { return slotIdxOk(idx) ? readLocked(s_
 int      BleSensor::rssi(int idx)        { return slotIdxOk(idx) ? readLocked(s_slots[idx].rssi) : 0; }
 const char* BleSensor::sensorType(int idx) { return slotIdxOk(idx) ? readLocked(s_slots[idx].type) : nullptr; }
 bool     BleSensor::isConfigured(int idx) { return slotIdxOk(idx) && readLocked(s_slots[idx].valid); }
+
+bool BleSensor::slotSeenSinceBoot(int idx) {
+    if (!slotIdxOk(idx)) return false;
+    taskENTER_CRITICAL(&s_mux);
+    bool seen = s_slots[idx].lastUpdate != 0;
+    taskEXIT_CRITICAL(&s_mux);
+    return seen;
+}
+
+int BleSensor::slotRssi(int idx, bool* valid) {
+    if (valid) *valid = false;
+    if (!slotIdxOk(idx)) return 0;
+    // Validity means FRESH, not "ever seen": a slot silent past the stale
+    // timeout must not supply a rise-test baseline (a sensor that dies, gets
+    // a battery swap, and is held to the unit again must be re-promotable —
+    // see PairPolicy's rise test, which applies to every configured slot).
+    uint32_t staleMs = (uint32_t)settings.get().roomStaleTimeoutS * 1000;
+    taskENTER_CRITICAL(&s_mux);
+    uint32_t lu   = s_slots[idx].lastUpdate;
+    int      rssi = s_slots[idx].rssi;
+    taskEXIT_CRITICAL(&s_mux);
+    bool has = freshAt(lu, uptime_ms(), staleMs);
+    if (valid) *valid = has;
+    return has ? rssi : 0;
+}
 
 // Master toggle off reports neither active nor stale: the last readings
 // survive in the slots for a quick re-enable, but consumers (web badge, Dial

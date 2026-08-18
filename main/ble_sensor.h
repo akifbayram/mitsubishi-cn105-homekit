@@ -89,6 +89,21 @@ namespace BleSensor {
     // Copy current results into out (up to max). Returns count; *truncated set
     // when more devices were seen than fit.
     int  discoveryResults(BleDiscoveredDevice* out, int max, bool* truncated);
+
+    // Proximity pairing (ble_pair.cpp). Pair mode keeps the scan in the SEARCH
+    // duty profile and routes every decodable advertisement to BlePair, without
+    // touching the discovery results the web UI reads.
+    void setPairMode(bool on);
+
+    // Slot introspection for the pairing policy's PairSlotView.
+    bool slotSeenSinceBoot(int idx);          // has produced a reading since configured
+    int  slotRssi(int idx, bool* valid);      // last RSSI; *valid false when none
+
+    // Runtime-only enable for the pairing window. setBleEnabled() writes NVS
+    // (it is the user's persistent toggle); this flips the runtime mirror
+    // alone, so a FAILED pair leaves settings.bleEnabled exactly as it found
+    // it. A successful pair calls setBleEnabled() instead.
+    void setBleEnabledTransient(bool on);
 }
 
 #endif // BLE_ENABLE

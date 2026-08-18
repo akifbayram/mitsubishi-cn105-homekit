@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include "board_profile.h"
+#include "button_input.h"
 
 // Timeout before enabling AP fallback
 constexpr uint32_t WIFI_RECOVERY_TIMEOUT_CHANGE = 120000;  // 2 min (after credential change)
@@ -21,14 +22,20 @@ constexpr uint32_t WIFI_SETUP_WINDOW_MS = 600000;  // 10 minutes
 constexpr uint32_t WIFI_RESET_BUTTON_HOLD_MS = 10000;  // 10 seconds
 // Button medium-press (release before 10s) opens Link pairing
 constexpr uint32_t PAIR_BUTTON_HOLD_MS       = 2000;   // 2 seconds
+// The medium-press band is the gap between a click and the WiFi reset: a
+// release only opens Link pairing when it lands above PAIR_BUTTON_HOLD_MS,
+// and ButtonInput only emits BTN_EV_RELEASE above BTN_CLICK_MAX_MS. Drop the
+// pair threshold below the click window and the band silently stops firing.
+static_assert(PAIR_BUTTON_HOLD_MS > BTN_CLICK_MAX_MS,
+              "pair hold threshold must exceed the click window");
 constexpr int8_t   WIFI_RESET_BUTTON_PIN = PIN_BUTTON;  // From board profile (-1 = no button)
 
 class WifiRecovery {
 public:
-    void begin(const char *apName, const char *displayName);    // Initialize: store AP name, configure button GPIO
-    void loop();                       // Call every main-loop iteration: samples the button each
-                                       // call (2 s / 10 s hold thresholds need ~10 ms sampling);
-                                       // WiFi/AP checks are rate-limited to 1 Hz internally
+    void begin(const char *apName, const char *displayName);    // Initialize: store AP name
+    void loop();                       // Call every main-loop iteration; WiFi/AP checks are
+                                       // rate-limited to 1 Hz internally
+    void onButton(const ButtonOut& b); // fed by main.cpp's ButtonInput, every iteration
     bool isAPActive() const { return _apActive; }
     uint32_t buttonHeldMs() const;     // 0 = button not pressed; else ms held so far
     void setChangePending(bool pending); // Set/clear the NVS flag
@@ -43,7 +50,6 @@ public:
     uint32_t getWifiUptimeSeconds() const;
 
 private:
-    void checkButton();
     void enableFallbackAP();
     void disableFallbackAP();
     void refreshCachedSSID();          // Re-read SSID from WifiManager NVS into _cachedSSID
@@ -57,7 +63,8 @@ private:
     uint32_t _wifiConnectedSince = 0;    // uptime_ms() when WiFi connected (0 = not connected)
     uint32_t _apShutdownAt = 0;          // uptime_ms() when AP should be disabled (0 = no pending shutdown)
     uint32_t _lastWifiCheck = 0;         // uptime_ms() of last 1 Hz WiFi/AP check
-    uint32_t _buttonPressStart = 0;      // uptime_ms() when button was first pressed (0 = not pressed)
+    uint32_t _buttonHeldMs = 0;          // Live hold duration from the last onButton() call
+                                         // (0 = not pressed) — see button_input.h ButtonOut::heldMs
     bool     _buttonTriggered = false;   // Prevent repeat triggers
     bool     _changeWindow = false;      // Dial-initiated change window open (AP up over a live STA).
                                          // While open WITHOUT a reprovision, STA blips (the portal's

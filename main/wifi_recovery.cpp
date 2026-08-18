@@ -11,7 +11,6 @@
 #include "web_server.h"
 
 #include <esp_netif.h>
-#include <driver/gpio.h>
 #include <esp_system.h>
 #include <freertos/FreeRTOS.h>   // vTaskDelay/pdMS_TO_TICKS — do not rely on a
 #include <freertos/task.h>       // transitive include (absent on esp32c6)
@@ -31,11 +30,6 @@ void WifiRecovery::begin(const char *apName, const char *displayName) {
     strncpy(_displayName, displayName, sizeof(_displayName) - 1);
     _displayName[sizeof(_displayName) - 1] = '\0';
 
-#if PIN_BUTTON >= 0
-    gpio_set_direction((gpio_num_t)WIFI_RESET_BUTTON_PIN, GPIO_MODE_INPUT);
-    gpio_set_pull_mode((gpio_num_t)WIFI_RESET_BUTTON_PIN, GPIO_PULLUP_ONLY);
-#endif
-
     refreshCachedSSID();
 
     // A change left pending across a reboot is still an unconfirmed change:
@@ -48,10 +42,6 @@ void WifiRecovery::begin(const char *apName, const char *displayName) {
 }
 
 void WifiRecovery::loop() {
-    // Button first, every call — the 2 s / 10 s hold thresholds need finer
-    // sampling than the 1 Hz WiFi check below.
-    checkButton();
-
     uint32_t now = uptime_ms();
     if (now - _lastWifiCheck < 1000) return;
     _lastWifiCheck = now;
@@ -275,59 +265,58 @@ uint32_t WifiRecovery::getWifiUptimeSeconds() const {
 }
 
 uint32_t WifiRecovery::buttonHeldMs() const {
-#if PIN_BUTTON < 0
-    return 0;
-#else
-    return _buttonPressStart ? (uptime_ms() - _buttonPressStart) : 0;
-#endif
+    return _buttonHeldMs;
 }
 
-void WifiRecovery::checkButton() {
+void WifiRecovery::onButton(const ButtonOut& b) {
 #if PIN_BUTTON < 0
-    return;
+    (void)b;
 #else
-    bool pressed = (gpio_get_level((gpio_num_t)WIFI_RESET_BUTTON_PIN) == (BUTTON_ACTIVE_LOW ? 0 : 1));
+    // Zero same-tick on release (not b.heldMs verbatim): heldMs still carries
+    // the final hold duration on the BTN_EV_RELEASE tick itself, and the old
+    // gpio-polled checkButton() always read 0 the instant the button came up
+    // (it zeroed _buttonPressStart before returning). Copying b.heldMs as-is
+    // would leave the LED reporting a stale non-zero hold for one extra loop
+    // iteration after every release.
+    _buttonHeldMs = b.pressed ? b.heldMs : 0;
 
-    if (pressed && _buttonPressStart == 0) {
-        _buttonPressStart = safeUptimeMs();
-        _buttonTriggered = false;
-    } else if (pressed && !_buttonTriggered) {
-        if (uptime_ms() - _buttonPressStart >= WIFI_RESET_BUTTON_HOLD_MS) {
+    if (b.pressed) {
+        if (!_buttonTriggered && b.heldMs >= WIFI_RESET_BUTTON_HOLD_MS) {
             _buttonTriggered = true;
             LOG_WARN("[WiFiRecovery] Button held 10s — erasing WiFi credentials");
             WifiManager::eraseCredentials();
             esp_restart();
         }
-    } else if (!pressed) {
-        if (_buttonPressStart != 0 && !_buttonTriggered) {
-            uint32_t held = uptime_ms() - _buttonPressStart;
-            // Upper bound: once the LED enters its red SLED_BTN_WIPE warning
-            // tier (>= SLED_BTN_WIPE_WARN_MS, 7 s), releasing must be a no-op
-            // so that tier honestly means "release now to abort" — otherwise
-            // releasing at, say, 8 s to abort the wipe would instead fire the
-            // (destructive when bonded) pairing/unbond action. The 10 s wipe
-            // threshold itself is unaffected: it fires from the while-pressed
-            // branch above, not this release path.
-            if (held >= PAIR_BUTTON_HOLD_MS && held < SLED_BTN_WIPE_WARN_MS) {
-#if ESPNOW_REMOTE_ENABLE
-                bool otaBusy = webota_active();
-                if (otaBusy) {
-                    LOG_INFO("[WiFiRecovery] Button pairing ignored (OTA in progress)");
-                } else if (espnowLink.pairingActive()) {
-                    LOG_INFO("[WiFiRecovery] Button: cancelling Link pairing");
-                    espnowLink.cancelPairing();
-                } else if (espnowLink.isBonded()) {
-                    LOG_WARN("[WiFiRecovery] Button hold — forgetting Link remote");
-                    espnow_forget_and_restart();
-                } else {
-                    LOG_INFO("[WiFiRecovery] Button hold — opening Link pairing");
-                    espnowLink.startPairing();
-                }
-#endif
-            }
-        }
-        _buttonPressStart = 0;
-        _buttonTriggered = false;
+        return;
     }
+
+    if (b.ev == BTN_EV_RELEASE && !_buttonTriggered) {
+        // Upper bound: once the LED enters its red SLED_BTN_WIPE warning tier
+        // (>= SLED_BTN_WIPE_WARN_MS, 7 s), releasing must be a no-op so that
+        // tier honestly means "release now to abort" — otherwise releasing at,
+        // say, 8 s to abort the wipe would instead fire the (destructive when
+        // bonded) pairing/unbond action. The 10 s wipe threshold itself is
+        // unaffected: it fires from the while-pressed branch above.
+        uint32_t held = b.heldMs;
+        if (held >= PAIR_BUTTON_HOLD_MS && held < SLED_BTN_WIPE_WARN_MS) {
+#if ESPNOW_REMOTE_ENABLE
+            bool otaBusy = webota_active();
+            if (otaBusy) {
+                LOG_INFO("[WiFiRecovery] Button pairing ignored (OTA in progress)");
+            } else if (espnowLink.pairingActive()) {
+                LOG_INFO("[WiFiRecovery] Button: cancelling Link pairing");
+                espnowLink.cancelPairing();
+            } else if (espnowLink.isBonded()) {
+                LOG_WARN("[WiFiRecovery] Button hold — forgetting Link remote");
+                espnow_forget_and_restart();
+            } else {
+                LOG_INFO("[WiFiRecovery] Button hold — opening Link pairing");
+                espnowLink.startPairing();
+            }
+#endif
+        }
+    }
+
+    if (!b.pressed) _buttonTriggered = false;
 #endif
 }

@@ -23,6 +23,7 @@ static const char* stateName(LEDState s) {
         case SLED_ERROR_CODE:         return "ERROR";
         case SLED_OTA:                return "OTA";
         case SLED_PAIR_LISTEN:        return "PAIR_LISTEN";
+        case SLED_BLE_PAIR_LISTEN:    return "BLE_PAIR_LISTEN";
         case SLED_RESULT_OK:          return "RESULT_OK";
         case SLED_RESULT_FAIL:        return "RESULT_FAIL";
         case SLED_UNPAIR:             return "UNPAIR";
@@ -145,6 +146,7 @@ void StatusLED::setState(LEDState state) {
             break;
         case SLED_OTA:
         case SLED_PAIR_LISTEN:
+        case SLED_BLE_PAIR_LISTEN:
         case SLED_PORTAL:
         case SLED_SAFE_MODE:
             // pulses — animated in loop(); dark until first tick
@@ -228,6 +230,9 @@ void StatusLED::loop() {
             break;
         case SLED_PAIR_LISTEN:
             pulseTick(now, stateAge, MAX_BRIGHT, 0, MAX_BRIGHT);           // purple
+            break;
+        case SLED_BLE_PAIR_LISTEN:
+            pulseTick(now, stateAge, 0, MAX_BRIGHT, MAX_BRIGHT);           // cyan
             break;
         case SLED_PORTAL:
             pulseTick(now, stateAge, 0, 0, MAX_BRIGHT);                    // blue

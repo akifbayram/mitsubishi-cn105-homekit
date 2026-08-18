@@ -11,6 +11,7 @@
 #if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
 #include <driver/usb_serial_jtag.h>
 #endif
+#include <driver/gpio.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
@@ -27,6 +28,7 @@
 #include "espnow_link.h"
 #include "wifi_manager.h"
 #include "wifi_recovery.h"
+#include "button_input.h"
 #include "homekit_setup.h"
 #include "homekit_services.h"
 #include "web_server.h"
@@ -37,6 +39,7 @@
 #include "ble_sensor.h"
 #include "homekit_sensor_accessory.h"
 #endif
+#include "ble_pair.h"
 
 static const char *TAG = "main";
 
@@ -245,6 +248,11 @@ extern "C" void app_main(void)
                  PIN_CN105_RX, PIN_CN105_TX, (unsigned long)CN105_BAUD_RATE);
     }
 
+#if PIN_BUTTON >= 0
+    gpio_set_direction((gpio_num_t)WIFI_RESET_BUTTON_PIN, GPIO_MODE_INPUT);
+    gpio_set_pull_mode((gpio_num_t)WIFI_RESET_BUTTON_PIN, GPIO_PULLUP_ONLY);
+#endif
+
     // ── 11. WiFi recovery (AP fallback + button handler) ─────────────────
     wifiRecovery.begin(apName, displayName);
 
@@ -357,7 +365,20 @@ extern "C" void app_main(void)
         // ── ESP-NOW remote — every iter (~10 ms) ────────────────────────
         espnowLink.loop();
 
-        // ── WiFi recovery + button — every iter (~10 ms); WiFi checks are
+        // ── Button — every iter (~10 ms). One debounced source, two
+        // consumers: wifiRecovery owns the hold bands, BlePair owns clicks.
+#if PIN_BUTTON >= 0
+        {
+            static ButtonInput button;
+            bool rawPressed = (gpio_get_level((gpio_num_t)WIFI_RESET_BUTTON_PIN)
+                               == (BUTTON_ACTIVE_LOW ? 0 : 1));
+            ButtonOut b = button.update(rawPressed, now);
+            wifiRecovery.onButton(b);
+            if (webUIStarted && !safeMode && b.ev == BTN_EV_CLICK && b.clicks == 3) BlePair::onTripleClick();
+        }
+#endif
+
+        // ── WiFi recovery — every iter (~10 ms); WiFi checks are
         // rate-limited to 1 Hz inside loop()
         wifiRecovery.loop();
         WifiManager::loop();   // trial-connect commit/revert (must run on main task)
@@ -451,6 +472,7 @@ extern "C" void app_main(void)
 
 #ifdef BLE_ENABLE
             if (!safeMode) BleSensor::begin();
+            if (!safeMode) BlePair::begin();
 #endif
         }
 
@@ -472,6 +494,7 @@ extern "C" void app_main(void)
 #ifdef BLE_ENABLE
         if (webUIStarted && now - lastBleLoop >= 1000) {
             BleSensor::loop(cn105);
+            BlePair::loop();
             lastBleLoop = now;
         }
 #endif
@@ -535,9 +558,12 @@ extern "C" void app_main(void)
             li.buttonHeldMs    = wifiRecovery.buttonHeldMs();
             li.otaActive       = webota_active();
 #if ESPNOW_REMOTE_ENABLE
-            li.pairActionAllowed = !li.otaActive;   // mirrors checkButton()'s OTA guard
+            li.pairActionAllowed = !li.otaActive;   // mirrors onButton()'s OTA guard
 #endif
             li.pairingActive   = espnowLink.pairingActive();
+#ifdef BLE_ENABLE
+            li.blePairListening  = BlePair::isListening();
+#endif
             li.wifiTrialActive = (tr == WifiManager::WIFI_TRIAL_TESTING);   // real credential trials only
             li.safeMode        = safeMode;
             li.portalActive    = wifiRecovery.isAPActive();

@@ -19,6 +19,7 @@ idf_component_register(
          "homekit_fan.cpp"
          "homekit_switches.cpp"
          "ble_sensor.cpp"
+         "ble_pair.cpp"
          "homekit_sensor_accessory.cpp"
          "espnow_link.cpp"
          "solar.cpp"
