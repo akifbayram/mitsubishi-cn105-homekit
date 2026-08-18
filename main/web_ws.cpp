@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <cstdarg>
 #include "ble_config.h"
 #ifdef BLE_ENABLE
 #include "ble_sensor.h"
@@ -539,7 +540,12 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
         sendWsText(httpd_req_to_sockfd(req),
                    "{\"type\":\"info\",\"msg\":\"Factory reset — erasing all settings and restarting...\"}");
         vTaskDelay(pdMS_TO_TICKS(300));   // let the frame flush
-        nvs_flash_deinit();               // close handles; stray writes now fail cleanly
+        // nvs_flash_erase() closes every handle and deinits the partition
+        // itself (nvs_api.cpp runs close_handles_and_deinit before erasing),
+        // so an explicit nvs_flash_deinit() bought nothing here: it does not
+        // wait for concurrent users, it only freed the Storage object under a
+        // settings.save() / eventlog_append() / HAP pairing write that little
+        // bit sooner.
         nvs_flash_erase();
         esp_restart();
 
@@ -665,6 +671,28 @@ void WebUI::broadcastWs(const char *text) {
 // Push full state JSON to all connected WebSocket clients
 // ══════════════════════════════════════════════════════════════════════════════
 
+// jsonAppend, plus `*want`: what the text appended so far would have measured
+// with an unlimited buffer. jsonAppend stops advancing `*pos` once the buffer
+// is full, so every field appended after the first one that overflowed goes
+// uncounted — a size read off `*pos` under-reports, and a buffer resized to it
+// would still truncate. The sizing-only vsnprintf runs only while the buffer
+// is already full, so a frame that fits pays nothing for the tally.
+static void stateAppend(char *buf, size_t cap, int *pos, int *want,
+                        const char *fmt, ...) {
+    const bool room = (*pos >= 0 && (size_t)*pos < cap);
+    va_list args;
+    va_start(args, fmt);
+    int w = room ? vsnprintf(buf + *pos, cap - (size_t)*pos, fmt, args)
+                 : vsnprintf(nullptr, 0, fmt, args);
+    va_end(args);
+    if (w < 0) {                    // encoding error — mark truncated, count nothing
+        if (room) *pos = (int)cap;
+        return;
+    }
+    if (room) *pos += w;            // may pass cap, so truncation stays detectable
+    *want += w;
+}
+
 void WebUI::pushState() {
     int wsFds[CONFIG_LWIP_MAX_SOCKETS];
     int wsN = collectWsClients(wsFds, CONFIG_LWIP_MAX_SOCKETS);
@@ -687,8 +715,22 @@ void WebUI::pushState() {
 
     // Heap, not stack: the averaging rework (per-sensor list + blend status)
     // outgrew what pushState may burn on the httpd task's stack.
-    constexpr size_t bufSz = 3584;
-    char *buf = (char *)malloc(bufSz);
+    //
+    // bufSz is derived, not guessed. Worst case over today's fields, taking
+    // every escaped string at the length jsonEscape can actually emit
+    // (dstLen - 2): header 475 (31-char deviceName + 32-char SSID, both fully
+    // escaped, plus roomMembers) + 58 outsideTemp/errorCode/runtime
+    // + 183 heap/health + 44 thresholds + 108 night gate + 387 remote/dial
+    // (escaped model + fw) + 310 HomeKit (setup code + URI) + 195 room/Link
+    // + 215 blend + roomOffs + 278 legacy BLE + 928 for four bleSensors[]
+    // entries with 48-char escaped names + 1 closing brace = 3182 B. 4096
+    // keeps ~28% for fields added later; overflow past that degrades (see the
+    // sections below).
+    constexpr size_t bufSz = 4096;
+    // Tail the sections can never eat, so the closing brace (and the
+    // truncation marker) always fit however full the body ran.
+    constexpr size_t allocSz = bufSz + 16;
+    char *buf = (char *)malloc(allocSz);
     if (!buf) return;
     int n = snprintf(buf, bufSz,
         "{\"type\":\"state\""
@@ -709,7 +751,11 @@ void WebUI::pushState() {
         ",\"stage\":\"%s\""
         ",\"autoSubMode\":\"%s\""
         ",\"deviceName\":\"%s\""
-        ",\"ssid\":\"%s\"",
+        ",\"ssid\":\"%s\""
+        // Header, not the blend section below: the Manage Sensors panel
+        // read-modify-writes roomMembers, so a frame that dropped it would
+        // have the browser toggle a bit into a map it can no longer see.
+        ",\"roomMembers\":%u",
         st.power ? "true" : "false",
         modeToWebStr(st.mode),
         st.targetTemp,
@@ -727,35 +773,62 @@ void WebUI::pushState() {
         stageToWebStr(st.stage),
         autoSubModeToWebStr(st.autoSubMode),
         escName,
-        escSsid
+        escSsid,
+        (unsigned)cfg.roomMembers
     );
 
-    if (st.outsideTempValid) {
-        jsonAppend(buf, bufSz, &n, ",\"outsideTemp\":%.1f", st.outsideTemp);
-    } else {
-        jsonAppend(buf, bufSz, &n, ",\"outsideTemp\":null");
+    // The header is fixed-bounded (475 B worst case, see bufSz), so it cannot
+    // overflow; a later field that broke that would leave it cut mid-value,
+    // which is not something to hand a browser.
+    if (n >= (int)bufSz) {
+        LOG_WARN("pushState header overflow (%d >= %zu), skipping send", n, bufSz);
+        free(buf);
+        return;
     }
+
+    // Everything below is built in sections, committed one at a time. An
+    // overflowing frame used to be dropped ENTIRELY and silently — the UI
+    // froze on a live WebSocket with only a WARN in the 12-line log ring — so
+    // now the section that doesn't fit is rolled back whole (never half a
+    // field) and the rest still ships as valid JSON.
+    int kept = n;      // end of the last section that fit
+    int dropped = 0;   // sections rolled back from this frame
+    int want = n;      // length this frame would have taken with nothing dropped
+    auto section = [&]() {
+        if (n < (int)bufSz) { kept = n; return; }
+        n = kept;
+        dropped++;
+    };
+
+    if (st.outsideTempValid) {
+        stateAppend(buf, bufSz, &n, &want, ",\"outsideTemp\":%.1f", st.outsideTemp);
+    } else {
+        stateAppend(buf, bufSz, &n, &want, ",\"outsideTemp\":null");
+    }
+    section();
 
     // Error code
     if (st.hasError) {
-        jsonAppend(buf, bufSz, &n, ",\"errorCode\":%u", st.errorCode);
+        stateAppend(buf, bufSz, &n, &want, ",\"errorCode\":%u", st.errorCode);
     } else {
-        jsonAppend(buf, bufSz, &n, ",\"errorCode\":null");
+        stateAppend(buf, bufSz, &n, &want, ",\"errorCode\":null");
     }
+    section();
 
     // Runtime hours
     if (st.runtimeValid) {
-        jsonAppend(buf, bufSz, &n, ",\"runtime\":%.1f", st.runtimeHours);
+        stateAppend(buf, bufSz, &n, &want, ",\"runtime\":%.1f", st.runtimeHours);
     } else {
-        jsonAppend(buf, bufSz, &n, ",\"runtime\":null");
+        stateAppend(buf, bufSz, &n, &want, ",\"runtime\":null");
     }
+    section();
 
     // Heap + reboot/connectivity health. resetReason/crashCount make a silent
     // field reboot classifiable over the network (the boot banner scrolls out
     // of the 12-line log ring before a client can reconnect); wifiDrops/
     // cn105Drops/epoch add connectivity health (epoch 0 = wall clock not
     // SNTP-synced yet).
-    jsonAppend(buf, bufSz, &n,
+    stateAppend(buf, bufSz, &n, &want,
         ",\"heapFree\":%lu"
         ",\"heapMin\":%lu"
         ",\"heapBlock\":%lu"
@@ -773,14 +846,16 @@ void WebUI::pushState() {
         (unsigned long)eventlog_session_count(EV_CN105_LOST),
         (unsigned long)time_sync_epoch()
     );
+    section();
 
     // Dual setpoint thresholds
-    jsonAppend(buf, bufSz, &n,
+    stateAppend(buf, bufSz, &n, &want,
         ",\"heatThresh\":%.1f"
         ",\"coolThresh\":%.1f",
         cfg.heatingThreshold,
         cfg.coolingThreshold
     );
+    section();
 
     // Night gate location. NAN (unset) must serialize as JSON null, never
     // the literal "nan" — pre-format into buffers so the format string can
@@ -788,14 +863,15 @@ void WebUI::pushState() {
     {
         // NAN serializes as null — same conditional-append shape as
         // outsideTemp/errorCode above.
-        if (std::isnan(cfg.latitude))  jsonAppend(buf, bufSz, &n, ",\"nightLat\":null");
-        else                           jsonAppend(buf, bufSz, &n, ",\"nightLat\":%.4f", cfg.latitude);
-        if (std::isnan(cfg.longitude)) jsonAppend(buf, bufSz, &n, ",\"nightLon\":null");
-        else                           jsonAppend(buf, bufSz, &n, ",\"nightLon\":%.4f", cfg.longitude);
-        jsonAppend(buf, bufSz, &n, ",\"nightDuskOff\":%d,\"nightDawnOff\":%d,\"nightCeil\":%d",
+        if (std::isnan(cfg.latitude))  stateAppend(buf, bufSz, &n, &want, ",\"nightLat\":null");
+        else                           stateAppend(buf, bufSz, &n, &want, ",\"nightLat\":%.4f", cfg.latitude);
+        if (std::isnan(cfg.longitude)) stateAppend(buf, bufSz, &n, &want, ",\"nightLon\":null");
+        else                           stateAppend(buf, bufSz, &n, &want, ",\"nightLon\":%.4f", cfg.longitude);
+        stateAppend(buf, bufSz, &n, &want, ",\"nightDuskOff\":%d,\"nightDawnOff\":%d,\"nightCeil\":%d",
                    (int)cfg.nightDuskOffMin, (int)cfg.nightDawnOffMin,
                    (int)cfg.nightCeilPct);
     }
+    section();
 
     // ── ESP-NOW remote (Dial) status ──────────────────────────────────────
     {
@@ -803,7 +879,7 @@ void WebUI::pushState() {
         char macStr[18];
         snprintf(macStr, sizeof(macStr), "%02X:%02X:%02X:%02X:%02X:%02X",
                  rm[0],rm[1],rm[2],rm[3],rm[4],rm[5]);
-        jsonAppend(buf, bufSz, &n,
+        stateAppend(buf, bufSz, &n, &want,
             ",\"remoteBonded\":%s,\"remoteLive\":%s,\"remoteMac\":\"%s\""
             ",\"remotePairing\":%s,\"remotePairSecs\":%d,\"remotePairResult\":\"%s\"",
             espnowLink.isBonded() ? "true" : "false",
@@ -817,21 +893,22 @@ void WebUI::pushState() {
         if (espnowLink.getDialDetail(dd)) {
             // remoteCertState: sl2_cert_state_t — 0 NONE (unprovisioned dial,
             // the common home-built case) / 1 PRESENT / 2 INVALID / 3 OK.
-            jsonAppend(buf, bufSz, &n,
+            stateAppend(buf, bufSz, &n, &want,
                 ",\"remoteLastSeen\":%ld,\"remoteSyncing\":%s,\"remoteCertState\":%u",
                 (long)dd.lastSeenSec, dd.syncing ? "true" : "false",
                 (unsigned)dd.certState);
             if (dd.rssi != 0)
-                jsonAppend(buf, bufSz, &n, ",\"remoteRssi\":%d", dd.rssi);
+                stateAppend(buf, bufSz, &n, &want, ",\"remoteRssi\":%d", dd.rssi);
             if (dd.haveInfo && dd.model[0]) {
                 char escModel[64], escFw[48];
                 jsonEscape(dd.model, escModel, sizeof(escModel));
                 jsonEscape(dd.fw, escFw, sizeof(escFw));
-                jsonAppend(buf, bufSz, &n,
+                stateAppend(buf, bufSz, &n, &want,
                     ",\"remoteModel\":\"%s\",\"remoteFw\":\"%s\"", escModel, escFw);
             }
         }
     }
+    section();
 
     // Before HomeKit has started, its fields are placeholders — neutralize
     // them here so clients don't need started-ness special cases: boot mask
@@ -840,7 +917,7 @@ void WebUI::pushState() {
     bool hkReady = homekit_is_started();
     int hkControllers = homekit_get_controller_count();
 
-    jsonAppend(buf, bufSz, &n,
+    stateAppend(buf, bufSz, &n, &want,
         ",\"logLevel\":%d"
         ",\"pollInterval\":%lu"
         ",\"tempUnit\":\"%s\""
@@ -868,6 +945,7 @@ void WebUI::pushState() {
         hkReady ? homekit_get_setup_code() : "",
         hkReady ? homekit_get_setup_payload() : ""
     );
+    section();
 
     {
         // Room source + Serin Link sensor — deliberately OUTSIDE the
@@ -885,7 +963,7 @@ void WebUI::pushState() {
         if (!std::isnan(linkT)) snprintf(linkTStr, sizeof(linkTStr), "%.2f", linkT);
         if (!std::isnan(linkH)) snprintf(linkHStr, sizeof(linkHStr), "%.0f", linkH);
 
-        jsonAppend(buf, bufSz, &n,
+        stateAppend(buf, bufSz, &n, &want,
             ",\"roomSource\":%d"
             ",\"roomStatus\":%d"
             ",\"bleTimeout\":%u"
@@ -905,17 +983,19 @@ void WebUI::pushState() {
             LinkSensor::isStale() ? "true" : "false",
             (unsigned long)linkAge);
     }
+    section();
 
     {
         // Blending model + last blend pass. Everything the card needs to
         // render modes/exclusions/banners rides here — no client inference.
+        // roomMembers is the exception, up in the header, because it is the
+        // one field the UI writes back bit by bit.
         const RoomAvg::Status av = RoomAvg::status();
         char effStr[8] = "null";
         if (!std::isnan(av.effective)) snprintf(effStr, sizeof(effStr), "%.2f", av.effective);
-        jsonAppend(buf, bufSz, &n,
+        stateAppend(buf, bufSz, &n, &want,
             ",\"roomMode\":%u"
             ",\"roomSingle\":%u"
-            ",\"roomMembers\":%u"
             ",\"avgFeeding\":%s"
             ",\"avgFallback\":%s"
             ",\"effTemp\":%s"
@@ -926,7 +1006,6 @@ void WebUI::pushState() {
             ",\"exclOff\":%u",
             (unsigned)cfg.roomMode,
             (unsigned)cfg.roomSingle,
-            (unsigned)cfg.roomMembers,
             av.feeding ? "true" : "false",
             av.fallback ? "true" : "false",
             effStr,
@@ -935,11 +1014,12 @@ void WebUI::pushState() {
             (unsigned)av.contributors,
             (unsigned)av.exclStale,
             (unsigned)av.exclOff);
-        jsonAppend(buf, bufSz, &n, ",\"roomOffs\":[");
+        stateAppend(buf, bufSz, &n, &want, ",\"roomOffs\":[");
         for (int i = 0; i < ROOM_MEMBER_COUNT; i++)
-            jsonAppend(buf, bufSz, &n, "%s%d", i ? "," : "", (int)cfg.roomOffsets[i]);
-        jsonAppend(buf, bufSz, &n, "]");
+            stateAppend(buf, bufSz, &n, &want, "%s%d", i ? "," : "", (int)cfg.roomOffsets[i]);
+        stateAppend(buf, bufSz, &n, &want, "]");
     }
+    section();
 
 #ifdef BLE_ENABLE
     {
@@ -959,7 +1039,7 @@ void WebUI::pushState() {
 
         const char* sType = BleSensor::sensorType();
 
-        jsonAppend(buf, bufSz, &n,
+        stateAppend(buf, bufSz, &n, &want,
             ",\"bleEnabled\":%s"
             ",\"bleTemp\":%s"
             ",\"bleHumidity\":%s"
@@ -988,11 +1068,12 @@ void WebUI::pushState() {
             sType ? "\"" : "", sType ? sType : "null", sType ? "\"" : ""
         );
     }
+    section();
 
     {
         // Named sensor list — one entry per configured slot, slot index
         // included so member bits and offsets line up client-side.
-        jsonAppend(buf, bufSz, &n, ",\"bleSensors\":[");
+        stateAppend(buf, bufSz, &n, &want, ",\"bleSensors\":[");
         bool first = true;
         for (int i = 0; i < ROOM_MAX_BLE_SENSORS; i++) {
             if (!BleSensor::isConfigured(i)) continue;
@@ -1005,7 +1086,7 @@ void WebUI::pushState() {
             char escSensName[50];
             jsonEscape(settings.get().bleSensors[i].name, escSensName, sizeof(escSensName));
             const char* ty = BleSensor::sensorType(i);
-            jsonAppend(buf, bufSz, &n,
+            stateAppend(buf, bufSz, &n, &want,
                 "%s{\"i\":%d,\"addr\":\"%s\",\"name\":\"%s\",\"type\":%s%s%s"
                 ",\"temp\":%s,\"hum\":%s,\"batt\":%d,\"rssi\":%d,\"age\":%lu"
                 ",\"active\":%s,\"stale\":%s}",
@@ -1018,16 +1099,38 @@ void WebUI::pushState() {
                 BleSensor::isStale(i) ? "true" : "false");
             first = false;
         }
-        jsonAppend(buf, bufSz, &n, "]");
+        stateAppend(buf, bufSz, &n, &want, "]");
     }
+    section();
 #endif
 
-    jsonAppend(buf, bufSz, &n, "}");
+    // Close on the last section that fit — always a section boundary, so the
+    // object is well formed — and flag the loss in-band. The UI ignores keys
+    // it doesn't know and reads every optional field defensively
+    // (`s.x != null`, `(s.bleSensors||[])`), so a short frame renders instead
+    // of freezing.
+    n = kept;
+    if (dropped) jsonAppend(buf, allocSz, &n, ",\"trunc\":true");
+    stateAppend(buf, allocSz, &n, &want, "}");
 
-    if (n >= (int)bufSz) {
-        LOG_WARN("pushState buffer truncated (%d >= %zu), skipping send", n, bufSz);
-        free(buf);
-        return;
+    if (dropped) {
+        // Loud but bounded: at 1 Hz a persistent overflow would flood the
+        // 12-line log ring and bury every other line, so warn on the first
+        // frame and then once a minute, carrying the running total. `want` is
+        // the length this frame would have taken had nothing been dropped,
+        // closing brace included and the `trunc` marker excluded — i.e. what
+        // bufSz must reach for it to ship whole. main and httpd both push,
+        // hence the atomics.
+        static std::atomic<uint32_t> truncFrames{0};
+        static std::atomic<uint32_t> lastWarnMs{0};
+        uint32_t frames = ++truncFrames;
+        uint32_t now = uptime_ms();
+        if (frames == 1 || now - lastWarnMs >= 60000) {
+            lastWarnMs = now;
+            LOG_WARN("pushState buffer truncated (needs %d B, have %zu): "
+                     "%d section(s) dropped, %lu frame(s) so far",
+                     want, bufSz, dropped, (unsigned long)frames);
+        }
     }
 
     for (int i = 0; i < wsN; i++) {
@@ -1107,7 +1210,7 @@ void WebUI::sendDeviceInfo(int fd) {
         mac[0], mac[1], mac[2], mac[3], mac[4], mac[5],
         ip,
         WifiManager::getHostname(),
-        reset_reason_str(esp_reset_reason()),
+        resetReasonStr(esp_reset_reason()),
         (unsigned long)eventlog_boot_count(),
         (unsigned long)eventlog_crash_total(),
         eventlog_safe_mode() ? "true" : "false");

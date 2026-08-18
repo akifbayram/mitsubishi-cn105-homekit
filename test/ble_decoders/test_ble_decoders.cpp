@@ -144,6 +144,18 @@ static void test_atc1441(void) {
     CHECK(decodeAdvertisement(xx, sizeof xx, nullptr, x) == nullptr);
 }
 
+// ── BTHome v2 object sizes: the uint16 ids hiding in the binary-sensor block ─
+static void test_bthome_objlen(void) {
+    // CO2/TVOC/moisture are uint16 measurements at ids 0x12-0x14, inside the
+    // 0x0F..0x2D binary-sensor block — the explicit table must win over it
+    CHECK(bthomeObjLen(0x12) == 2 && bthomeObjLen(0x13) == 2 && bthomeObjLen(0x14) == 2);
+    // Their binary-sensor neighbours stay one byte
+    CHECK(bthomeObjLen(0x0f) == 1 && bthomeObjLen(0x11) == 1);
+    CHECK(bthomeObjLen(0x15) == 1 && bthomeObjLen(0x2d) == 1);
+    // Outside the block nothing changes: known uint8 id, unknown id
+    CHECK(bthomeObjLen(0x2e) == 1 && bthomeObjLen(0xe0) == -1);
+}
+
 // ── BTHome v2 (0xFCD2): object order, packet id, Shelly BLU H&T objects ─────
 static void test_bthome(void) {
     // Spec-ordered frame (ids ascending): batt 88, temp 23.45, hum 48.00
@@ -164,6 +176,19 @@ static void test_bthome(void) {
     // Button event (0x3A) before the 0x45 temp is skipped via the size table
     SensorReading e; uint8_t ev[] = {0x09,0x16,0xd2,0xfc, 0x40, 0x3a,0x00, 0x45,0xea,0x00};
     CHECK(isType(ev, sizeof ev, "BTHome v2", e) && feq(e.temp,23.4f));
+    // A uint16 CO2 object (0x12) between temp and humidity: read as one byte it
+    // desynced the walk and every later object was lost — temp 22.00, hum 55 %
+    SensorReading q; uint8_t qc[] = {0x0c,0x16,0xd2,0xfc, 0x40, 0x02,0x98,0x08, 0x12,0x20,0x03, 0x2e,0x37};
+    CHECK(isType(qc, sizeof qc, "BTHome v2", q) && feq(q.temp,22.0f) && feq(q.hum,55.0f));
+    // Worse than a lost field: CO2 600 ppm then 24.1 C used to desync into a
+    // *plausible* -37.7 C, which passes validTemp and reaches the heat pump
+    SensorReading w; uint8_t wt[] = {0x0a,0x16,0xd2,0xfc, 0x40, 0x12,0x58,0x02, 0x45,0xf1,0x00};
+    CHECK(isType(wt, sizeof wt, "BTHome v2", w) && feq(w.temp,24.1f));
+    // All three uint16 ids in one spec-ordered frame: pid, CO2, TVOC, moisture,
+    // hum 45 %, temp 23.4 C — the trailing objects must survive the skips
+    SensorReading m; uint8_t mx[] = {0x14,0x16,0xd2,0xfc, 0x40, 0x00,0x0b, 0x12,0x20,0x03, 0x13,0x2c,0x01,
+                                     0x14,0x94,0x11, 0x2e,0x2d, 0x45,0xea,0x00};
+    CHECK(isType(mx, sizeof mx, "BTHome v2", m) && feq(m.temp,23.4f) && feq(m.hum,45.0f));
     // Unknown object id after temp: keep what already decoded
     SensorReading u; uint8_t un[] = {0x0a,0x16,0xd2,0xfc, 0x40, 0x02,0x29,0x09, 0xe0,0x12,0x34};
     CHECK(isType(un, sizeof un, "BTHome v2", u) && feq(u.temp,23.45f));
@@ -189,6 +214,7 @@ int main(void) {
     test_govee();
     test_pvvx();
     test_atc1441();
+    test_bthome_objlen();
     test_bthome();
     printf("ble_decoders: all %d checks passed\n", g_checks);
     return 0;

@@ -2,7 +2,7 @@
 // Pure LED priority policy — NO ESP-IDF includes; host-testable
 // (test/sled_policy). The main loop gathers SledInputs once per tick and
 // drives StatusLED with the result; requestHold() overrides still apply
-// inside StatusLED::setState().
+// inside StatusLED (see sled_hold_action below).
 
 #include <stdint.h>
 
@@ -52,21 +52,34 @@ struct SledInputs {
 
 // ── Hold precedence ─────────────────────────────────────────────────────────
 // requestHold() lets another task pin a transient (green success, white
-// identify) over whatever the policy picks. Two states outrank a hold, for
-// different reasons — both answered here, next to the priority chain, rather
-// than as name comparisons buried in the driver.
+// identify) over whatever the policy picks. What an incoming state does to
+// that armed hold is answered here, next to the priority chain, rather than
+// as name comparisons buried in the driver. The three outcomes partition the
+// space — every call maps to exactly one, so there is no predicate to choose
+// between.
+enum SledHoldAction {
+    SLED_HOLD_SUBSTITUTE,  // hold wins — the held state is shown instead
+    SLED_HOLD_BYPASS,      // show the incoming state, hold stays armed and resumes
+    SLED_HOLD_CANCEL       // show the incoming state, hold is discarded
+};
 
-// A firmware upload supersedes any pending transient outright: the hold is
-// cancelled, not deferred (the upload outlasts every hold duration anyway).
-inline bool sled_cancels_hold(LEDState state) {
-    return state == SLED_OTA;
-}
-
-// The wipe warning must be visible the instant it applies — a green/white
-// transient may never cover it while the 10 s erase clock runs — but it is
-// momentary, so the hold resumes on release rather than being discarded.
-inline bool sled_bypasses_hold(LEDState state) {
-    return state == SLED_BTN_WIPE;
+// `blocking` marks StatusLED::holdBlocking() — a terminal indication driven
+// straight from the main task, not a policy pick. It always wins, whatever
+// the state.
+inline SledHoldAction sled_hold_action(LEDState state, bool blocking) {
+    // Cancel rather than bypass: a blocking indication owns the strip for its
+    // full duration, so resuming a transient the user has already watched out
+    // is wrong even for a caller that does not reboot (today's only one does,
+    // which additionally makes an armed deadline dead state).
+    if (blocking) return SLED_HOLD_CANCEL;
+    // A firmware upload supersedes any pending transient outright: the hold is
+    // cancelled, not deferred (the upload outlasts every hold duration anyway).
+    if (state == SLED_OTA) return SLED_HOLD_CANCEL;
+    // The wipe warning must be visible the instant it applies — a green/white
+    // transient may never cover it while the 10 s erase clock runs — but it is
+    // momentary, so the hold resumes on release rather than being discarded.
+    if (state == SLED_BTN_WIPE) return SLED_HOLD_BYPASS;
+    return SLED_HOLD_SUBSTITUTE;
 }
 
 inline LEDState sled_evaluate(const SledInputs& in) {

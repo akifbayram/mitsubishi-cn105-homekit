@@ -78,7 +78,13 @@ static struct {
     char newSsid[33] = {}, newPass[65] = {};
     char oldSsid[33] = {}, oldPass[65] = {};
     bool haveOld = false;
-    int64_t deadlineMs = 0;
+    // Trial start, not an absolute deadline: uptime_ms() is a wrapping
+    // uint32, so elapsed time is measured with unsigned subtraction
+    // (a stored deadline past the wrap could never be reached again).
+    // That subtraction only holds if the clock it is subtracted from was
+    // sampled under this same lock — a sample taken before the lock can
+    // predate a newer trial's startMs and wrap the result to ~49 days.
+    uint32_t startMs = 0;
     WifiManager::WifiTrialState result = WifiManager::WIFI_TRIAL_IDLE;
 } s_trial;
 
@@ -261,7 +267,7 @@ bool WifiManager::connect(const char* ssid, const char* password)
             s_trial.haveOld = haveCur;
             memcpy(s_trial.oldSsid, curSsid, sizeof(s_trial.oldSsid));
             memcpy(s_trial.oldPass, curPass, sizeof(s_trial.oldPass));
-            s_trial.deadlineMs = (int64_t)uptime_ms() + TRIAL_TIMEOUT_MS;
+            s_trial.startMs = uptime_ms();
             s_trial.result = WIFI_TRIAL_TESTING;
         }
         portEXIT_CRITICAL(&s_trialMux);
@@ -319,10 +325,18 @@ void WifiManager::loop()
     // credential copies matter: a concurrent connect() may overwrite
     // s_trial.* the moment the lock is released.
     portENTER_CRITICAL(&s_trialMux);
+    // Clock read in here too, not the gate's nowMs above: a connect() on the
+    // httpd/Improv task landing in that gap stamps startMs *after* the sample,
+    // and the unsigned subtraction would wrap to ~49 days and fail the trial
+    // on its first tick. connect() already reads uptime_ms() inside this same
+    // lock, so this adds no new interrupts-off hazard: the read is lock-free,
+    // though not wholly IRAM (the 64-bit divide lands in flash), which is fine
+    // with interrupts masked and the cache still live.
+    uint32_t elapsedMs = uptime_ms() - s_trial.startMs;
     bool active = s_trial.active;
     bool commit = s_trial.commitPending;
     bool late = s_trial.lateCommit;
-    bool expired = active && !commit && (int64_t)nowMs >= s_trial.deadlineMs;
+    bool expired = active && !commit && elapsedMs >= TRIAL_TIMEOUT_MS;
     bool haveOld = s_trial.haveOld;
     char newSsid[sizeof(s_trial.newSsid)], newPass[sizeof(s_trial.newPass)];
     char oldSsid[sizeof(s_trial.oldSsid)], oldPass[sizeof(s_trial.oldPass)];

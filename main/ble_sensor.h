@@ -72,13 +72,20 @@ namespace BleSensor {
                                // source right now. NOT "is a sensor
                                // configured" — for that, check
                                // isBleEnabled() && isConfigured(i) instead.
-    void     setEnabled(bool enabled);   // Persist feed toggle; loop() reacts to the change
 
     // Sensor list management. mac "" clears the slot (readings reset, scan
     // restarted); name nullptr keeps the stored name.
     void     setSensor(int idx, const char* mac, const char* name);
     void     renameSensor(int idx, const char* name);
-    inline void setAddr(const char* mac) { setSensor(0, mac, nullptr); }  // legacy web cmd
+    // Legacy single-sensor web command — the inverse of getAddr(), so it edits
+    // the slot that call reports rather than slot 0: that slot can be empty
+    // while another holds the sensor the old UI is showing, and writing there
+    // would add a ghost and strand the real one. Nothing configured yet ->
+    // slot 0, where the first sensor belongs.
+    inline void setAddr(const char* mac) {
+        int idx = primarySlot();
+        setSensor(idx >= 0 ? idx : 0, mac, nullptr);
+    }
     const char* getAddr();               // primarySlot() address, "" when none
 
     // Discovery scan
@@ -87,7 +94,8 @@ namespace BleSensor {
     bool pollDiscoveryUpdate();          // Returns true when new devices found
     bool pollDiscoveryComplete();        // Returns true once when done
     // Copy current results into out (up to max). Returns count; *truncated set
-    // when more devices were seen than fit.
+    // when more devices were seen than fit. Returns 0 (and clears *truncated)
+    // when a new scan wipes the list mid-copy — never a mix of two scans.
     int  discoveryResults(BleDiscoveredDevice* out, int max, bool* truncated);
 
     // Proximity pairing (ble_pair.cpp). Pair mode keeps the scan in the SEARCH

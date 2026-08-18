@@ -6,9 +6,10 @@ static constexpr double DEG = M_PI / 180.0;
 static constexpr double CIVIL_TWILIGHT_DEG = -6.0;
 
 // Core of the Astronomical Almanac low-precision form: elevation in degrees,
-// and (optionally) the hour angle in radians — negative before local solar
-// noon, positive after. The sign is what lets the offset variant tell a dusk
-// crossing from a dawn crossing without ever computing event times.
+// and (optionally) the hour angle in radians, folded to [-pi,+pi) — negative
+// before local solar noon, positive after. The sign is what lets the offset
+// variant tell a dusk crossing from a dawn crossing without ever computing
+// event times.
 static double solar_elevation(uint32_t epoch, float lat_deg, float lon_deg,
                               double *H_out) {
     // Days since J2000.0 (2000-01-01 12:00 UTC = unix 946728000).
@@ -27,7 +28,12 @@ static double solar_elevation(uint32_t epoch, float lat_deg, float lon_deg,
     // True solar time -> hour angle -> elevation.
     double ut_h = fmod((double)epoch, 86400.0) / 3600.0;
     double tst_h = ut_h + (double)lon_deg / 15.0 + eqt;
-    double H = (tst_h - 12.0) * 15.0 * DEG;
+    // Fold to [-12,+12) hours: true solar time crosses the UTC day boundary
+    // at any non-zero longitude, and cos() hides that from the elevation but
+    // not from the sign the offset variant reads. fmod keeps the sign of its
+    // argument, so bias into positives before the second fold.
+    double h_ang = fmod(fmod(tst_h - 12.0, 24.0) + 36.0, 24.0) - 12.0;
+    double H = h_ang * 15.0 * DEG;
     if (H_out) *H_out = H;
     double lat = (double)lat_deg * DEG;
     double sin_el = sin(lat) * sin(decl) + cos(lat) * cos(decl) * cos(H);
@@ -102,6 +108,35 @@ int main() {
            == solar_gate_at(1782077400 - 7200, 51.48f, 0.0f));
     assert(solar_gate_off(1782012600, 51.48f, 0.0f, 0, 120)
            == solar_gate_at(1782012600 - 7200, 51.48f, 0.0f));
+    // Non-zero longitude: true solar time crosses the UTC day boundary there,
+    // so the hour angle has to be folded before its sign picks an edge.
+    // Los Angeles (34.05N, 118.24W) solstice dusk ~03:37 UTC on the NEXT UTC
+    // day while TST is still afternoon: 04:00 UTC is raw NIGHT, a +60 min
+    // dusk offset re-evaluates 03:00 -> DAY, and a dawn offset must not move
+    // this edge at all.
+    assert(solar_gate_at(1782014400, 34.05f, -118.24f) == SOLAR_NIGHT);
+    assert(solar_gate_off(1782014400, 34.05f, -118.24f, 60, 0) == SOLAR_DAY);
+    assert(solar_gate_off(1782014400, 34.05f, -118.24f, 0, 60) == SOLAR_NIGHT);
+    // LA dawn ~12:13 UTC: 12:30 is raw DAY, +60 min dawn offset -> NIGHT,
+    // dusk offset inert.
+    assert(solar_gate_at(1782045000, 34.05f, -118.24f) == SOLAR_DAY);
+    assert(solar_gate_off(1782045000, 34.05f, -118.24f, 0, 60) == SOLAR_NIGHT);
+    assert(solar_gate_off(1782045000, 34.05f, -118.24f, 60, 0) == SOLAR_DAY);
+    // Tokyo (35.68N, 139.65E) is the eastern mirror — TST runs past 24 h, so
+    // its dawn ~18:56 UTC lands on the previous UTC day. Dusk ~10:31 UTC:
+    // 11:00 is raw NIGHT, +60 min dusk -> DAY.
+    assert(solar_gate_at(1782039600, 35.68f, 139.65f) == SOLAR_NIGHT);
+    assert(solar_gate_off(1782039600, 35.68f, 139.65f, 60, 0) == SOLAR_DAY);
+    assert(solar_gate_off(1782039600, 35.68f, 139.65f, 0, 60) == SOLAR_NIGHT);
+    // Tokyo dawn edge: 19:20 UTC is raw DAY, +60 min dawn -> NIGHT.
+    assert(solar_gate_at(1782069600, 35.68f, 139.65f) == SOLAR_DAY);
+    assert(solar_gate_off(1782069600, 35.68f, 139.65f, 0, 60) == SOLAR_NIGHT);
+    assert(solar_gate_off(1782069600, 35.68f, 139.65f, 60, 0) == SOLAR_DAY);
+    // Shift equivalence away from the prime meridian too.
+    assert(solar_gate_off(1782014400, 34.05f, -118.24f, 120, 0)
+           == solar_gate_at(1782014400 - 7200, 34.05f, -118.24f));
+    assert(solar_gate_off(1782069600, 35.68f, 139.65f, 0, 120)
+           == solar_gate_at(1782069600 - 7200, 35.68f, 139.65f));
     // Guards hold for the offset variant too.
     assert(solar_gate_off(0, 51.48f, 0.0f, 30, 30) == SOLAR_NO_FIX);
     assert(solar_gate_off(1782000000, NAN, 0.0f, 30, 30) == SOLAR_NO_FIX);

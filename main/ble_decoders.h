@@ -120,7 +120,6 @@ static bool decodeATC1441(const uint8_t* svc, uint8_t len, SensorReading& out) {
 // Unknown ids stop the walk: the format has no per-object length byte, so a
 // wrong guess would corrupt every field after it.
 static int bthomeObjLen(uint8_t id) {
-    if (id >= 0x0F && id <= 0x2D) return 1;   // binary sensors — all uint8
     switch (id) {
         case 0x00: case 0x01: case 0x09: case 0x2E: case 0x2F: case 0x3A:
             return 1;   // packet id, battery, count8, humidity8, moisture8, button
@@ -134,6 +133,12 @@ static int bthomeObjLen(uint8_t id) {
         case 0x3E:
             return 4;   // count32
         default:
+            // 0x0F..0x2D is the binary-sensor block (uint8 each), but the spec
+            // interleaves three uint16 sensors in it — 0x12 CO2, 0x13 TVOC,
+            // 0x14 moisture — which the cases above claim first. The range is
+            // the fallback, never the override, so a sensor id added inside the
+            // block later can't silently inherit a 1-byte length.
+            if (id >= 0x0F && id <= 0x2D) return 1;
             return -1;
     }
 }

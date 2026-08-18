@@ -4,6 +4,7 @@
 #include "espnow_link.h"
 #include "branding.h"
 #include "board_profile.h"
+#include "esp_utils.h"
 #include "logging.h"
 
 #include <freertos/FreeRTOS.h>
@@ -25,8 +26,8 @@ static const char *TAG = "improv";
 // Improv Serial is a binary, newline-framed protocol. The console's default
 // line-ending translation (RX CR->LF, TX LF->CRLF) mangles frame bytes equal to
 // 0x0D/0x0A, and the browser SDK re-syncs its byte parser on '\n'. While Improv
-// owns the console we switch to raw LF passthrough; on stop we restore the
-// console defaults so the ESP-NOW REPL's Enter handling keeps working.
+// owns the console we switch to raw LF passthrough; on the task's way out we
+// restore the console defaults so the ESP-NOW REPL's Enter handling keeps working.
 static void improv_set_console_raw(bool raw) {
 #if defined(CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG)
     usb_serial_jtag_vfs_set_rx_line_endings(raw ? ESP_LINE_ENDINGS_LF : ESP_LINE_ENDINGS_CR);
@@ -62,6 +63,16 @@ static constexpr uint8_t ERR_UNABLE_TO_CONNECT = 0x03;
 static TaskHandle_t s_task_handle = nullptr;
 static char         s_device_name[32] = {};
 static uint8_t      s_cur_state = STATE_AUTHORIZED;
+
+// stop() -> task handshake. A task notification would only be sampled at the
+// top of the read loop, and the handlers below block for seconds
+// (handle_wifi_settings up to 15 s connecting, handle_scan_wifi for a whole
+// blocking scan), so the stop request is a flag they can poll too.
+// s_task_alive is published false by the task as its very last act, which is
+// the only real exit confirmation stop() can wait on — the task handle is not
+// one, because its TCB is freed under us.
+static volatile bool s_stop_requested = false;
+static volatile bool s_task_alive     = false;
 
 // ── Frame reader parse state ──────────────────────────────────────────────────
 enum ParseState : uint8_t {
@@ -136,9 +147,24 @@ static void handle_get_device_info() {
     write_frame(PKT_RPC_RESULT, buf, pos);
 }
 
+// Zero-total terminator signals end-of-list. Every exit path owes the browser
+// one — an aborted scan that just returns leaves the SDK's scan RPC waiting
+// forever, since nothing else ever resolves it.
+static void send_scan_end() {
+    uint8_t term[2] = { CMD_SCAN_WIFI, 0 };
+    write_frame(PKT_RPC_RESULT, term, 2);
+}
+
 static void handle_scan_wifi() {
+    // The scan itself cannot be aborted — WifiManager blocks in
+    // esp_wifi_scan_start() for seconds — so sample the stop request on both
+    // sides of it: a stop that lands mid-scan at least skips the result dump
+    // instead of making stop() wait for it too.
+    if (s_stop_requested) { send_scan_end(); return; }
+
     WifiManager::ScannedNetwork nets[20];
     int count = WifiManager::scanNetworks(nets, 20);
+    if (s_stop_requested) { send_scan_end(); return; }
 
     for (int i = 0; i < count; i++) {
         uint8_t buf[80];
@@ -162,9 +188,7 @@ static void handle_scan_wifi() {
         write_frame(PKT_RPC_RESULT, buf, pos);
     }
 
-    // Zero-total terminator signals end-of-list
-    uint8_t term[2] = { CMD_SCAN_WIFI, 0 };
-    write_frame(PKT_RPC_RESULT, term, 2);
+    send_scan_end();
 }
 
 static void handle_wifi_settings(const uint8_t* data, uint8_t len) {
@@ -192,6 +216,20 @@ static void handle_wifi_settings(const uint8_t* data, uint8_t len) {
     for (int i = 0; i < 150; i++) {         // 15 s @ 100 ms ticks
         vTaskDelay(pdMS_TO_TICKS(100));
         if (WifiManager::isConnected()) break;
+        // stop() is blocking on our exit with a bounded timeout; drop the wait
+        // as soon as it asks, or it gives up and the console stays ours.
+        // Connected wins the tie above, so a join on the same tick as a stop
+        // still saves its credentials.
+        if (s_stop_requested) {
+            // An abandoned join is still a failed join as far as the browser is
+            // concerned: it waits on a result or an error and nothing else will
+            // resolve this RPC, so close it out the same way the timeout below
+            // does before dropping the console.
+            send_error(ERR_UNABLE_TO_CONNECT);
+            s_cur_state = STATE_AUTHORIZED;
+            send_current_state(STATE_AUTHORIZED);
+            return;
+        }
     }
 
     if (WifiManager::isConnected()) {
@@ -275,6 +313,8 @@ static void process_byte(uint8_t b) {
 }
 
 // ── FreeRTOS task ─────────────────────────────────────────────────────────────
+static void improv_console_rx_detach(void);   // defined below, next to its attach half
+
 static void improv_task(void* /*arg*/) {
     // Save and restore the stdin flags: the UART-console REPL (plain esp32/c3)
     // does not reset them itself, and a leaked O_NONBLOCK makes linenoise()
@@ -289,9 +329,7 @@ static void improv_task(void* /*arg*/) {
     send_current_state(STATE_AUTHORIZED);
     LOG_INFO("[Improv] Started, state=AUTHORIZED");
 
-    while (true) {
-        if (ulTaskNotifyTake(pdTRUE, 0) > 0) break;
-
+    while (!s_stop_requested) {
         int c = fgetc(stdin);
         if (c == EOF) {
             // FREERTOS_HZ=100: pdMS_TO_TICKS(<10) rounds to 0 ticks — a yield,
@@ -306,7 +344,17 @@ static void improv_task(void* /*arg*/) {
 
     fcntl(stdin_fd, F_SETFL, prev_fl < 0 ? 0 : prev_fl);
     LOG_INFO("[Improv] Stopped");
-    s_task_handle = nullptr;
+    // The console goes back here rather than in stop(): only this task knows
+    // when its last fgetc/fwrite retired, and uninstalling the USB-Serial-JTAG
+    // driver under a live one is a use-after-uninstall panic. It also means a
+    // stop() that gave up waiting still gets the console back — late, but back.
+    improv_console_rx_detach();     // leave the console as the REPL expects it
+    improv_set_console_raw(false);  // restore CR/CRLF for the REPL / serial monitor
+    // Liveness last: past this point stop() (and any start() behind it) may
+    // assume the console is no longer ours. s_task_handle is NOT cleared here —
+    // the API owns it, and a late exit would otherwise null out a handle a
+    // newer start() had just filled in.
+    s_task_alive = false;
     vTaskDelete(nullptr);
 }
 
@@ -318,7 +366,7 @@ static void improv_task(void* /*arg*/) {
 // under O_NONBLOCK returns EOF forever, the FIFO stays full, and the host's
 // writes are NAKed — Improv transmitted fine but could not hear a single byte.
 // So while Improv owns the console, install the driver and route the VFS
-// through it; on stop, put both back so the ESP-NOW REPL's own
+// through it; the task puts both back as it exits, so the ESP-NOW REPL's own
 // esp_console_new_repl_usb_serial_jtag() finds the console exactly as it
 // expects (its install fails on an already-installed driver).
 // UART consoles (plain esp32/c3) need none of this: their no-driver VFS read
@@ -351,6 +399,14 @@ static void improv_console_rx_detach(void) {}
 // ── Public API ────────────────────────────────────────────────────────────────
 void improv_serial_start(const char* deviceName) {
     if (s_task_handle) return;
+    // A stop() that timed out leaves its task still winding down inside a
+    // handler, and that task owns stdin and the module-level parse state — a
+    // second one would fight it for both. Skip this pass; the AP-up edge that
+    // calls us comes round again, long after the old task is gone.
+    if (s_task_alive) {
+        LOG_WARN("[Improv] Previous task still exiting; not restarting");
+        return;
+    }
     // Guarded beside the resource, not at the call site: Improv and the
     // ESP-NOW REPL share the single console, and starting both deadlocks
     // app_main. The REPL is deferred until WiFi is up + AP down, so on the
@@ -365,19 +421,56 @@ void improv_serial_start(const char* deviceName) {
     s_device_name[sizeof(s_device_name) - 1] = '\0';
     improv_set_console_raw(true);   // binary-clean console for the framed protocol
     improv_console_rx_attach();     // and one that can actually receive
+    s_stop_requested = false;   // a stale request from the last stop() would exit the new task at once
+    s_task_alive     = true;    // set before the task can run; only the task clears it
     // 6144: handle_scan_wifi puts ~720B of ScannedNetwork on the stack and
     // scanNetworks adds ~1.8KB of wifi_ap_record_t — 4096 left no headroom.
-    xTaskCreate(improv_task, "improv", 6144, nullptr, tskIDLE_PRIORITY + 1, &s_task_handle);
+    if (xTaskCreate(improv_task, "improv", 6144, nullptr, tskIDLE_PRIORITY + 1,
+                    &s_task_handle) != pdPASS) {
+        // No task means nobody to hand the console back, so undo it here.
+        s_task_alive = false;
+        improv_console_rx_detach();
+        improv_set_console_raw(false);
+        LOG_WARN("[Improv] Task create failed; console released");
+        return;
+    }
     LOG_INFO("[Improv] Task created");
 }
 
 void improv_serial_stop() {
     if (!s_task_handle) return;
-    xTaskNotifyGive(s_task_handle);
-    // 100ms grace: WifiRecovery has a 6s AP linger before calling stop(),
-    // so the task has finished sending its last response well before this fires.
-    vTaskDelay(pdMS_TO_TICKS(100));
-    // s_task_handle is cleared by the task itself before vTaskDelete
-    improv_console_rx_detach();     // leave the console as the REPL expects it
-    improv_set_console_raw(false);  // restore CR/CRLF for the REPL / serial monitor
+    // Free the slot up front, whatever happens below: if a timed-out task kept
+    // the handle set, every later improv_serial_start() would hit the
+    // `if (s_task_handle) return` above and Improv would never come back.
+    s_task_handle = nullptr;
+    s_stop_requested = true;
+
+    // Wait for the task to confirm it has actually left the console instead of
+    // guessing a grace period. The old 100 ms leaned on WifiRecovery's 6 s AP
+    // linger, which says nothing about the handlers: handle_wifi_settings sits
+    // in a 15 s connect wait and handle_scan_wifi in a full blocking scan, and
+    // tearing the console down under either is a use-after-uninstall.
+    // Clocked off uptime_ms(), not the iteration count: vTaskDelay wakes on a
+    // fixed tick offset, but any preemption between waking and the next call
+    // stretches a pass beyond its nominal 20 ms, so a counted loop over-runs
+    // under load. Timing it directly keeps the bound honest either way.
+    // 3 s is enough for the connect wait, which drops within a 100 ms tick of
+    // the flag, and for a typical ~2 s scan; a slower scan overruns it and takes
+    // the late-handback path below. It stays well inside the 10 s task WDT of
+    // the main task that calls us. The task restores the console itself on the
+    // way out, so this is purely "is it gone yet" — a timeout costs latency,
+    // never the console.
+    constexpr uint32_t STOP_WAIT_MS = 3000;
+    const uint32_t wait_start = uptime_ms();
+    while (s_task_alive && (uptime_ms() - wait_start) < STOP_WAIT_MS)
+        vTaskDelay(pdMS_TO_TICKS(20));
+
+    if (s_task_alive) {
+        // Still inside a handler. It hands the console back when it finally
+        // exits; until then Improv keeps stdin, so the ESP-NOW REPL's own
+        // driver install fails if it is attempted in that window — a degraded
+        // console beats uninstalling a driver a live task is reading from.
+        LOG_WARN("[Improv] Task still busy after %lu ms; console handed back late",
+                 (unsigned long)STOP_WAIT_MS);
+    }
 }

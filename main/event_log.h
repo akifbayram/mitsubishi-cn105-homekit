@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <esp_system.h>
+#include "esp_utils.h"
 #include "event_ring.h"
 
 // Persistent device event log + lifetime health counters, NVS-backed
@@ -47,4 +48,12 @@ bool     eventlog_safe_mode();                   // as passed to eventlog_init
 int eventlog_json(char *out, size_t cap);
 
 const char *eventlog_type_str(uint8_t type);
-const char *reset_reason_str(esp_reset_reason_t r);
+
+// Snake_case alias for esp_utils.h's resetReasonStr(), kept for main.cpp's
+// boot banner. ONE table, not two — a reset reason added to the enum must
+// never make the About card and the state push disagree. New callers should
+// use resetReasonStr() directly. `static` matches the linkage of the function
+// it forwards to: a plain `inline` here has external linkage, so each
+// translation unit's definition would name a different resetReasonStr — ODR
+// violation, no diagnostic required.
+static inline const char *reset_reason_str(esp_reset_reason_t r) { return resetReasonStr(r); }

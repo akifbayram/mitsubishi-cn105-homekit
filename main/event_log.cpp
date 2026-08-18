@@ -121,7 +121,7 @@ int eventlog_json(char *out, size_t cap) {
         // numbering or of what a code byte means.
         if (e->type == EV_BOOT || e->type == EV_CRASH) {
             jsonAppend(out, cap, &n, ",\"r\":\"%s\"",
-                       reset_reason_str((esp_reset_reason_t)e->code));
+                       resetReasonStr((esp_reset_reason_t)e->code));
         } else if (e->type == EV_WIFI_CREDS_CHANGED && e->code == 1) {
             jsonAppend(out, cap, &n, ",\"r\":\"erased\"");
         }
@@ -145,19 +145,5 @@ const char *eventlog_type_str(uint8_t type) {
         case EV_HK_RESET:           return "HK_RESET";
         case EV_WIFI_CREDS_CHANGED: return "WIFI_CREDS";
         default:                    return "UNKNOWN";
-    }
-}
-
-const char *reset_reason_str(esp_reset_reason_t r) {
-    switch (r) {
-        case ESP_RST_POWERON:   return "POWER_ON";
-        case ESP_RST_SW:        return "SW_RESTART";
-        case ESP_RST_PANIC:     return "PANIC";
-        case ESP_RST_TASK_WDT:  return "TASK_WDT";
-        case ESP_RST_INT_WDT:   return "INT_WDT";
-        case ESP_RST_WDT:       return "WDT";
-        case ESP_RST_BROWNOUT:  return "BROWNOUT";
-        case ESP_RST_DEEPSLEEP: return "DEEPSLEEP";
-        default:                return "OTHER";
     }
 }

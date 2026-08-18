@@ -1290,6 +1290,8 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   function paintTempSlider(){ paintRange(tempSlider,'var(--mode-accent)'); }
 
   // ── Temperature unit helpers ──────────────────────────────────────────────
+  // ── temp-unit:start
+  // Extracted with the slider-units block and tested by test/web_state/.
   var F_TABLE=[
     [61,16.0],[62,16.5],[63,17.0],[64,17.5],[65,18.0],
     [66,18.5],[67,19.0],[68,20.0],[69,21.0],[70,21.5],
@@ -1311,6 +1313,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     if(fi<61)fi=61;if(fi>88)fi=88;
     return F_TABLE[fi-61][1];
   }
+  // ── temp-unit:end
   function fmtTemp(c){
     if(c==null) return '--';
     if(tempUnit==='F') return cToFTable(c).toString();
@@ -1975,7 +1978,31 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   }
 
   // ── State handler ──────────────────────────────────────────────────────────
+  // ── state-merge:start
+  // A frame carrying "trunc" is one pushState() had to shorten: whole sections
+  // were rolled back, so the fields they carried are MISSING, not zero (see
+  // web_ws.cpp). Merge those over the last frame instead of replacing it — the
+  // handlers that read back from lastState (toggleRoomMember, the rename
+  // prefill, exportSettings) would otherwise compute from an absent field and
+  // persist the result. A complete frame still replaces wholesale, so a field
+  // the device deliberately stops sending (remoteModel once a dial unpairs)
+  // un-sticks as soon as one arrives. Truncation is content-driven, not
+  // random, so while it persists a dropped field stays at its last value —
+  // acceptable, because the alternative is the absent-field write-back above.
+  // Tested by test/web_state/.
+  //
+  // This does NOT cover a truncated FIRST frame — there is nothing to merge
+  // with — so the read-modify-writes still check for the field themselves.
+  function mergeState(prev,s){
+    if(!prev||!s||!s.trunc) return s;
+    var out={};
+    for(var k in prev) out[k]=prev[k];
+    for(var j in s) out[j]=s[j];
+    return out;
+  }
+  // ── state-merge:end
   function onState(s){
+    s=mergeState(lastState,s);
     lastState=s;   // retained for diagnostics copy + event timestamps
     var locked = lastCmdTime > 0 && (Date.now() - lastCmdTime) < 2000;
 
@@ -2586,6 +2613,9 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       showToast('Not connected — change not sent',true);
     }
   };
+  // ── room-writes:start
+  // The three tap handlers below are extracted and tested by test/web_state/;
+  // saveRoomOffset reads its input element, so it stays outside the marker.
   // Optimistic tap-then-ack, all four writes: the firmware answers every
   // roomMode/roomSingle/roomMembers/roomOff write with a pushState (accepted
   // or rejected), which confirms the repaint below or snaps it back.
@@ -2600,13 +2630,17 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     lastState.roomSingle=bit;renderRoomCard(lastState);
   };
   window.toggleRoomMember=function(bit){
-    if(!lastState) return;
-    var m=(lastState.roomMembers|0)^(1<<bit);
+    // Absent is not zero: a truncated first frame carries no roomMembers at
+    // all, and XORing from 0 would clear every other member and persist that
+    // to NVS. `|0` folds the two cases together, so test for the field.
+    if(!lastState||lastState.roomMembers==null){showToast('Sensor list not loaded — try again',true);return}
+    var m=lastState.roomMembers^(1<<bit);
     if(!send({cmd:'config',roomMembers:m})){showToast('Not connected — change not sent',true);return}
     // Never leave an empty average silently — say what it means.
     if(m===0)showToast('No sensors checked — using the built-in sensor');
     lastState.roomMembers=m;renderRoomCard(lastState);
   };
+  // ── room-writes:end
   window.saveRoomOffset=function(bit){
     var id='roomOff'+bit,el=$(id);
     var v=parseFloat(el.value);
@@ -2617,8 +2651,13 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     else showToast('Not connected — change not sent',true);
   };
   window.renameBleSensor=function(idx){
+    // The row was drawn from the list, so no list now means the frame that
+    // carried it was rolled back. Prefilling '' from that offers a blank box
+    // for a name we simply do not have.
+    var list=lastState&&lastState.bleSensors;
+    if(!list){showToast('Sensor list not loaded — try again',true);return}
     var cur='';
-    ((lastState&&lastState.bleSensors)||[]).forEach(function(b){if(b.i===idx)cur=b.name||''});
+    list.forEach(function(b){if(b.i===idx)cur=b.name||''});
     var nm=prompt('Sensor name',cur);
     if(nm==null) return;
     nm=nm.trim().slice(0,23);
@@ -2804,14 +2843,21 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     send({cmd:'set',wideVane:v});
   };
 
+  // ── slider-units:start
+  // Extracted with the temp-unit block and tested by test/web_state/: the
+  // min==61 checks below are a release-blocker fix, so they get a test.
   function setSliderAttrs(el,min,max,step,val){
     el.min=min;el.max=max;el.step=step;el.value=val;
   }
+  // Both branches convert only when the slider is not already in the target
+  // unit (min==61 means it currently shows F), so re-running this for the unit
+  // the sliders already carry keeps the value instead of pushing it through the
+  // table a second time.
   function configureSliders(){
     if(tempUnit==='F'){
-      setSliderAttrs(tempSlider,61,88,1,cToFTable(parseFloat(tempSlider.value)));
-      setSliderAttrs(heatSlider,61,88,1,cToFTable(parseFloat(heatSlider.value)));
-      setSliderAttrs(coolSlider,61,88,1,cToFTable(parseFloat(coolSlider.value)));
+      setSliderAttrs(tempSlider,61,88,1,tempSlider.min==61?parseFloat(tempSlider.value):cToFTable(parseFloat(tempSlider.value)));
+      setSliderAttrs(heatSlider,61,88,1,heatSlider.min==61?parseFloat(heatSlider.value):cToFTable(parseFloat(heatSlider.value)));
+      setSliderAttrs(coolSlider,61,88,1,coolSlider.min==61?parseFloat(coolSlider.value):cToFTable(parseFloat(coolSlider.value)));
     } else {
       setSliderAttrs(tempSlider,16,30.5,0.5,tempSlider.min==61?fToCTable(parseFloat(tempSlider.value)):parseFloat(tempSlider.value));
       setSliderAttrs(heatSlider,16,30.5,0.5,heatSlider.min==61?fToCTable(parseFloat(heatSlider.value)):parseFloat(heatSlider.value));
@@ -2819,6 +2865,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     }
     paintTempSlider();
   }
+  // ── slider-units:end
 
   window.stepTemp=function(dir){
     if(!ensureConnected()) return;
@@ -2991,8 +3038,13 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     };
   }
 
+  // ── unit-tap:start
+  // Extracted and tested by test/web_state/.
   window.setTempUnit=function(btn){
     var u=btn.getAttribute('data-v');
+    // Tapping the unit already in use changes nothing and must not re-enter
+    // configureSliders() or re-arm the command lock.
+    if(u===tempUnit) return;
     tempUnit=u;
     lastCmdTime=Date.now();
     setActive('unitGrp',u);
@@ -3000,6 +3052,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     renderDual(state);
     send({cmd:'config',tempUnit:u});
   };
+  // ── unit-tap:end
 
   function getSegVal(id){var g=document.getElementById(id),a=g&&g.querySelector('button.active');return a?a.getAttribute('data-v'):null;}
 

@@ -87,17 +87,19 @@ void StatusLED::begin() {
              _pin, _enablePin, _bluePin);
 }
 
-void StatusLED::setState(LEDState state) {
+void StatusLED::setState(LEDState state) { applyState(state, false); }
+
+void StatusLED::applyState(LEDState state, bool blocking) {
     // A requestHold() override (set from another task) wins until it expires.
-    // Which states outrank a hold — and whether they cancel it or merely
-    // bypass it — is policy, so it lives in sled_policy.h alongside the
-    // priority chain (and its host tests).
+    // What an incoming state does to a live hold — substitute, bypass or
+    // cancel — is policy, so it lives in sled_policy.h alongside the priority
+    // chain (and its host tests). An expired hold is just a cancel.
     if (_holdUntil) {
-        if (sled_cancels_hold(state) || (int32_t)(_holdUntil - uptime_ms()) <= 0) {
-            _holdUntil = 0;
-        } else if (!sled_bypasses_hold(state)) {
-            state = _holdState;
-        }
+        SledHoldAction act = (int32_t)(_holdUntil - uptime_ms()) <= 0
+                                 ? SLED_HOLD_CANCEL
+                                 : sled_hold_action(state, blocking);
+        if (act == SLED_HOLD_CANCEL)          _holdUntil = 0;
+        else if (act == SLED_HOLD_SUBSTITUTE) state = _holdState;
     }
     if (state == _state) return;
     LOG_INFO("%s -> %s", stateName(_state), stateName(state));
@@ -251,13 +253,23 @@ void StatusLED::requestHold(LEDState state, uint32_t ms) {
 }
 
 void StatusLED::holdBlocking(LEDState state, uint32_t ms) {
-    setState(state);
+    // Terminal indication: it is the last thing shown before the restart, so
+    // it must never be traded for an armed requestHold() transient (identify,
+    // a pair/WiFi verdict). The blocking flag makes the policy cancel that
+    // hold instead of substituting it back in.
+    applyState(state, true);
     uint32_t until = uptime_ms() + ms;
     while ((int32_t)(until - uptime_ms()) > 0) {
         loop();
         vTaskDelay(pdMS_TO_TICKS(20));
     }
-    off();
+    // Land in SLED_OFF rather than calling off() directly: the strip is dark,
+    // so _state has to say so too. Left at the terminal value it would make a
+    // second holdBlocking() of the same state hit the early-out above and
+    // paint nothing — today's only caller restarts, but that is its choice,
+    // not a property of this method. Still blocking, so a requestHold() armed
+    // from another task mid-wait cannot substitute a color back in here.
+    applyState(SLED_OFF, true);
 }
 
 void StatusLED::setColor(uint8_t r, uint8_t g, uint8_t b) {

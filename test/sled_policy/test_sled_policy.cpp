@@ -1,7 +1,11 @@
-// Host tests for the LED priority policy (sled_policy.h).
+// Host tests for the LED priority policy (sled_policy.h), plus a source-level
+// check that the driver is still wired into it (see hold_blocking_wiring()).
 #include "sled_policy.h"
 #include <cassert>
 #include <cstdio>
+#include <fstream>
+#include <iterator>
+#include <string>
 
 // A healthy, fully-up device: everything connected, nothing in progress.
 static SledInputs healthy() {
@@ -11,6 +15,27 @@ static SledInputs healthy() {
     in.wifiConnected  = true;
     in.wifiOnRgb      = true;
     return in;
+}
+
+// StatusLED itself needs ESP-IDF headers, so holdBlocking() cannot be run
+// here — and dropping either of its two load-bearing details would leave every
+// suite green. Pin them by reading that one function's source: it must apply
+// its state with blocking=true (else an armed requestHold() transient replaces
+// the terminal indication), and it must end back in SLED_OFF (else _state
+// keeps a terminal value the dark strip no longer shows, and a second call
+// with that same state hits applyState()'s early-out and paints nothing).
+static void hold_blocking_wiring() {
+    std::ifstream f("../../main/status_led.cpp");  // run.sh cd's to this dir
+    assert(f.is_open() && "run this via test/sled_policy/run.sh");
+    const std::string src((std::istreambuf_iterator<char>(f)),
+                          std::istreambuf_iterator<char>());
+    const std::string::size_type b = src.find("void StatusLED::holdBlocking(");
+    assert(b != std::string::npos);
+    const std::string::size_type e = src.find("\n}\n", b);
+    assert(e != std::string::npos);
+    const std::string body = src.substr(b, e - b);
+    assert(body.find("applyState(state, true)") != std::string::npos);
+    assert(body.find("applyState(SLED_OFF, true)") != std::string::npos);
 }
 
 int main() {
@@ -90,17 +115,30 @@ int main() {
 
     // ── Hold precedence ────────────────────────────────────────────────────
     // An OTA supersedes a pending transient outright; the wipe warning shows
-    // over one but leaves it armed. Nothing else may override a hold — an
-    // armed transient is what the user just asked to see.
-    assert(sled_cancels_hold(SLED_OTA));
-    assert(!sled_bypasses_hold(SLED_OTA));
-    assert(sled_bypasses_hold(SLED_BTN_WIPE));
-    assert(!sled_cancels_hold(SLED_BTN_WIPE));
+    // over one but leaves it armed. No other policy state may override a hold
+    // — an armed transient is what the user just asked to see.
+    assert(sled_hold_action(SLED_OTA, false) == SLED_HOLD_CANCEL);
+    assert(sled_hold_action(SLED_BTN_WIPE, false) == SLED_HOLD_BYPASS);
+
     for (int s = SLED_OFF; s <= SLED_BTN_WIPE; s++) {
         LEDState st = (LEDState)s;
+        // A blocking terminal indication (holdBlocking, driven from the main
+        // task right before esp_restart()) always wins, whatever the state,
+        // and always by cancelling — nothing resumes after a restart.
+        assert(sled_hold_action(st, true) == SLED_HOLD_CANCEL);
+        // Non-blocking behavior is exactly the two exemptions above: every
+        // other state still defers to the hold.
         if (st == SLED_OTA || st == SLED_BTN_WIPE) continue;
-        assert(!sled_cancels_hold(st) && !sled_bypasses_hold(st));
+        assert(sled_hold_action(st, false) == SLED_HOLD_SUBSTITUTE);
     }
+
+    // The case that motivated the blocking flag: SLED_UNPAIR has no
+    // state-level exemption, so only the blocking path keeps the unpair
+    // confirmation from being replaced by a stale identify/verdict transient.
+    assert(sled_hold_action(SLED_UNPAIR, false) == SLED_HOLD_SUBSTITUTE);
+    assert(sled_hold_action(SLED_UNPAIR, true) == SLED_HOLD_CANCEL);
+
+    hold_blocking_wiring();
 
     printf("sled_policy: all tests passed\n");
     return 0;

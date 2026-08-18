@@ -362,17 +362,18 @@ static uint8_t action_of(const CN105State &st) {
 
 static bool h_get_state(void *, sl2_hvac_state_t *out) {
     const CN105State st = s_ctrl->getEffectiveState();
+    const DeviceSettings &cfg = settings.get();
     memset(out, 0, sizeof *out);
     out->hvac_link        = s_ctrl->isConnected();
     out->wifi             = WifiManager::isConnected();
     out->wifi_provisioned = WifiManager::hasCredentials();
     out->setup_ap         = wifiRecovery.isAPActive();
     out->wifi_err         = wifiRecovery.wifiChangeFailed();
-    out->use_f            = settings.get().useFahrenheit;
+    out->use_f            = cfg.useFahrenheit;
     out->mode   = mode_to_sl2(st.power, st.mode);
     out->action = action_of(st);
     out->fan    = fan_to_pct(st.fanSpeed);
-    uint8_t vc = settings.get().vaneConfig;
+    uint8_t vc = cfg.vaneConfig;
     out->vane_v = (vc >= 1) ? vanev_to_sl2(st.vane) : 0;
     out->vane_h = (vc >= 2) ? vaneh_to_sl2(st.wideVane) : 0;
     out->preset = SL2_PRESET_NONE;
@@ -383,18 +384,62 @@ static bool h_get_state(void *, sl2_hvac_state_t *out) {
     out->set_high_dc = SL2_DC_NA;
     out->room_hum_pct = SL2_HUM_NA;
     out->hum_set_pct  = SL2_HUM_NA;
-    /* Sun gate: pure function of the SNTP clock + configured location, so
-     * recomputing on every ~1 Hz STATE build is cheaper than caching. Loses
-     * its fix (reboot before SNTP, location cleared) -> CTL drops and dials
-     * fail bright. */
-    const solar_gate_t sg = solar_gate_off(time_sync_epoch(),
-                                           settings.get().latitude,
-                                           settings.get().longitude,
-                                           settings.get().nightDuskOffMin,
-                                           settings.get().nightDawnOffMin);
-    out->night_ctl = (sg != SOLAR_NO_FIX);
-    out->night     = (sg == SOLAR_NIGHT);
-    out->night_ceil_pct = settings.get().nightCeilPct;
+    /* Sun gate: pure function of the SNTP clock + configured location, but
+     * not a cheap one — solar_gate_off() runs two double-precision trig
+     * chains, software-emulated on a part with no double FPU — and this
+     * builder is called on EVERY core pass, ~20 Hz while a dial is live
+     * (the core builds the STATE first and memcmps it afterwards). The
+     * verdict tracks civil-twilight crossings, so it moves on the scale of
+     * hours — orders of magnitude slower than that call rate whatever the
+     * latitude or offsets — so cache it: recomputed once a minute,
+     * and immediately whenever an input moves — clock validity, location,
+     * or either edge offset — so the first SNTP sync and a settings edit
+     * land at once instead of up to a minute late. Losing the fix (reboot
+     * before SNTP, location cleared) -> CTL drops and dials fail bright. */
+    static solar_gate_t s_sunGate   = SOLAR_NO_FIX;
+    static bool         s_sunCached = false;
+    static uint32_t     s_sunAtMs   = 0;
+    static uint32_t     s_sunEpoch  = 0;
+    static bool         s_sunClock  = false;
+    static float        s_sunLat    = NAN;
+    static float        s_sunLon    = NAN;
+    static int16_t      s_sunDusk   = 0;
+    static int16_t      s_sunDawn   = 0;
+    const uint32_t epoch = time_sync_epoch();
+    const uint32_t nowMs = uptime_ms();
+    /* NaN-aware compare: an unset location IS NaN, and NaN != NaN would read
+     * as "input changed" on every build, defeating the cache. */
+    const bool sameLoc =
+        ((cfg.latitude  == s_sunLat) || (std::isnan(cfg.latitude)  && std::isnan(s_sunLat))) &&
+        ((cfg.longitude == s_sunLon) || (std::isnan(cfg.longitude) && std::isnan(s_sunLon)));
+    /* The epoch VALUE is deliberately not a key: it moves every second, so
+     * keying on it would recompute every pass and there would be no cache.
+     * Validity plus a skew bound instead — inside a cached window the clock
+     * should advance with uptime, so an SNTP step of more than two minutes
+     * either way drops the entry rather than serving a verdict from the
+     * wrong time for up to a minute. Smaller steps ride the cache: two
+     * minutes moves the sun at most ~0.5 deg, which is the elevation
+     * approximation's own error. */
+    const int64_t skewS = (epoch != 0 && s_sunEpoch != 0)
+        ? (int64_t)epoch - (int64_t)s_sunEpoch - (int64_t)((nowMs - s_sunAtMs) / 1000)
+        : 0;
+    if (!s_sunCached || (epoch != 0) != s_sunClock || !sameLoc ||
+        cfg.nightDuskOffMin != s_sunDusk || cfg.nightDawnOffMin != s_sunDawn ||
+        skewS > 120 || skewS < -120 || nowMs - s_sunAtMs >= 60000) {
+        s_sunGate   = solar_gate_off(epoch, cfg.latitude, cfg.longitude,
+                                     cfg.nightDuskOffMin, cfg.nightDawnOffMin);
+        s_sunCached = true;
+        s_sunAtMs   = nowMs;
+        s_sunEpoch  = epoch;
+        s_sunClock  = (epoch != 0);
+        s_sunLat    = cfg.latitude;
+        s_sunLon    = cfg.longitude;
+        s_sunDusk   = cfg.nightDuskOffMin;
+        s_sunDawn   = cfg.nightDawnOffMin;
+    }
+    out->night_ctl = (s_sunGate != SOLAR_NO_FIX);
+    out->night     = (s_sunGate == SOLAR_NIGHT);
+    out->night_ceil_pct = cfg.nightCeilPct;
 #ifdef BLE_ENABLE
     /* Remote-sensor low-battery latch: ON at <=10%, clear only at >=15% so a
      * cell hovering at the threshold doesn't flap the home-face chip. */
@@ -490,8 +535,9 @@ static void h_room_sensor(void *, const uint8_t src_mac[6],
 }
 
 static bool h_get_caps(void *, struct sl2_caps_pkt *out) {
+    const DeviceSettings &cfg = settings.get();
     out->caps_flags = 0;
-    uint8_t mm = settings.get().modeMask;
+    uint8_t mm = cfg.modeMask;
     uint16_t modes = (uint16_t)(1u << SL2_MODE_OFF);   // Off is always available
     // Compose the existing CN105->cap-bit and CN105->sl2 tables so this list
     // is the only place that enumerates the real modes.
@@ -504,7 +550,7 @@ static bool h_get_caps(void *, struct sl2_caps_pkt *out) {
     out->presets = 0;
     out->fan_steps = 5;
     out->fan_flags = SL2_FAN_HAS_AUTO;
-    uint8_t vc = settings.get().vaneConfig;
+    uint8_t vc = cfg.vaneConfig;
     out->vane_v = (vc >= 1) ? SL2_VANECAP(5, true, true) : 0;
     /* SPLIT_TOP: the top position is the vendor split, not a sixth angle. A
      * dial that predates the bit reads the same axis via the legacy rule, so

@@ -16,14 +16,17 @@ public:
     LEDState getState() const { return _state; }
     void setWifi(bool connected);
     void loop();
-    // Blocking hold: drive `state` for `ms`, animating the LED, then turn it
-    // off. For terminal indications shown right before an esp_restart() (e.g.
-    // SLED_UNPAIR), where the main-loop LED evaluation won't get another tick.
+    // Blocking hold: drive `state` for `ms`, animating the LED, then return
+    // to SLED_OFF (dark). For terminal indications shown right before an
+    // esp_restart() (e.g. SLED_UNPAIR), where the main-loop LED evaluation
+    // won't get another tick. Outranks an armed requestHold() — it cancels
+    // it, so the terminal indication is always the one displayed.
     // MAIN TASK ONLY — it drives the (non-thread-safe) strip itself.
     void holdBlocking(LEDState state, uint32_t ms);
     // Non-blocking hold, callable from other tasks (e.g. httpd): setState()
     // substitutes `state` for whatever the main loop asks for until the
-    // deadline passes. The main task keeps sole ownership of the strip.
+    // deadline passes (or a holdBlocking() cancels it). The main task keeps
+    // sole ownership of the strip.
     void requestHold(LEDState state, uint32_t ms);
 
 private:
@@ -39,6 +42,9 @@ private:
     volatile LEDState    _holdState  = SLED_OFF;  // requestHold() override
     volatile uint32_t    _holdUntil  = 0;         // 0 = no hold armed
 
+    // Shared body of setState()/holdBlocking(); `blocking` marks the terminal
+    // main-task path, which sled_hold_action() never substitutes.
+    void applyState(LEDState state, bool blocking);
     void setColor(uint8_t r, uint8_t g, uint8_t b);
     void off();
     void blinkTick(uint32_t now, uint8_t r, uint8_t g, uint8_t b);

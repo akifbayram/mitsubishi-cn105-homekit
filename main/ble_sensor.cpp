@@ -38,7 +38,7 @@ static const char *TAG = "ble";
 //    setters rewrite targets from the httpd task while the scan callback
 //    compares against them) ────────────────────────────────────────────────
 struct SlotState {
-    char        mac[18];      // "AA:BB:CC:DD:EE:FF"; compared case-insensitively
+    char        mac[18];      // "aa:bb:cc:dd:ee:ff", lower-cased by setSlotMac()
     bool        valid;        // mac holds a parseable target
     float       temp;
     float       hum;
@@ -54,6 +54,18 @@ static SlotState s_slots[ROOM_MAX_BLE_SENSORS];   // readings reset in begin()/s
 static void resetSlotReadings(SlotState &sl) {
     sl.temp = NAN; sl.hum = NAN; sl.batt = -1; sl.rssi = 0;
     sl.lastUpdate = 0; sl.type = nullptr;
+}
+
+// Store a target in the scan callback's own lower-case form so the per
+// advertisement match can be a fixed-length memcmp instead of strcasecmp —
+// that compare runs under s_mux, i.e. with interrupts disabled. validMac()
+// guarantees exactly 17 characters. Call under s_mux.
+static void setSlotMac(SlotState &sl, const char* mac) {
+    for (int i = 0; i < 17; i++) {
+        char c = mac[i];
+        sl.mac[i] = (c >= 'A' && c <= 'F') ? (char)(c + 32) : c;
+    }
+    sl.mac[17] = '\0';
 }
 
 // ── Scan duty profiles ──────────────────────────────────────────────────────
@@ -88,12 +100,16 @@ static float    s_lastSentTemp  = NAN;   // last value sent to the HP
 static int      s_prevFeedSlot  = -1;    // feed edge detection (-1 = not feeding)
 
 // ── Discovery state ─────────────────────────────────────────────────────────
-// Results are written from the NimBLE host task and read from the main task —
-// array, count, truncated flag, and pushed-count all live under s_mux.
+// Results are written from the NimBLE host task, cleared from the httpd task
+// (startDiscovery) and read from the main task — array, count, truncated flag,
+// pushed-count and generation all live under s_mux. The generation is what
+// lets a reader that dropped the lock mid-pass notice that the list it sampled
+// was cleared out from under it.
 static BleDiscoveredDevice s_discovered[BLE_MAX_DISCOVERED];
 static int      s_discoveryCount     = 0;
 static bool     s_discoveryTruncated = false;
 static int      s_lastPushedCount    = 0;
+static uint32_t s_discoveryGen       = 0;   // bumped every time the list is cleared
 static std::atomic<bool>     s_discoveryMode{false};
 static std::atomic<uint32_t> s_discoveryStart{0};
 
@@ -157,8 +173,13 @@ static bool validMac(const char* str) {
 }
 
 // Record a discovered device (deduplicated by MAC). Runs in the NimBLE scan
-// callback; the results array is shared with the main task, so the search and
-// insert happen under s_mux (string prep stays outside the lock).
+// callback — the one and only writer of the results array — so the dedup
+// search can read entries below the count unlocked. The count that bounds it
+// is not ours alone (startDiscovery() zeroes it from the httpd task), so it is
+// sampled under s_mux together with a generation the append re-checks. String
+// prep stays outside the lock too: s_mux is a spinlock, and up to
+// BLE_MAX_DISCOVERED compares with interrupts off is latency the BLE/WiFi
+// coexistence can't spare.
 static void addDiscoveryResult(const char* addrLower, const char* name,
                                const char* type, int rssi, float temp, float hum) {
     BleDiscoveredDevice d;
@@ -172,19 +193,37 @@ static void addDiscoveryResult(const char* addrLower, const char* name,
     d.temperature = temp;
     d.humidity    = hum;
 
+    const bool hasTemp = !std::isnan(temp);
+    const bool hasHum  = !std::isnan(hum);
+
+    // Entries below the count are only ever appended and refreshed by this
+    // callback, so scanning them unlocked can't race a writer — the count
+    // itself can, hence the stamped snapshot. Both sides are upper-cased
+    // 17-char MACs, so the compare is a memcmp.
     taskENTER_CRITICAL(&s_mux);
-    // Already seen — refresh RSSI and the latest valid reading
-    for (int j = 0; j < s_discoveryCount; j++) {
-        if (strcmp(s_discovered[j].addr, d.addr) == 0) {
-            s_discovered[j].rssi = rssi;
-            if (!std::isnan(temp)) s_discovered[j].temperature = temp;
-            if (!std::isnan(hum))  s_discovered[j].humidity    = hum;
-            taskEXIT_CRITICAL(&s_mux);
-            return;
-        }
+    uint32_t gen  = s_discoveryGen;
+    int      seen = s_discoveryCount;
+    taskEXIT_CRITICAL(&s_mux);
+
+    int hit = -1;
+    for (int j = 0; j < seen; j++) {
+        if (memcmp(s_discovered[j].addr, d.addr, 17) == 0) { hit = j; break; }
     }
-    // List only once a temperature decodes — a battery-only frame can't identify it
-    if (!std::isnan(temp)) {
+    if (hit < 0 && !hasTemp) return;   // nothing to refresh, nothing to list
+
+    taskENTER_CRITICAL(&s_mux);
+    // A newer generation means startDiscovery() cleared the list while we
+    // scanned: the index points at a dead entry, and the list that replaced it
+    // is still empty (this callback is its only writer, and it is single
+    // threaded), so fall through to the append.
+    if (s_discoveryGen != gen) hit = -1;
+    if (hit >= 0) {
+        // Already seen — refresh RSSI and the latest valid reading
+        s_discovered[hit].rssi = rssi;
+        if (hasTemp) s_discovered[hit].temperature = temp;
+        if (hasHum)  s_discovered[hit].humidity    = hum;
+    } else if (hasTemp) {
+        // List only once a temperature decodes — a battery-only frame can't identify it
         if (s_discoveryCount < BLE_MAX_DISCOVERED) s_discovered[s_discoveryCount++] = d;
         else s_discoveryTruncated = true;
     }
@@ -243,11 +282,14 @@ static int gap_event_cb(struct ble_gap_event *event, void *arg) {
         }
 
         // MAC filter: only process configured target sensors. Match under the
-        // lock — setSensor rewrites targets from the httpd task.
+        // lock — setSensor rewrites targets from the httpd task. Both sides are
+        // lower-case 17-char MACs (setSlotMac), so this is a memcmp: the loop
+        // runs once per advertisement with interrupts off, where strcasecmp's
+        // per-character case folding is latency nobody asked for.
         taskENTER_CRITICAL(&s_mux);
         int slot = -1;
         for (int i = 0; i < ROOM_MAX_BLE_SENSORS; i++) {
-            if (s_slots[i].valid && strcasecmp(addrStr, s_slots[i].mac) == 0) { slot = i; break; }
+            if (s_slots[i].valid && memcmp(addrStr, s_slots[i].mac, 17) == 0) { slot = i; break; }
         }
         taskEXIT_CRITICAL(&s_mux);
         if (slot < 0) return 0;
@@ -389,7 +431,7 @@ void BleSensor::begin() {
         const char* addr = settings.get().bleSensors[i].addr;
         sl.valid = validMac(addr);
         memset(sl.mac, 0, sizeof(sl.mac));
-        if (sl.valid) { memcpy(sl.mac, addr, 17); nTargets++; }  // validMac guarantees exactly 17 chars
+        if (sl.valid) { setSlotMac(sl, addr); nTargets++; }
     }
     taskEXIT_CRITICAL(&s_mux);
     if (nTargets) {
@@ -637,15 +679,6 @@ bool BleSensor::isEnabled() {
     return feedSlot() >= 0;
 }
 
-void BleSensor::setEnabled(bool enabled) {
-    settings.get().roomMode   = 0;
-    settings.get().roomSingle = enabled ? ROOM_MEMBER_BLE0 : ROOM_MEMBER_INTERNAL;
-    settings.save();
-    LOG_INFO("Feed %s", enabled ? "enabled" : "disabled");
-    // loop() reacts to the change: a falling edge clears the remote temp on the
-    // heat pump, a rising edge sends the current reading promptly
-}
-
 void BleSensor::setSensor(int idx, const char* mac, const char* name) {
     if (!mac || !slotIdxOk(idx)) return;
     BleSensorCfg &cfg = settings.get().bleSensors[idx];
@@ -667,7 +700,7 @@ void BleSensor::setSensor(int idx, const char* mac, const char* name) {
         taskENTER_CRITICAL(&s_mux);
         SlotState &sl = s_slots[idx];
         memset(sl.mac, 0, sizeof(sl.mac));
-        if (valid) memcpy(sl.mac, mac, 17);   // validMac guarantees exactly 17 chars
+        if (valid) setSlotMac(sl, mac);
         sl.valid = valid;
         bool hadReading = sl.lastUpdate != 0;
         resetSlotReadings(sl);
@@ -725,6 +758,7 @@ void BleSensor::startDiscovery() {
     s_discoveryCount     = 0;
     s_discoveryTruncated = false;
     s_lastPushedCount    = 0;
+    s_discoveryGen++;    // voids indices readers sampled from the old list
     taskEXIT_CRITICAL(&s_mux);
     s_discoveryStart.store(uptime_ms());
     s_discoveryMode.store(true);
@@ -768,11 +802,38 @@ bool BleSensor::pollDiscoveryComplete() {
 }
 
 int BleSensor::discoveryResults(BleDiscoveredDevice* out, int max, bool* truncated) {
+    // Take the count and generation first, then copy a few devices per
+    // critical section: a full list is ~1.3 KB, and every byte of it under
+    // this spinlock is a byte of interrupt latency on the caller's core.
+    // Within one scan that costs nothing but freshness — the list only grows
+    // and its entries are only refreshed in place, so every device still
+    // crosses the lock whole and at worst the head carries readings one scan
+    // tick older than the tail (batches are copied head-first). What it must not do is mix two scans, so each
+    // batch re-checks the generation and abandons the copy if a new scan
+    // cleared the list underneath it.
+    constexpr int COPY_BATCH = 4;
     taskENTER_CRITICAL(&s_mux);
+    uint32_t gen = s_discoveryGen;
     int n = s_discoveryCount < max ? s_discoveryCount : max;
-    for (int i = 0; i < n; i++) out[i] = s_discovered[i];
     if (truncated) *truncated = s_discoveryTruncated;
     taskEXIT_CRITICAL(&s_mux);
+
+    for (int i = 0; i < n; i += COPY_BATCH) {
+        int end = i + COPY_BATCH < n ? i + COPY_BATCH : n;
+        taskENTER_CRITICAL(&s_mux);
+        bool cleared = s_discoveryGen != gen;
+        if (!cleared) {
+            for (int j = i; j < end; j++) out[j] = s_discovered[j];
+        }
+        taskEXIT_CRITICAL(&s_mux);
+        // Everything copied so far belongs to the scan that just ended, so
+        // report none of it; the new scan's first devices arrive in the next
+        // push, a second or so away.
+        if (cleared) {
+            if (truncated) *truncated = false;
+            return 0;
+        }
+    }
     return n;
 }
 
