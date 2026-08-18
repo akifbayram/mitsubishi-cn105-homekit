@@ -167,6 +167,15 @@ body{
 .hk-digit{flex:1;max-width:38px;aspect-ratio:1;display:flex;align-items:center;justify-content:center;
   background:var(--surface2);border-radius:10px;font-size:20px;font-weight:600;font-variant-numeric:tabular-nums;}
 
+/* ===== Firmware card =====
+   Body copy is .help-text; only the headline and the address need rules of
+   their own. (.setting-caption would centre them, which is wrong for running
+   sentences.) */
+.fw-name{font-size:17px;font-weight:600;color:var(--text);margin-top:4px;}
+/* Not a link — the AP has no route to the internet — so weight and colour mark
+   it as an address instead. nowrap keeps it whole at the end of a line. */
+.fw-url{color:var(--text);font-weight:600;white-space:nowrap;}
+
 /* ===== Footer ===== */
 .footer{text-align:center;padding:22px 16px 26px;font-size:11.5px;color:var(--text3);}
 
@@ -200,7 +209,10 @@ a:focus-visible,button:focus-visible,input:focus-visible{outline:2px solid var(-
   <header class="header">
     <div class="header-left">
       <h1 class="device-name" id="devName">{{BRAND_NAME}}</h1>
-      <div class="header-sub">Wi-Fi Setup</div>
+      <!-- Units ship already flashed, so this is the first place a customer can
+           learn which of the three firmwares is on the board. The Firmware card
+           at the foot of the page carries the rest. -->
+      <div class="header-sub">Apple Home &middot; Wi-Fi Setup</div>
     </div>
     <div class="header-right">
       <button class="theme-toggle" id="themeToggle" title="Toggle theme" aria-label="Toggle theme">
@@ -273,6 +285,26 @@ a:focus-visible,button:focus-visible,input:focus-visible{outline:2px solid var(-
       <li>Open the <strong>Home</strong> app &rarr; <strong>+</strong> &rarr; <strong>Add Accessory</strong></li>
       <li>Tap <strong>More options&hellip;</strong> and enter the code above (or scan the label)</li>
     </ol>
+  </div>
+
+  <!-- ===== FIRMWARE =====
+       Units ship already flashed and nothing in the box used to say with what,
+       so a customer had no reason to know the other two builds exist. Below the
+       action (Wi-Fi, then Next · HomeKit once joined) because it is reference,
+       not a step. The flash URL is plain text rather than a link: this page is
+       served over the controller's own hotspot, which has no route to the
+       internet, so a tappable link could only ever fail — the last sentence is
+       what stops that reading as broken. -->
+  <h2 class="group-label">Firmware</h2>
+  <div class="card">
+    <span class="card-label">Installed</span>
+    <div class="fw-name">Apple Home (HomeKit)</div>
+    <p class="help-text">Your controller was flashed with this build before it shipped,
+      so it pairs with the Apple Home app and Siri.</p>
+    <p class="help-text">Prefer Home Assistant, Google Home or Alexa? Those builds are
+      free too, and you can install one over USB from a desktop Chrome browser at
+      <strong class="fw-url">serin-labs.com/flash.html</strong>. That page needs
+      internet, and this hotspot has none.</p>
   </div>
 
   <div class="footer">{{BRAND_NAME}}</div>
