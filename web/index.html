@@ -1142,6 +1142,11 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   var lastQRURI='';
   var hkPairedNow=false;      // last pushed paired state
   var hkSetupExpanded=false;  // "Show Setup Code" toggle while paired
+  // A freshly bonded Link sends its DIAL_INFO (model/fw) a beat after the bond,
+  // so the first few status pushes carry no model. Hold the neutral title for a
+  // grace window instead of flashing "Model unknown" at every new pairing.
+  var linkInfoWaitAt=0;
+  var LINK_INFO_GRACE_MS=15000;
   // Single renderer for the pairing hero's collapsed/expanded state — used by
   // both the state push and the toggle button so the two can't drift.
   function renderHkSetupToggle(){
@@ -2239,7 +2244,12 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
 
       // Header: model over MAC once bonded; the card's own name before that,
       // where the summary chip already says "Not Paired".
-      $('remoteTitle').textContent = bonded ? (s.remoteModel||'Model unknown — update the Link') : 'Link';
+      if(!bonded||s.remoteModel) linkInfoWaitAt=0;
+      else if(!linkInfoWaitAt)     linkInfoWaitAt=Date.now();
+      var infoLate = linkInfoWaitAt && (Date.now()-linkInfoWaitAt > LINK_INFO_GRACE_MS);
+      $('remoteTitle').textContent = bonded
+        ? (s.remoteModel || (infoLate ? 'Model unknown — update the Link' : 'Link'))
+        : 'Link';
       var sub=$('remoteSub');
       sub.textContent = bonded ? (s.remoteMac||'—') : 'Not Paired';
       sub.className   = bonded ? 'b mono' : 'b';

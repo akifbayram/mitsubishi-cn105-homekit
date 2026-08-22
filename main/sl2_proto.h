@@ -21,7 +21,7 @@
 extern "C" {
 #endif
 
-#define SL2_PROTO_VERSION    2
+#define SL2_PROTO_VERSION    3
 #define SL2_PROTO_MIN_COMPAT 1
 
 /* esp_now_set_pmk() input: a documented PUBLIC constant (16 bytes). It only
@@ -80,6 +80,12 @@ enum sl2_preset {               /* ESPHome preset superset; 0 = none */
 
 #define SL2_DC_NA      ((int16_t)0x7FFF)   /* "no value" for optional temps */
 #define SL2_HUM_NA     ((uint8_t)0xFF)     /* "no value" for humidity fields */
+#define SL2_CC_NA      ((int16_t)0x7FFF)   /* "no value" for centi-C temps */
+#define SL2_HUM_CC_NA  ((uint16_t)0xFFFF)  /* "no value" for centi-% humidity */
+/* NB SL2_HUM_NA (0xFF) and SL2_HUM_CC_NA (0xFFFF) mean the same thing in
+ * different units and now coexist. SL2_HUM_NA is for sl2_state_pkt's
+ * room_hum_pct / hum_set_pct; SL2_HUM_CC_NA is ONLY for sl2_dial_sensor_pkt.
+ * A mixed-up sentinel compares false forever and reads as "never reports". */
 
 /* ── STATE (ctrl -> dial) ─────────────────────────────────────────────── */
 
@@ -471,10 +477,11 @@ struct __attribute__((packed)) sl2_dial_info_pkt {
  *
  * SL2_ROOMSRC_NOEDIT is 0xFF, not 0, on purpose: the tolerant decode
  * zero-fills a short frame, and 0 means Internal. A receiver must treat
- * len < 7 as reading-only by LENGTH, never by value. */
+ * len < 8 as reading-only by LENGTH, never by value (want_src sits at
+ * offset 7 now that hum_cc widened to 16 bits). */
 enum {  /* sl2_dial_sensor_pkt.flags */
     SL2_DSF_HAS_SENSOR = 1u << 0,  /* dial has sensing hardware (reading may
-                                    * still be absent — see temp_dc) */
+                                    * still be absent — see temp_cc) */
     /* Screen status report, gated on SL2_FEAT_SCREEN in CAPS. VALID+ON is the
      * same two-bit scheme as SL2_SF2_SCREEN_*: a zero-filled legacy dial reads
      * as "does not report", never as "screen off". ON covers every lit state
@@ -499,14 +506,22 @@ enum sl2_room_status {
 
 struct __attribute__((packed)) sl2_dial_sensor_pkt {
     uint8_t  type;           /* SL2_PKT_DIAL_SENSOR */
-    uint8_t  version;        /* SL2_PROTO_VERSION */
+    uint8_t  version;        /* SL2_PROTO_VERSION; < 3 means deci fields — reject */
     uint8_t  flags;          /* SL2_DSF_* */
-    int16_t  temp_dc;        /* deci-C; SL2_DC_NA  = no reading */
-    uint8_t  hum_pct;        /* 0..100; SL2_HUM_NA = no reading */
+    int16_t  temp_cc;        /* centi-C; SL2_CC_NA = no reading */
+    uint16_t hum_cc;         /* centi-%, 0..10000; SL2_HUM_CC_NA = no reading */
     uint8_t  want_src;       /* enum sl2_room_src; NOEDIT = reading only */
-    uint8_t  reserved[2];    /* senders zero-fill, receivers ignore */
+    uint8_t  reserved[1];    /* senders zero-fill, receivers ignore */
 };
-#define SL2_DIAL_SENSOR_MIN_LEN 6   /* through hum_pct; want_src may be absent */
+#define SL2_DIAL_SENSOR_MIN_LEN 7   /* through hum_cc; want_src may be absent */
+/* The first version whose DIAL_SENSOR temp/hum fields are centi (v2 and
+ * earlier were deci, at the same packet size — see the version comment on
+ * sl2_dial_sensor_pkt.version above). A fixed historical fact, NOT an alias
+ * for SL2_PROTO_VERSION: that constant moves at the next protocol bump, and
+ * if this one moved with it the version gate in sl2_link.c would silently
+ * stop rejecting the v2-era frames it exists to reject. Do not "simplify"
+ * this back to SL2_PROTO_VERSION. */
+#define SL2_DIAL_SENSOR_MIN_VER 3
 
 /* ── sizeof guards — every vendored copy must agree ───────────────────── */
 #define SL2_STATIC_ASSERT(c, m) typedef char sl2_sa_##m[(c) ? 1 : -1]

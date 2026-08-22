@@ -5,6 +5,7 @@
 #include "esp_utils.h"
 #include "ble_sensor.h"   // arbitration guard below; safe to include unconditionally
 #include "room_avg.h"
+#include "link_units.h"
 
 #include <cstring>
 #include <cmath>
@@ -30,9 +31,9 @@ static const char *TAG = "link_sensor";
 
 // ── Latest reading (guarded by s_mux) ───────────────────────────────────────
 static portMUX_TYPE s_mux = portMUX_INITIALIZER_UNLOCKED;
-static int16_t  s_tempDc     = SL2_DC_NA;   // deci-C; SL2_DC_NA = no reading yet
-static uint8_t  s_humPct     = SL2_HUM_NA;
-static uint32_t s_lastUpdate = 0;           // uptime_ms of last VALID temp_dc
+static int16_t  s_tempCc     = SL2_CC_NA;   // centi-C; SL2_CC_NA = no reading yet
+static uint16_t s_humCc      = SL2_HUM_CC_NA;
+static uint32_t s_lastUpdate = 0;           // uptime_ms of last VALID temp_cc
 static uint8_t  s_mac[6]     = {0};         // MAC of the dial that last fed us
 static bool     s_hasSensor  = false;       // latest packet's SL2_DSF_HAS_SENSOR
 
@@ -66,15 +67,15 @@ void LinkSensor::feed(const uint8_t mac[6], const struct sl2_dial_sensor_pkt *p)
     // Freshness follows the temperature, not the flags — a dial that has
     // sensing hardware but no reading yet (or a battery/hum-only frame, if
     // one ever exists) must not keep the stale watchdog from firing.
-    bool gotTemp = (p->temp_dc != SL2_DC_NA);
+    bool gotTemp = (p->temp_cc != SL2_CC_NA);
 
     taskENTER_CRITICAL(&s_mux);
     s_hasSensor = (p->flags & SL2_DSF_HAS_SENSOR) != 0;
     if (gotTemp) {
-        s_tempDc     = p->temp_dc;
+        s_tempCc     = p->temp_cc;
         s_lastUpdate = uptime_ms();
     }
-    if (p->hum_pct != SL2_HUM_NA) s_humPct = p->hum_pct;
+    if (p->hum_cc != SL2_HUM_CC_NA) s_humCc = p->hum_cc;
     if (mac) memcpy(s_mac, mac, 6);
     taskEXIT_CRITICAL(&s_mux);
 }
@@ -103,19 +104,22 @@ void LinkSensor::loop(CN105Controller &cn105) {
     }
 
     uint32_t now = uptime_ms();
-    int16_t  tempDc;
+    int16_t  tempCc;
     uint32_t lastUpd;
     taskENTER_CRITICAL(&s_mux);
-    tempDc  = s_tempDc;
+    tempCc  = s_tempCc;
     lastUpd = s_lastUpdate;
     taskEXIT_CRITICAL(&s_mux);
 
+    // The wire is centi as of proto v3; everything from here down — the change
+    // grid, the offsets, the CN105 wire — is deci, so convert once, here.
     // Calibration offset applies in Single mode too, not just in the Average
     // blend. Both are tenths °C, so this stays in integer space — and folding
     // it in before room_feed_step() means the 0.5 °C change grid and the
     // keepalive both track the corrected value.
-    tempDc = (int16_t)std::clamp((int)tempDc + room_offset_dc(settings.get(), ROOM_MEMBER_LINK),
-                                 (int)INT16_MIN, (int)INT16_MAX);
+    int16_t tempDc = (int16_t)std::clamp((int)link_cc_to_dc(tempCc) +
+                                             room_offset_dc(settings.get(), ROOM_MEMBER_LINK),
+                                         (int)INT16_MIN, (int)INT16_MAX);
 
     bool     selected    = (settings.get().roomMode == 0) &&
                            (settings.get().roomSingle == ROOM_MEMBER_LINK);
@@ -162,13 +166,13 @@ bool LinkSensor::isStale() {
 }
 
 float LinkSensor::temperature() {
-    int16_t dc = readLocked(s_tempDc);
-    return dc == SL2_DC_NA ? NAN : dc / 10.0f;
+    int16_t cc = readLocked(s_tempCc);
+    return cc == SL2_CC_NA ? NAN : cc / 100.0f;
 }
 
 float LinkSensor::humidity() {
-    uint8_t h = readLocked(s_humPct);
-    return h == SL2_HUM_NA ? NAN : (float)h;
+    uint16_t cc = readLocked(s_humCc);
+    return cc == SL2_HUM_CC_NA ? NAN : cc / 100.0f;
 }
 
 uint32_t LinkSensor::lastUpdateAge() {

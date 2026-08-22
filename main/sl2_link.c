@@ -351,7 +351,14 @@ void sl2_link_on_recv(sl2_link_t *l, const uint8_t src[6], const uint8_t dst[6],
         }
         break;
     case SL2_PKT_DIAL_SENSOR:
-        if (len >= SL2_DIAL_SENSOR_MIN_LEN) {
+        /* v3 rescaled temp/hum from deci to centi WITHOUT changing the packet
+         * size, so a v2 frame decodes cleanly into the wrong units — 247 C
+         * reported as if real. Nothing else in the stack rejects on version
+         * (peerVer is only a skew warning), so this check is the sole guard.
+         * Dropping the frame is correct: no reading beats a wrong one.
+         * SL2_DIAL_SENSOR_MIN_VER (not SL2_PROTO_VERSION) is the floor — see
+         * its definition in sl2_proto.h for why the two must never merge. */
+        if (len >= SL2_DIAL_SENSOR_MIN_LEN && ver >= SL2_DIAL_SENSOR_MIN_VER) {
             struct sl2_dial_sensor_pkt p;
             sl2_decode_pkt(&p, sizeof p, data, len);
             /* Screen status is core state, not adapter policy: stash it in
