@@ -291,6 +291,31 @@ input[type=range].slim::-moz-range-thumb{width:22px;height:22px;}
 .field::placeholder{color:var(--text3);}
 .field.mono{font-family:ui-monospace,Menlo,monospace;}
 
+/* The UI's one <select> (night dimming's city picker). A native select ignores
+   most of .field, so the fill comes from .field and the chevron is a sibling
+   that can follow currentColor the way every other icon here does. */
+.select-wrap{position:relative;}
+.select-wrap .chev{position:absolute;right:13px;top:50%;width:14px;height:14px;margin-top:-7px;
+  color:var(--text3);pointer-events:none;}
+select.field{-webkit-appearance:none;appearance:none;padding-right:38px;
+  font-size:15px;font-weight:500;line-height:1.25;cursor:pointer;text-overflow:ellipsis;}
+/* No city picked yet: the first option is a prompt, so it reads as one. */
+select.field:has(option[value=""]:checked){color:var(--text3);font-weight:400;}
+
+/* ===== Night dimming (inside the padded Link card) =====
+   Its settings use the same inset rows as the Device card. Those rows carry
+   their own side padding for a .card.flush parent, which this card already
+   supplies, so the rows drop it and align to the card gutter. */
+#nightBlock .inset-row{padding:13px 0;}
+#nightBlock .num-chip{flex:none;}
+#nightBlock .num-chip.coord input{width:90px;}
+#nightBlock .night-tune{margin-top:14px;border-top:1px solid var(--sep);transition:opacity .2s;}
+/* Three stacked rows, so the unit column is fixed and the numbers line up. */
+#nightBlock .night-tune .unit{min-width:26px;}
+/* No coordinates means no twilight to gate on: the tuning below still saves,
+   but it has nothing to act on until a location is set. */
+#nightBlock .night-tune.is-idle{opacity:.45;}
+
 /* dimmed (no data) */
 .ble-dimmed{opacity:.5;}
 
@@ -442,6 +467,9 @@ button.wifi-row:active{background:var(--surface3);}
 .setting-value{font-size:14px;color:var(--text);font-weight:500;}
 
 /* ===== Logs ===== */
+.log-level{margin-bottom:16px;padding-bottom:16px;border-bottom:1px solid var(--sep);}
+.log-level .lbl{font-size:15px;color:var(--text);font-weight:500;}
+.log-level .sub{font-size:12px;color:var(--text2);margin:2px 0 10px;}
 .log-toolbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;}
 .log-toolbar .ttl{font-size:15px;color:var(--text);font-weight:500;}
 .log-actions{display:flex;gap:8px;}
@@ -875,27 +903,35 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
          see settings that can't do anything. Default none = no flash. -->
     <details class="advanced" id="nightBlock" style="display:none">
       <summary>Night Dimming</summary>
-      <div class="sub" style="margin:8px 0 10px">Paired Serin Link dials dim their wake brightness after civil twilight. Pick the nearest city, or leave empty to disable.</div>
-      <div class="btn-row" style="margin-bottom:10px">
-        <select id="nightTzSel" aria-label="Nearest city" style="max-width:100%"></select>
+      <p class="setting-caption" style="margin:8px 0 12px">Paired Serin Link dials dim their wake brightness after civil twilight. Pick the nearest city to switch it on, or clear the coordinates to switch it off.</p>
+      <div class="select-wrap">
+        <select id="nightTzSel" class="field" aria-label="Nearest city"></select>
+        <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
       </div>
-      <div class="btn-row" style="margin-bottom:10px">
-        <div class="num-chip"><input type="number" id="cfgNightLat" step="0.0001" min="-90" max="90" placeholder="latitude" aria-label="Latitude" style="width:76px"><span class="unit">lat</span></div>
-        <div class="num-chip"><input type="number" id="cfgNightLon" step="0.0001" min="-180" max="180" placeholder="longitude" aria-label="Longitude" style="width:76px"><span class="unit">lon</span></div>
+      <div class="night-loc">
+        <div class="inset-row">
+          <span class="lbl">Latitude</span>
+          <div class="num-chip coord"><input type="number" id="cfgNightLat" step="0.0001" min="-90" max="90" placeholder="&mdash;" aria-label="Latitude"><span class="unit">&deg;</span></div>
+        </div>
+        <div class="inset-row">
+          <span class="lbl">Longitude</span>
+          <div class="num-chip coord"><input type="number" id="cfgNightLon" step="0.0001" min="-180" max="180" placeholder="&mdash;" aria-label="Longitude"><span class="unit">&deg;</span></div>
+        </div>
       </div>
-      <div class="btn-row" style="margin-bottom:10px">
-        <button type="button" class="btn-secondary" id="nightLocBtn">Use My Location</button>
-      </div>
-      <div class="lbl" style="margin-top:4px">Night Timing Offsets</div>
-      <div class="sub" style="margin:2px 0 10px">Shift night's edges in minutes: positive dusk starts night later after dark, positive dawn keeps it later past first light.</div>
-      <div class="btn-row">
-        <div class="num-chip"><input type="number" id="cfgNightDusk" min="-180" max="180" step="5" value="0" aria-label="Dusk offset in minutes" style="width:64px"><span class="unit">dusk min</span></div>
-        <div class="num-chip"><input type="number" id="cfgNightDawn" min="-180" max="180" step="5" value="0" aria-label="Dawn offset in minutes" style="width:64px"><span class="unit">dawn min</span></div>
-      </div>
-      <div class="lbl" style="margin-top:10px">Night Brightness</div>
-      <div class="sub" style="margin:2px 0 10px">How bright the dial wakes while night mode holds.</div>
-      <div class="btn-row">
-        <div class="num-chip"><input type="number" id="cfgNightCeil" min="5" max="60" step="5" value="20" aria-label="Night brightness percent" style="width:64px"><span class="unit">%</span></div>
+      <button type="button" class="btn-secondary" id="nightLocBtn" style="margin-top:12px">Use My Location</button>
+      <div class="night-tune" id="nightTune">
+        <div class="inset-row">
+          <div><div class="lbl">Dusk Offset</div><div class="sub">Minutes to delay the start of night.</div></div>
+          <div class="num-chip"><input type="number" id="cfgNightDusk" min="-180" max="180" step="5" value="0" aria-label="Dusk offset in minutes"><span class="unit">min</span></div>
+        </div>
+        <div class="inset-row">
+          <div><div class="lbl">Dawn Offset</div><div class="sub">Minutes to hold night past first light.</div></div>
+          <div class="num-chip"><input type="number" id="cfgNightDawn" min="-180" max="180" step="5" value="0" aria-label="Dawn offset in minutes"><span class="unit">min</span></div>
+        </div>
+        <div class="inset-row">
+          <div><div class="lbl">Wake Brightness</div><div class="sub">How bright the dial wakes at night.</div></div>
+          <div class="num-chip"><input type="number" id="cfgNightCeil" min="5" max="60" step="5" value="20" aria-label="Night brightness percent"><span class="unit">%</span></div>
+        </div>
       </div>
     </details>
     <div class="btn-row" id="remotePairRow" style="margin-top:14px">
@@ -955,20 +991,6 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
         <label class="ios-toggle"><input type="checkbox" id="capFan" onchange="onCapChange(this)" aria-label="Unit supports fan-only mode"><span class="ios-toggle-slider"></span></label>
       </div>
     </div>
-    <div class="inset-block">
-      <div class="lbl" style="margin-bottom:10px">Log Level</div>
-      <div class="seg compact" id="logLevelGrp">
-        <div class="seg-bg"></div>
-        <button data-v="0" onclick="setLogLevel(this)">Error</button>
-        <button data-v="1" onclick="setLogLevel(this)">Warn</button>
-        <button data-v="2" class="active" onclick="setLogLevel(this)">Info</button>
-        <button data-v="3" onclick="setLogLevel(this)">Debug</button>
-      </div>
-    </div>
-    <div class="inset-row">
-      <div><div class="lbl">Poll Interval</div><div class="sub">Lower is more responsive; higher is gentler on the bus.</div></div>
-      <div class="num-chip"><input type="number" id="cfgPoll" min="500" max="30000" step="500" value="2000" aria-label="Poll interval in milliseconds"><span class="unit">ms</span></div>
-    </div>
     <div style="padding:14px 18px 18px;border-top:1px solid var(--sep)">
       <button class="save-btn" onclick="saveConfig()">Save Settings</button>
       <div class="btn-row" style="margin-top:9px">
@@ -977,6 +999,10 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       </div>
       <details class="advanced">
         <summary>Advanced</summary>
+        <div class="inset-row" style="padding:13px 0">
+          <div><div class="lbl">Poll Interval</div><div class="sub">Lower is more responsive; higher is gentler on the bus. Applied on Save Settings.</div></div>
+          <div class="num-chip"><input type="number" id="cfgPoll" min="500" max="30000" step="500" value="2000" aria-label="Poll interval in milliseconds"><span class="unit">ms</span></div>
+        </div>
         <p class="setting-caption" style="margin:8px 0 10px">
           Factory reset erases everything — Wi-Fi credentials, HomeKit pairing, paired Link, and all settings — and restarts the device into setup mode. This cannot be undone.
         </p>
@@ -1064,6 +1090,17 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   <!-- ===== LOGS ===== -->
   <h2 class="group-label">Diagnostics · Logs</h2>
   <div class="card" id="logsBody">
+    <div class="log-level">
+      <div class="lbl">Log Level</div>
+      <div class="sub">Applies immediately. Debug is session-only &mdash; a restart returns to Info.</div>
+      <div class="seg compact" id="logLevelGrp">
+        <div class="seg-bg"></div>
+        <button data-v="0" onclick="setLogLevel(this)">Error</button>
+        <button data-v="1" onclick="setLogLevel(this)">Warn</button>
+        <button data-v="2" class="active" onclick="setLogLevel(this)">Info</button>
+        <button data-v="3" onclick="setLogLevel(this)">Debug</button>
+      </div>
+    </div>
     <div class="log-toolbar">
       <span class="ttl">Live Log</span>
       <div class="log-actions">
@@ -2194,15 +2231,16 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       $('devName').textContent=s.deviceName;
       document.title=s.deviceName;
     }
+    if(s.logLevel!=null) setActive('logLevelGrp',String(s.logLevel));
     if(!settingsDirty){
       if(s.deviceName&&!$('cfgDeviceName').matches(':focus')) $('cfgDeviceName').value=s.deviceName;
-      if(s.logLevel!=null) setActive('logLevelGrp',String(s.logLevel));
       if(s.pollInterval!=null&&!$('cfgPoll').matches(':focus')) $('cfgPoll').value=s.pollInterval;
       if(s.vaneConfig!=null) setActive('vaneTypeGrp',String(s.vaneConfig));
       if(s.modeMask!=null) applyCapMask(s.modeMask);
     }
     if(s.nightLat!=null&&!$('cfgNightLat').matches(':focus')) $('cfgNightLat').value=s.nightLat;
     if(s.nightLon!=null&&!$('cfgNightLon').matches(':focus')) $('cfgNightLon').value=s.nightLon;
+    syncNightTune();
     if(s.nightDuskOff!=null&&!$('cfgNightDusk').matches(':focus')) $('cfgNightDusk').value=s.nightDuskOff;
     if(s.nightDawnOff!=null&&!$('cfgNightDawn').matches(':focus')) $('cfgNightDawn').value=s.nightDawnOff;
     if(s.nightCeil!=null&&!$('cfgNightCeil').matches(':focus')) $('cfgNightCeil').value=s.nightCeil;
@@ -2954,6 +2992,13 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     renderBand();
   }
 
+  // The offsets and brightness below still save with no location set, but
+  // nothing acts on them until there is a twilight to gate on — so the group
+  // reads as idle until both coordinates are filled in.
+  function syncNightTune(){
+    var on=$('cfgNightLat').value.trim()!==''&&$('cfgNightLon').value.trim()!=='';
+    $('nightTune').classList.toggle('is-idle',!on);
+  }
   // Night gate location: paired Serin Link dials dim their wake brightness
   // after civil twilight once lat/lon is set. Sent immediately (cmd:'set',
   // same as heatThresh/coolThresh) rather than through the batched
@@ -2961,10 +3006,11 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   // send to confirm the commit the way the batched card's own Save button
   // would otherwise have.
   function sendNightLoc(){
+    syncNightTune();
     if(!wsReady()){showToast('Not connected — change not sent',true);return}
     var laStr=$('cfgNightLat').value.trim(), loStr=$('cfgNightLon').value.trim();
     if(laStr===''&&loStr===''){
-      // Both empty: explicit clear, honoring the "leave empty to disable" caption.
+      // Both empty: explicit clear, honoring the caption's "clear the coordinates".
       send({cmd:'set',nightLocClear:1});
       showToast('Location cleared');
       return;
@@ -3103,13 +3149,23 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   }
 
   window.setVaneType=function(b){setActive('vaneTypeGrp',b.getAttribute('data-v'));settingsDirty=true;};
-  window.setLogLevel=function(b){setActive('logLevelGrp',b.getAttribute('data-v'));settingsDirty=true;};
+  // Log level lives in the Logs card, away from the Device card's Save button,
+  // so it applies on tap. The firmware's config handler takes each field
+  // independently, so a logLevel-only frame is a valid partial config.
+  window.setLogLevel=function(b){
+    var v=b.getAttribute('data-v');
+    var prev=getSegVal('logLevelGrp');
+    setActive('logLevelGrp',v);
+    if(!send({cmd:'config',logLevel:parseInt(v)})){
+      setActive('logLevelGrp',prev);
+      showToast('Not connected — log level unchanged',true);
+    }
+  };
   window.saveConfig=function(){
     var name=$('cfgDeviceName').value.replace(/["\\\n\r]/g,'').trim();
     var ok=send({
       cmd:'config',
       deviceName:name,
-      logLevel:parseInt(getSegVal('logLevelGrp')),
       pollInterval:parseInt($('cfgPoll').value),
       vaneConfig:parseInt(getSegVal('vaneTypeGrp')),
       modeMask:getCapMask()
