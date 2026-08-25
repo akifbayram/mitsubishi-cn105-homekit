@@ -17,7 +17,6 @@ enum LEDState {
     SLED_ERROR_CODE,         // Heat pump error code — red fast blink (persistent)
     SLED_OTA,                // Firmware upload — white slow pulse
     SLED_PAIR_LISTEN,        // Link pairing window open — purple slow pulse
-    SLED_BLE_PAIR_LISTEN,    // BLE proximity-pair window open — cyan slow pulse
     SLED_RESULT_OK,          // Success transient (pair OK / WiFi joined) — green solid, held by caller
     SLED_RESULT_FAIL,        // Fail transient (pair fail / creds rejected) — red fast blink, held by caller
     SLED_UNPAIR,             // Link forgotten — orange fast blink (held before restart)
@@ -39,7 +38,6 @@ struct SledInputs {
     bool     pairActionAllowed; // releasing at the 2 s tier would act (ESPNOW on, no OTA)
     bool     otaActive;         // firmware upload in progress (webota_active())
     bool     pairingActive;     // Link pairing window open
-    bool     blePairListening;  // BLE proximity-pair window open
     bool     wifiTrialActive;   // submitted credentials being tried
     bool     safeMode;          // crash-loop safe mode session
     bool     portalActive;      // captive-portal AP up
@@ -87,7 +85,6 @@ inline LEDState sled_evaluate(const SledInputs& in) {
     if (in.buttonHeldMs >= SLED_BTN_PAIR_TIER_MS && in.pairActionAllowed) return SLED_BTN_PAIR;
     if (in.otaActive)          return SLED_OTA;
     if (in.pairingActive)      return SLED_PAIR_LISTEN;
-    if (in.blePairListening)   return SLED_BLE_PAIR_LISTEN;
     if (in.wifiTrialActive)    return SLED_WIFI_TRIAL;
     if (in.safeMode)           return SLED_SAFE_MODE;
     if (in.portalActive)       return SLED_PORTAL;

@@ -74,21 +74,6 @@ int main() {
     { SledInputs in = healthy(); in.wifiTrialActive = true; in.pairingActive = true;
       assert(sled_evaluate(in) == SLED_PAIR_LISTEN); }
 
-    // BLE proximity-pair window sits just under Link pairing: it outranks the
-    // WiFi trial, and Link pairing outranks it (the two are mutually exclusive
-    // by guard, but the order must still be defined).
-    { SledInputs in = healthy(); in.wifiTrialActive = true; in.blePairListening = true;
-      assert(sled_evaluate(in) == SLED_BLE_PAIR_LISTEN); }
-    { SledInputs in = healthy(); in.blePairListening = true; in.pairingActive = true;
-      assert(sled_evaluate(in) == SLED_PAIR_LISTEN); }
-
-    // OTA and the button hold tiers still outrank it
-    { SledInputs in = healthy(); in.blePairListening = true; in.otaActive = true;
-      assert(sled_evaluate(in) == SLED_OTA); }
-    { SledInputs in = healthy(); in.blePairListening = true;
-      in.buttonHeldMs = SLED_BTN_WIPE_WARN_MS;
-      assert(sled_evaluate(in) == SLED_BTN_WIPE); }
-
     // OTA outranks pairing listen and everything below
     { SledInputs in = healthy(); in.pairingActive = true; in.otaActive = true;
       assert(sled_evaluate(in) == SLED_OTA); }

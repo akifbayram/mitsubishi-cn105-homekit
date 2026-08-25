@@ -39,7 +39,6 @@
 #include "ble_sensor.h"
 #include "homekit_sensor_accessory.h"
 #endif
-#include "ble_pair.h"
 
 static const char *TAG = "main";
 
@@ -365,8 +364,8 @@ extern "C" void app_main(void)
         // ── ESP-NOW remote — every iter (~10 ms) ────────────────────────
         espnowLink.loop();
 
-        // ── Button — every iter (~10 ms). One debounced source, two
-        // consumers: wifiRecovery owns the hold bands, BlePair owns clicks.
+        // ── Button — every iter (~10 ms). One debounced source;
+        // wifiRecovery owns the hold bands.
 #if PIN_BUTTON >= 0
         {
             static ButtonInput button;
@@ -374,7 +373,6 @@ extern "C" void app_main(void)
                                == (BUTTON_ACTIVE_LOW ? 0 : 1));
             ButtonOut b = button.update(rawPressed, now);
             wifiRecovery.onButton(b);
-            if (webUIStarted && !safeMode && b.ev == BTN_EV_CLICK && b.clicks == 3) BlePair::onTripleClick();
         }
 #endif
 
@@ -472,7 +470,6 @@ extern "C" void app_main(void)
 
 #ifdef BLE_ENABLE
             if (!safeMode) BleSensor::begin();
-            if (!safeMode) BlePair::begin();
 #endif
         }
 
@@ -494,7 +491,6 @@ extern "C" void app_main(void)
 #ifdef BLE_ENABLE
         if (webUIStarted && now - lastBleLoop >= 1000) {
             BleSensor::loop(cn105);
-            BlePair::loop();
             lastBleLoop = now;
         }
 #endif
@@ -561,9 +557,6 @@ extern "C" void app_main(void)
             li.pairActionAllowed = !li.otaActive;   // mirrors onButton()'s OTA guard
 #endif
             li.pairingActive   = espnowLink.pairingActive();
-#ifdef BLE_ENABLE
-            li.blePairListening  = BlePair::isListening();
-#endif
             li.wifiTrialActive = (tr == WifiManager::WIFI_TRIAL_TESTING);   // real credential trials only
             li.safeMode        = safeMode;
             li.portalActive    = wifiRecovery.isAPActive();
