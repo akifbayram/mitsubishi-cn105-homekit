@@ -5,6 +5,7 @@
 #include <esp_app_desc.h>
 #include <esp_partition.h>
 #include "ota_guard.h"
+#include "esp_utils.h"   // uptime_ms()
 
 static const char *TAG = "web_ota";
 
@@ -13,6 +14,20 @@ static const char *TAG = "web_ota";
 static volatile bool s_otaActive = false;
 
 bool webota_active() { return s_otaActive; }
+
+// How long the upload may go completely silent before the session is torn
+// down. A client that vanishes WITHOUT a clean FIN — a dropped Wi-Fi link, a
+// killed curl, a NAT timeout — leaves recv() returning HTTPD_SOCK_ERR_TIMEOUT
+// (EAGAIN, once per httpd recv_wait_timeout) forever, and nothing else ever
+// ends the request. Retrying that unbounded wedges the device until it is
+// power-cycled: s_otaActive stays true, so the LED never leaves SLED_OTA,
+// button pairing stays refused and wifi_recovery stops trying to reconnect --
+// and because esp_http_server dispatches handlers on its single server task,
+// every other socket is blocked with it (the web UI stops answering while the
+// device still pings). A clean disconnect returns 0 and is handled below;
+// this bounds the silent case. Generous on purpose: a live upload always
+// delivers something inside this window no matter how weak the link.
+static constexpr uint32_t OTA_STALL_MS = 30000;
 
 // The default task-watchdog timeout the rest of the firmware runs with. The
 // erase/flash phase needs longer, but it must go back on EVERY exit: a 30 s
@@ -152,14 +167,25 @@ esp_err_t WebUI::handleOtaUpload(httpd_req_t *req) {
     const char *expProject = esp_app_get_description()->project_name;
 
     size_t received = 0;
+    uint32_t lastRx = uptime_ms();
     while (received < totalLen) {
         int ret = httpd_req_recv(req, buf, 4096);
         if (ret <= 0) {
-            if (ret == HTTPD_SOCK_ERR_TIMEOUT) continue;
+            // Keep waiting only while the client is still plausibly alive; see
+            // OTA_STALL_MS for why this must not retry forever.
+            if (ret == HTTPD_SOCK_ERR_TIMEOUT) {
+                if ((uint32_t)(uptime_ms() - lastRx) < OTA_STALL_MS) continue;
+                LOG_ERROR("Upload stalled at %u/%u bytes (no data for %us) — aborting",
+                          (unsigned)received, (unsigned)totalLen,
+                          (unsigned)(OTA_STALL_MS / 1000));
+                httpd_resp_send_err(req, HTTPD_408_REQ_TIMEOUT, "Upload stalled");
+                return ESP_FAIL;
+            }
             LOG_ERROR("Receive error at %u/%u bytes", (unsigned)received, (unsigned)totalLen);
             httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Receive failed");
             return ESP_FAIL;
         }
+        lastRx = uptime_ms();
 
         // Identity guard on the first 288 bytes (magic byte, chip_id,
         // project_name) — rejects wrong-chip and wrong-app images (e.g. Dial
