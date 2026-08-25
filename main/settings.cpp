@@ -3,6 +3,7 @@
 #include "sl2_proto.h"
 
 #include <algorithm>
+#include <cstring>
 
 static const char *TAG = "settings";
 
@@ -410,6 +411,11 @@ void SettingsStore::begin() {
     // roomSource is derived state from here on — recompute so a stored value
     // that predates the blending model can't disagree with roomMode/roomSingle.
     _settings.roomSource = room_source_derived(_settings);
+    // Same contract as roomSource: derived from (roomMode, roomSingle) on load
+    // and on every save. The stored value only carries the one thing that pair
+    // cannot express — which Link dial a per-dial pin selected.
+    nvs_get_u64(_handle, "roomSrcId", &_settings.roomSourceId);
+    _settings.roomSourceId = room_source_id_derived(_settings);
 
     LOG_INFO("[Settings] Loaded: logLevel=%d poll=%lums name=%s unit=%s room mode=%u single=%u members=0x%02X",
              _settings.logLevel, (unsigned long)_settings.pollMs, _settings.deviceName,
@@ -432,6 +438,59 @@ uint8_t room_single_from_legacy(uint8_t src) {
         return ROOM_MEMBER_INTERNAL;
     }
     return ROOM_MEMBER_INTERNAL;
+}
+
+static int hex_nibble(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+// Hand-parsed rather than sscanf'd: this runs on the ESP-NOW link path, and
+// newlib's scanf engine costs ~960 bytes of stack for a 12-nibble parse.
+// Stricter than the sscanf form too — it requires exactly two hex digits per
+// group, so a short group like "A:BB:.." is rejected instead of silently
+// yielding a different MAC.
+bool mac_from_str(const char *s, uint8_t out[6]) {
+    if (!s || strlen(s) != 17) return false;
+    for (int i = 0; i < 6; i++) {
+        int hi = hex_nibble(s[i * 3]), lo = hex_nibble(s[i * 3 + 1]);
+        if (hi < 0 || lo < 0) return false;
+        if (i < 5 && s[i * 3 + 2] != ':') return false;
+        out[i] = (uint8_t)(hi * 16 + lo);
+    }
+    return true;
+}
+
+// The canonical SENSOR-namespace source id for a slot, or 0 if the slot is
+// empty/malformed. Shared with espnow_link.cpp via settings.h so the catalog
+// and the stored selection can never disagree on a sensor's identity.
+uint64_t room_sensor_id_from_addr(const char *s) {
+    uint8_t mac[6];
+    if (!mac_from_str(s, mac)) return 0;
+    return sl2_room_source_mac_id(SL2_ROOM_SOURCE_NS_SENSOR, mac);
+}
+
+uint64_t room_source_id_derived(const DeviceSettings &s) {
+    if (s.roomMode != 0) return SL2_ROOM_SOURCE_AVERAGE_ID;
+    if (s.roomSingle == ROOM_MEMBER_LINK) {
+        // A per-dial pin (NS_LINK) is the only selection roomSingle cannot
+        // encode, so it is the only stored id worth preserving — and only for
+        // as long as the selection stays on Link. Anything else means the pin
+        // is gone (forgotten dial, source changed elsewhere): fall back to the
+        // automatic Link source rather than keeping a dead MAC.
+        uint8_t pin[6];
+        if (sl2_room_source_id_mac(s.roomSourceId, SL2_ROOM_SOURCE_NS_LINK, pin))
+            return s.roomSourceId;
+        return SL2_ROOM_SOURCE_LINK_AUTO_ID;
+    }
+#ifdef BLE_ENABLE
+    int i = s.roomSingle - ROOM_MEMBER_BLE0;
+    if (i >= 0 && i < ROOM_MAX_BLE_SENSORS)
+        return room_sensor_id_from_addr(s.bleSensors[i].addr);
+#endif
+    return SL2_ROOM_SOURCE_INTERNAL_ID;
 }
 
 uint8_t room_source_derived(const DeviceSettings &s) {
@@ -463,6 +522,10 @@ void SettingsStore::save() {
     // the pre-averaging firmware keep their source.
     _settings.roomSource = room_source_derived(_settings);
     nvs_set_u8(_handle, "roomSrc", _settings.roomSource);
+    // Derived too, so every writer of roomMode/roomSingle — the web UI, a dial
+    // edit, a removed BLE slot — gets a consistent id without restating it.
+    _settings.roomSourceId = room_source_id_derived(_settings);
+    nvs_set_u64(_handle, "roomSrcId", _settings.roomSourceId);
     nvs_set_u16(_handle, "roomTimeout", _settings.roomStaleTimeoutS);
     nvs_set_u8(_handle, "roomMode", _settings.roomMode);
     nvs_set_u8(_handle, "roomSingle", _settings.roomSingle);

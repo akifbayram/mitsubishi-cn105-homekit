@@ -39,6 +39,15 @@ static void mark_all_state_pending(sl2_link_t *l) {
     for (int i = 0; i < l->n_dials; i++) l->dial[i].pend_state = true;
 }
 
+/* Clear the INFO throttle on every dial except `except`, so the next loop
+ * re-sends INFO to them. Used when controller-owned state carried in INFO
+ * changes (the room source): the dial that asked was answered directly, the
+ * others would otherwise wait out SL2_PULL_THROTTLE_MS. */
+static void mark_other_info_pending(sl2_link_t *l, const sl2_dial_rt_t *except) {
+    for (int i = 0; i < l->n_dials; i++)
+        if (&l->dial[i] != except) l->dial[i].last_info_tx_ms = 0;
+}
+
 /* Replay guard: dials echo STATE.epoch in CMD/WIFI_SETUP. The radio's CCMP
  * packet-number window lives in RAM, so a captured ciphertext replayed after
  * a controller reboot decrypts cleanly — the per-boot epoch is what kills it
@@ -416,6 +425,31 @@ void sl2_link_on_recv(sl2_link_t *l, const uint8_t src[6], const uint8_t dst[6],
             }
         }
         break;
+    case SL2_PKT_ROOM_CATALOG_REQ:
+        /* SL2_ROOM_CATALOG_MIN_VER, not SL2_PROTO_VERSION — see its definition
+         * in sl2_proto.h. A peer below the floor gets no catalog rather than
+         * one it would decode wrongly. */
+        if (len >= (int)sizeof(struct sl2_room_catalog_req_pkt) &&
+            ver >= SL2_ROOM_CATALOG_MIN_VER) {
+            struct sl2_room_catalog_req_pkt q;
+            sl2_decode_pkt(&q, sizeof q, data, len);
+            d->room_catalog_cursor = q.cursor;   /* known_revision: unused */
+            d->room_catalog_req = true;
+            d->last_probe_ms = now;
+        }
+        break;
+    case SL2_PKT_ROOM_SOURCE_SET:
+        if (len >= (int)sizeof(struct sl2_room_source_set_pkt) &&
+            ver >= SL2_ROOM_CATALOG_MIN_VER) {
+            struct sl2_room_source_set_pkt q;
+            sl2_decode_pkt(&q, sizeof q, data, len);
+            d->room_source_request_id = q.request_id;
+            d->room_source_revision   = q.revision;
+            d->room_source_id         = q.source_id;
+            d->room_source_req = true;
+            d->last_probe_ms = now;
+        }
+        break;
     default:
         break;
     }
@@ -465,6 +499,55 @@ static void serve_pulls(sl2_link_t *l, sl2_dial_rt_t *d, uint32_t now) {
         d->wifi_setup_req = false;
         if (l->hvac->wifi_setup)
             l->hvac->wifi_setup(l->hvac->ctx);   /* AP status echoes back via STATE */
+    }
+    if (d->room_catalog_req) {
+        d->room_catalog_req = false;
+        struct sl2_room_catalog_resp_pkt r;
+        memset(&r, 0, sizeof r);
+        r.type = SL2_PKT_ROOM_CATALOG_RESP;
+        r.version = SL2_PROTO_VERSION;
+        r.next_cursor = SL2_ROOM_CATALOG_DONE;
+        uint8_t count = 0;
+        uint16_t next_cursor = SL2_ROOM_CATALOG_DONE;
+        uint32_t revision = 0;
+        bool ok = l->hvac->room_catalog_page &&
+                  l->hvac->room_catalog_page(l->hvac->ctx, d->room_catalog_cursor,
+                                             r.entries, SL2_ROOM_CATALOG_PAGE_MAX,
+                                             &count, &next_cursor, &revision);
+        if (!ok || count > SL2_ROOM_CATALOG_PAGE_MAX) count = 0;
+        r.count = count;
+        r.next_cursor = ok ? next_cursor : SL2_ROOM_CATALOG_DONE;
+        r.revision = revision;
+        size_t n = SL2_ROOM_CATALOG_RESP_HDR_LEN +
+                   (size_t)r.count * sizeof(struct sl2_room_source_entry);
+        l->port->send(l->port->ctx, d->bond.mac, &r, n);
+    }
+    if (d->room_source_req) {
+        d->room_source_req = false;
+        struct sl2_room_source_ack_pkt a;
+        memset(&a, 0, sizeof a);
+        a.type = SL2_PKT_ROOM_SOURCE_ACK;
+        a.version = SL2_PROTO_VERSION;
+        a.request_id = d->room_source_request_id;
+        a.result = l->hvac->room_source_set
+                       ? l->hvac->room_source_set(l->hvac->ctx,
+                                                  d->room_source_revision,
+                                                  d->room_source_id)
+                       : SL2_ROOM_SET_UNSUPPORTED;
+        if (l->hvac->room_source_get) {
+            uint32_t revision = 0;
+            uint64_t source_id = 0;
+            uint8_t status = SL2_ROOMST_UNAVAILABLE;
+            l->hvac->room_source_get(l->hvac->ctx, &revision, &source_id, &status);
+            a.revision = revision;
+            a.source_id = source_id;
+            a.status = status;
+        }
+        l->port->send(l->port->ctx, d->bond.mac, &a, sizeof a);
+        /* The confirmed selection rides in INFO, so the OTHER heads must
+         * re-pull it now. This dial already has it: the ACK above carries the
+         * same revision/source_id/status the TLV would. */
+        if (a.result == SL2_ROOM_SET_OK) mark_other_info_pending(l, d);
     }
 }
 

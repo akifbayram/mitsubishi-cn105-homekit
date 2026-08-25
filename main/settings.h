@@ -73,6 +73,9 @@ struct DeviceSettings {
     // DERIVED from (roomMode, roomSingle) on every save — kept stored so the
     // Serin Link dial (sl2_room_src) and a firmware downgrade keep working.
     uint8_t  roomSource = 0;              // enum sl2_room_src
+    // DERIVED like roomSource (see room_source_id_derived); stored so a
+    // per-dial Link pin survives a reboot. 0 = Internal.
+    uint64_t roomSourceId = 0;            // protocol-v4 canonical source id
     uint16_t roomStaleTimeoutS = 600;     // Seconds before a source is stale (30-3600)
     // Blending model. Single mode reproduces the legacy one-source behavior;
     // Average mode feeds the equal-weight mean of the checked members.
@@ -97,6 +100,18 @@ uint8_t room_source_derived(const DeviceSettings &s);
 // is a single-mode selection; BLE maps to the first CONFIGURED slot (slot 0
 // may be empty after a remove), or to internal when none is configured.
 uint8_t room_single_from_legacy(uint8_t src);
+
+// roomSourceId is DERIVED from (roomMode, roomSingle) exactly like roomSource,
+// on load and on every save. The stored value carries one thing that pair
+// cannot encode — which Link dial a per-dial pin chose — so callers that set a
+// pin write roomSourceId; every other writer just sets roomMode/roomSingle.
+uint64_t room_source_id_derived(const DeviceSettings &s);
+uint64_t room_sensor_id_from_addr(const char *addr);
+
+// "AA:BB:CC:DD:EE:FF" (any case) -> 6 bytes. The single acceptance rule for a
+// sensor address: BleSensor's slot validation and the room-source id share it,
+// so a slot can never be rejected as a sensor yet still name a source.
+bool mac_from_str(const char *s, uint8_t out[6]);
 
 // A member's calibration offset, in tenths °C. Every path that feeds the heat
 // pump goes through these — the Average blend AND both single-source paths —

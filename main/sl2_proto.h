@@ -21,7 +21,7 @@
 extern "C" {
 #endif
 
-#define SL2_PROTO_VERSION    3
+#define SL2_PROTO_VERSION    4
 #define SL2_PROTO_MIN_COMPAT 1
 
 /* esp_now_set_pmk() input: a documented PUBLIC constant (16 bytes). It only
@@ -42,7 +42,11 @@ enum sl2_pkt_type {
     SL2_PKT_WIFI_SETUP = 10, /* dial -> ctrl, encrypted (raise setup AP) */
     SL2_PKT_DIAL_INFO  = 11, /* dial -> ctrl, encrypted (dial identity) */
     SL2_PKT_DIAL_SENSOR = 12, /* dial -> ctrl, encrypted (dial's own room sensor) */
-    /* 13..127 reserved for core growth; 128..255 experiments, never shipped */
+    SL2_PKT_ROOM_CATALOG_REQ = 13,
+    SL2_PKT_ROOM_CATALOG_RESP = 14,
+    SL2_PKT_ROOM_SOURCE_SET = 15,
+    SL2_PKT_ROOM_SOURCE_ACK = 16,
+    /* 17..127 reserved for core growth; 128..255 experiments, never shipped */
 };
 
 /* ── semantic HVAC model ──────────────────────────────────────────────── */
@@ -299,7 +303,8 @@ enum {  /* sl2_caps_pkt.features — telemetry/services the controller offers */
     SL2_FEAT_LINK_SENSOR    = 1u << 10, /* accepts DIAL_SENSOR as a room source */
     SL2_FEAT_SCREEN         = 1u << 11, /* runs a screen gate (SL2_SF2_SCREEN_*)
                                          * and wants SL2_DSF_SCREEN_* status back */
-    /* bits 12-15 spare */
+    SL2_FEAT_ROOM_CATALOG   = 1u << 12, /* named room-source catalog + selection */
+    /* bits 13-15 spare */
 };
 
 /* vane axis descriptor byte: low nibble = n_pos (0 = axis absent),
@@ -388,6 +393,7 @@ enum sl2_tlv_type {          /* 0x01..0x7F core; 0x80..0xFF vendor-specific */
                                   * (Serin-signed device identity); absent on
                                   * unprovisioned dials */
     SL2_TLV_ROOM_SRC    = 0x0B,  /* u8 applied_src; u8 status */
+    SL2_TLV_ROOM_SOURCE_V2 = 0x0C, /* u32 revision; u64 source_id; u8 status */
 };
 
 /* Append one TLV. Returns false (and writes nothing) if it doesn't fit. */
@@ -411,6 +417,88 @@ static inline bool sl2_tlv_next(const uint8_t *buf, size_t len, size_t *off,
     *off += 2 + (size_t)ll;
     return true;
 }
+
+/* ── controller-defined room-temperature source catalog (v4) ───────── */
+/* Well-known ids occupy namespace 0; every other namespace is a u8 tag in the
+ * high byte with a 6-byte MAC below it. Ids 2..0xFF in namespace 0 and
+ * namespaces 4..255 are reserved for core growth. Not every controller
+ * produces every id — the ESPHome adapter emits Internal/Link-auto/Link, the
+ * HomeKit adopter also emits Average and NS_SENSOR entries. */
+#define SL2_ROOM_SOURCE_INTERNAL_ID UINT64_C(0)
+#define SL2_ROOM_SOURCE_AVERAGE_ID UINT64_C(1)
+#define SL2_ROOM_SOURCE_NS_LINK 1u
+#define SL2_ROOM_SOURCE_NS_SENSOR 2u
+#define SL2_ROOM_SOURCE_NS_LINK_AUTO 3u
+#define SL2_ROOM_SOURCE_LINK_AUTO_ID \
+    ((uint64_t) SL2_ROOM_SOURCE_NS_LINK_AUTO << 56)
+#define SL2_ROOM_SOURCE_NAME_LEN 24
+#define SL2_ROOM_CATALOG_DONE UINT16_C(0xFFFF)
+#define SL2_ROOM_CATALOG_PAGE_MAX 7
+
+static inline uint64_t sl2_room_source_mac_id(uint8_t ns, const uint8_t mac[6]) {
+    uint64_t id = (uint64_t) ns << 56;
+    for (int i = 0; i < 6; i++) id |= (uint64_t) mac[i] << (40 - i * 8);
+    return id;
+}
+
+/* Exact inverse of sl2_room_source_mac_id for one namespace. True (and fills
+ * mac) only when `id` is a MAC-derived id in `ns`. This is what lets a
+ * controller keep the id as its ONLY stored copy of the selection and recover
+ * the MAC on demand, instead of persisting the two separately and keeping
+ * them in step by hand. */
+static inline bool sl2_room_source_id_mac(uint64_t id, uint8_t ns,
+                                          uint8_t mac[6]) {
+    if ((uint8_t)(id >> 56) != ns) return false;
+    for (int i = 0; i < 6; i++) mac[i] = (uint8_t)(id >> (40 - i * 8));
+    return true;
+}
+
+enum sl2_room_source_kind {
+    SL2_ROOM_KIND_INTERNAL = 0, SL2_ROOM_KIND_SENSOR = 1,
+    SL2_ROOM_KIND_LINK = 2, SL2_ROOM_KIND_AUTO = 3,
+    SL2_ROOM_KIND_AGGREGATE = 4,
+};
+enum { SL2_ROOM_SOURCE_F_SELECTABLE = 1u << 0 };
+
+struct __attribute__((packed)) sl2_room_source_entry {
+    uint64_t id;
+    uint8_t kind, flags;
+    char name[SL2_ROOM_SOURCE_NAME_LEN];
+};
+struct __attribute__((packed)) sl2_room_catalog_req_pkt {
+    uint8_t type, version;
+    uint16_t cursor;
+    uint32_t known_revision;
+};
+struct __attribute__((packed)) sl2_room_catalog_resp_pkt {
+    uint8_t type, version, count, flags;
+    uint16_t next_cursor, reserved;
+    uint32_t revision;
+    struct sl2_room_source_entry entries[SL2_ROOM_CATALOG_PAGE_MAX];
+};
+#define SL2_ROOM_CATALOG_RESP_HDR_LEN 12
+struct __attribute__((packed)) sl2_room_source_set_pkt {
+    uint8_t type, version, request_id, reserved;
+    uint32_t revision;
+    uint64_t source_id;
+};
+enum sl2_room_source_result {
+    SL2_ROOM_SET_OK = 0, SL2_ROOM_SET_BAD_SOURCE = 1,
+    SL2_ROOM_SET_STALE_CATALOG = 2, SL2_ROOM_SET_UNSUPPORTED = 3,
+};
+struct __attribute__((packed)) sl2_room_source_ack_pkt {
+    uint8_t type, version, request_id, result;
+    uint32_t revision;
+    uint64_t source_id;
+    uint8_t status, reserved[3];
+};
+struct __attribute__((packed)) sl2_room_source_v2 {
+    uint32_t revision;
+    uint64_t source_id;
+    uint8_t status;
+};
+/* The matching put helper lives in sl2_info.h with the other INFO
+ * builders, which write multi-byte fields little-endian by hand. */
 
 /* ── Link OTA credential relay ────────────────────────────────────────── */
 
@@ -523,6 +611,13 @@ struct __attribute__((packed)) sl2_dial_sensor_pkt {
  * this back to SL2_PROTO_VERSION. */
 #define SL2_DIAL_SENSOR_MIN_VER 3
 
+/* Same discipline for the v4 room-source family (ROOM_CATALOG_REQ/RESP,
+ * ROOM_SOURCE_SET/ACK): a fixed historical floor, not an alias for
+ * SL2_PROTO_VERSION. These types did not exist before v4, so nothing legitimate
+ * sends them at a lower version — and if a v4 field is ever rescaled in place
+ * the way DIAL_SENSOR's was, this is the constant that gate keys off. */
+#define SL2_ROOM_CATALOG_MIN_VER 4
+
 /* ── sizeof guards — every vendored copy must agree ───────────────────── */
 #define SL2_STATIC_ASSERT(c, m) typedef char sl2_sa_##m[(c) ? 1 : -1]
 SL2_STATIC_ASSERT(sizeof(struct sl2_state_pkt)     == 26,  state_size);
@@ -537,6 +632,12 @@ SL2_STATIC_ASSERT(sizeof(struct sl2_wifi_resp_pkt) == 103, wifi_resp_size);
 SL2_STATIC_ASSERT(sizeof(struct sl2_wifi_setup_pkt) == 4,  wifi_setup_size);
 SL2_STATIC_ASSERT(sizeof(struct sl2_dial_info_pkt) == 43,  dial_info_size);
 SL2_STATIC_ASSERT(sizeof(struct sl2_dial_sensor_pkt) == 9, dial_sensor_size);
+SL2_STATIC_ASSERT(sizeof(struct sl2_room_source_entry) == 34, room_source_entry_size);
+SL2_STATIC_ASSERT(sizeof(struct sl2_room_catalog_req_pkt) == 8, room_catalog_req_size);
+SL2_STATIC_ASSERT(sizeof(struct sl2_room_catalog_resp_pkt) == 250, room_catalog_resp_size);
+SL2_STATIC_ASSERT(sizeof(struct sl2_room_source_set_pkt) == 16, room_source_set_size);
+SL2_STATIC_ASSERT(sizeof(struct sl2_room_source_ack_pkt) == 20, room_source_ack_size);
+SL2_STATIC_ASSERT(sizeof(struct sl2_room_source_v2) == 13, room_source_v2_size);
 SL2_STATIC_ASSERT(SL2_DIAL_INFO_MIN_LEN <= (int)sizeof(struct sl2_dial_info_pkt), dial_info_minlen);
 SL2_STATIC_ASSERT(SL2_DIAL_SENSOR_MIN_LEN <= (int)sizeof(struct sl2_dial_sensor_pkt), dial_sensor_minlen);
 SL2_STATIC_ASSERT(SL2_STATE_MIN_LEN <= (int)sizeof(struct sl2_state_pkt), state_minlen);

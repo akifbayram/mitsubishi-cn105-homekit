@@ -29,6 +29,7 @@
 #include <sodium.h>
 
 #include "sl2_link.h"
+#include "sl2_info.h"
 #include "sl2_rxq.h"
 #include "esp_utils.h"
 #include "logging.h"
@@ -528,7 +529,7 @@ static void h_room_sensor(void *, const uint8_t src_mac[6],
         if (st.roomMode != 0 || st.roomSingle != single) {
             st.roomMode   = 0;
             st.roomSingle = single;
-            settings.save();
+            settings.save();   // re-derives roomSource and roomSourceId
             LOG_INFO("room source -> %u (set from dial)", (unsigned)p->want_src);
         }
     }
@@ -566,7 +567,8 @@ static bool h_get_caps(void *, struct sl2_caps_pkt *out) {
     uint16_t feat = SL2_FEAT_WIFI_INFO | SL2_FEAT_HOMEKIT | SL2_FEAT_OUTSIDE_T |
                     SL2_FEAT_COMPRESSOR | SL2_FEAT_FW_INFO | SL2_FEAT_RUNTIME |
                     SL2_FEAT_LINK_OTA_CREDS | SL2_FEAT_WIFI_SETUP |
-                    SL2_FEAT_LINK_SENSOR;   /* we always accept a dial-sourced
+                    SL2_FEAT_LINK_SENSOR | SL2_FEAT_ROOM_CATALOG;
+                                           /* we always accept a dial-sourced
                                               * reading, BLE_ENABLE or not */
 #ifdef BLE_ENABLE
     /* This bit means "a BLE sensor exists and can be chosen", NOT "is
@@ -612,6 +614,180 @@ static uint8_t room_src_status(void) {
     }
 }
 
+/* Averaging needs two members to average. Membership can lose one without any
+ * save of ours (a dial drops off, a BLE slot is cleared), so the invariant is
+ * repaired from the loop rather than at the edit sites. Once per second is far
+ * more often than a configuration can realistically change, and it keeps the
+ * member scan — which locks per Link/BLE probe — off a 10 ms path. */
+static void room_source_reconcile_catalog(uint32_t now) {
+    static uint32_t last_ms = 0;
+    if (last_ms && (uint32_t)(now - last_ms) < 1000) return;
+    last_ms = now ? now : 1;
+
+    auto &st = settings.get();
+    if (st.roomMode == 0 || RoomAvg::averageSelectable()) return;
+    LOG_WARN("Average no longer has two configured members — using Internal");
+    st.roomMode   = 0;
+    st.roomSingle = ROOM_MEMBER_INTERNAL;
+    settings.save();   // re-derives roomSourceId back to Internal
+}
+
+/* Every dial just went away, so any Link selection — automatic or a per-dial
+ * pin — now names a source that cannot report. Hand the room back to the
+ * internal thermistor; save() re-derives the id to match. */
+static void room_source_drop_link(void) {
+    auto &st = settings.get();
+    if (st.roomMode != 0 || st.roomSingle != ROOM_MEMBER_LINK) return;
+    st.roomSingle = ROOM_MEMBER_INTERNAL;
+    settings.save();
+}
+
+/* The catalog is small and fully described by settings + the bond table, so
+ * it is rebuilt on demand rather than cached. ROOM_CATALOG_MAX bounds it:
+ * Internal + Average + every BLE slot + Link-automatic + every bonded dial. */
+#define ROOM_CATALOG_MAX (2 + ROOM_MAX_BLE_SENSORS + 1 + SL2_MAX_DIALS)
+
+/* Bounded copy, not snprintf: every catalog name is a literal or a stored
+ * string, never a format. newlib's printf engine would put ~1.1 KB of frame on
+ * the main task's deepest chain for what is a strcpy. Leaves the caller's
+ * zero-init intact past the NUL, which the revision hash depends on. */
+static void copy_name(char *dst, size_t cap, const char *src) {
+    size_t n = 0;
+    while (n + 1 < cap && src[n]) { dst[n] = src[n]; n++; }
+    dst[n] = '\0';
+}
+
+static int room_catalog_build(struct sl2_room_source_entry *a, int cap) {
+    int n = 0;
+    auto add = [&](uint64_t id, uint8_t kind, const char *name) {
+        if (n >= cap) return;
+        a[n].id    = id;
+        a[n].kind  = kind;
+        a[n].flags = SL2_ROOM_SOURCE_F_SELECTABLE;
+        copy_name(a[n].name, sizeof a[n].name, name);
+        n++;
+    };
+
+    add(SL2_ROOM_SOURCE_INTERNAL_ID, SL2_ROOM_KIND_INTERNAL, "Internal");
+    if (RoomAvg::averageSelectable())
+        add(SL2_ROOM_SOURCE_AVERAGE_ID, SL2_ROOM_KIND_AGGREGATE, "Average");
+#ifdef BLE_ENABLE
+    for (int i = 0; i < ROOM_MAX_BLE_SENSORS; i++) {
+        /* isConfigured(), not addr[0]: a malformed address is not a sensor
+         * anywhere else in the firmware, so it must not be one here either. */
+        if (!BleSensor::isConfigured(i)) continue;
+        const auto &sensor = settings.get().bleSensors[i];
+        add(room_sensor_id_from_addr(sensor.addr), SL2_ROOM_KIND_SENSOR,
+            sensor.name[0] ? sensor.name : "Sensor");
+    }
+#endif
+    /* "Automatic" only means something when there is a choice to make. */
+    int links = sl2_link_dial_count(&s_link);
+    if (links > 1)
+        add(SL2_ROOM_SOURCE_LINK_AUTO_ID, SL2_ROOM_KIND_AUTO, "Serin Link (automatic)");
+    for (int i = 0; i < links; i++) {
+        uint8_t mac[6];
+        if (!sl2_link_dial_mac(&s_link, i, mac)) continue;
+        char name[SL2_ROOM_SOURCE_NAME_LEN];
+        copy_name(name, sizeof name, "Serin Link");
+        if (links > 1 && i < 9) {   /* SL2_MAX_DIALS is single-digit */
+            size_t l = strlen(name);
+            name[l] = ' ';
+            name[l + 1] = (char)('1' + i);
+            name[l + 2] = '\0';
+        }
+        add(sl2_room_source_mac_id(SL2_ROOM_SOURCE_NS_LINK, mac), SL2_ROOM_KIND_LINK, name);
+    }
+    return n;
+}
+
+/* Never returns 0 — the dial treats 0 as "no revision known yet", so a real
+ * catalog must never hash to it. */
+static uint32_t room_catalog_hash(const struct sl2_room_source_entry *a, int n) {
+    uint32_t h = fnv1a32(a, (size_t)n * sizeof a[0]);
+    return h ? h : 1;
+}
+
+static uint32_t room_catalog_revision(void) {
+    struct sl2_room_source_entry a[ROOM_CATALOG_MAX]{};
+    return room_catalog_hash(a, room_catalog_build(a, ROOM_CATALOG_MAX));
+}
+
+/* One build per request: the page and the revision the dial checks it against
+ * must describe the same catalog anyway. */
+static bool h_room_catalog(void *, uint16_t cursor, struct sl2_room_source_entry *out,
+                           uint8_t cap, uint8_t *count, uint16_t *next, uint32_t *rev) {
+    struct sl2_room_source_entry a[ROOM_CATALOG_MAX]{};
+    int n = room_catalog_build(a, ROOM_CATALOG_MAX);
+    *rev = room_catalog_hash(a, n);
+    if (cursor >= (uint16_t)n) {
+        *count = 0;
+        *next  = SL2_ROOM_CATALOG_DONE;
+        return true;
+    }
+    uint8_t take = std::min<uint8_t>(cap, (uint8_t)(n - cursor));
+    memcpy(out, a + cursor, take * sizeof *out);
+    *count = take;
+    *next  = cursor + take < n ? cursor + take : SL2_ROOM_CATALOG_DONE;
+    return true;
+}
+
+static bool h_room_source_get(void *, uint32_t *rev, uint64_t *id, uint8_t *status) {
+    *rev    = room_catalog_revision();
+    *id     = settings.get().roomSourceId;
+    *status = room_src_status();
+    return true;
+}
+
+/* Resolve an id back to a member. Only roomMode/roomSingle are written for the
+ * cases save() can re-derive; a per-dial Link pin also stores the id, because
+ * roomSingle alone cannot say which dial. */
+static uint8_t h_room_source_set(void *, uint32_t rev, uint64_t id) {
+    struct sl2_room_source_entry a[ROOM_CATALOG_MAX]{};
+    int n = room_catalog_build(a, ROOM_CATALOG_MAX);
+    if (rev != room_catalog_hash(a, n)) return SL2_ROOM_SET_STALE_CATALOG;
+
+    auto &st = settings.get();
+    if (id == SL2_ROOM_SOURCE_AVERAGE_ID) {
+        if (!RoomAvg::averageSelectable()) return SL2_ROOM_SET_BAD_SOURCE;
+        st.roomMode = 1;
+        settings.save();
+        return SL2_ROOM_SET_OK;
+    }
+
+    int single = -1;
+    if (id == SL2_ROOM_SOURCE_INTERNAL_ID)      single = ROOM_MEMBER_INTERNAL;
+    else if (id == SL2_ROOM_SOURCE_LINK_AUTO_ID) single = ROOM_MEMBER_LINK;
+#ifdef BLE_ENABLE
+    else for (int i = 0; i < ROOM_MAX_BLE_SENSORS; i++)
+        if (room_sensor_id_from_addr(st.bleSensors[i].addr) == id) {
+            single = ROOM_MEMBER_BLE0 + i;
+            break;
+        }
+#endif
+    uint8_t pin[6];
+    if (single < 0 && sl2_room_source_id_mac(id, SL2_ROOM_SOURCE_NS_LINK, pin)) {
+        int dials = sl2_link_dial_count(&s_link);
+        for (int i = 0; i < dials; i++) {
+            uint8_t mac[6];
+            if (sl2_link_dial_mac(&s_link, i, mac) && memcmp(mac, pin, 6) == 0) {
+                single = ROOM_MEMBER_LINK;
+                break;
+            }
+        }
+    }
+    if (single < 0) return SL2_ROOM_SET_BAD_SOURCE;
+    /* The same gate every other writer applies (room_avg.h): a source that
+     * went away between the catalog page and this SET is not selectable. */
+    if (!RoomAvg::memberAvailable(single)) return SL2_ROOM_SET_BAD_SOURCE;
+
+    st.roomMode     = 0;
+    st.roomSingle   = (uint8_t)single;
+    st.roomSourceId = id;   // only a per-dial pin survives the re-derive
+    settings.save();
+    return SL2_ROOM_SET_OK;
+}
+
 /* NUL-joined string pair for variable TLVs; returns bytes or 0 if too big. */
 static uint8_t tlv_strings(uint8_t *dst, size_t cap, const char *a, const char *b) {
     size_t la = strlen(a) + 1, lb = strlen(b) + 1;
@@ -655,8 +831,11 @@ static size_t h_fill_info(void *, uint8_t *buf, size_t cap) {
          * EVERY INFO — the dial re-derives it from presence, so silence means
          * "internal", not packet thrift (spec §9 freshness rule). Unconditional
          * on BLE_ENABLE: Link is a source in every build. */
-        const uint8_t v[2] = { settings.get().roomSource, room_src_status() };
+        const uint8_t status = room_src_status();
+        const uint8_t v[2] = { settings.get().roomSource, status };
         sl2_tlv_put(buf, cap, &off, SL2_TLV_ROOM_SRC, v, 2);
+        sl2_info_put_room_source_v2(buf, cap, &off, room_catalog_revision(),
+                                    settings.get().roomSourceId, status);
     }
 #ifdef BLE_ENABLE
     /* Configured, not selected — same reasoning as the CAPS bit above. A
@@ -814,6 +993,9 @@ void EspnowLink::begin(CN105Controller *ctrl) {
     s_hvac.room_sensor = h_room_sensor;
     s_hvac.wifi_creds = h_wifi_creds;
     s_hvac.wifi_setup = h_wifi_setup;
+    s_hvac.room_catalog_page = h_room_catalog;
+    s_hvac.room_source_get = h_room_source_get;
+    s_hvac.room_source_set = h_room_source_set;
 
     sl2_link_init(&s_link, &s_port, &s_crypto, &s_hvac);
 
@@ -849,17 +1031,21 @@ void EspnowLink::begin(CN105Controller *ctrl) {
 void EspnowLink::loop() {
     if (!s_started) return;
 
+    const uint32_t nowMs = uptime_ms();   /* one systimer read + divide per pass */
+    room_source_reconcile_catalog(nowMs);
+
     /* Drain the cross-task mailbox first: the sl2 core is single-context by
      * contract (sl2_link.h), so mutations requested by the web (httpd) and
      * console (REPL) tasks execute here, in the link's owning task. If both
      * a start and a cancel land within one tick, start runs first and the
      * cancel wins — the same net result as the user's last click. */
-    if (s_reqForgetAll)  { s_reqForgetAll = false;  sl2_link_forget_all(&s_link); }
+    if (s_reqForgetAll)  { s_reqForgetAll = false;  sl2_link_forget_all(&s_link); room_source_drop_link(); }
     if (s_reqPairStart)  { s_reqPairStart = false;  sl2_link_pair_start(&s_link, PAIR_WINDOW_S * 1000); }
     if (s_reqPairCancel) { s_reqPairCancel = false; sl2_link_pair_cancel(&s_link); }
     if (s_reqForgetRestart) {
         s_reqForgetRestart = false;
         sl2_link_forget_all(&s_link);
+        room_source_drop_link();
 #if PIN_LED_DATA >= 0
         /* Main task owns the strip: animate the blink inline. The blocking
          * hold also gives an httpd requester's reply time to flush. */
@@ -882,9 +1068,8 @@ void EspnowLink::loop() {
      * running it at the tick rate is ~10x wasted builds. Pair timeouts and
      * the status snapshot tolerate 50 ms granularity. */
     static uint32_t s_lastCore = 0;
-    uint32_t now = uptime_ms();
-    if (now - s_lastCore < 50) return;
-    s_lastCore = now;
+    if (nowMs - s_lastCore < 50) return;
+    s_lastCore = nowMs;
 
     sl2_link_loop(&s_link);
 

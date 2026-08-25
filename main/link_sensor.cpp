@@ -63,6 +63,16 @@ static T readLocked(const T& var) {
 
 void LinkSensor::feed(const uint8_t mac[6], const struct sl2_dial_sensor_pkt *p) {
     if (!p) return;
+    // A per-dial pin is the one selection that makes the OTHER dials' readings
+    // wrong rather than merely unselected, so it is filtered here at ingest —
+    // everything downstream (freshness, status, the average) reads one set of
+    // Link state. Every other selection still feeds, so switching to Link
+    // later finds live state rather than a cold start.
+    uint8_t pin[6];
+    if (mac && sl2_room_source_id_mac(settings.get().roomSourceId,
+                                      SL2_ROOM_SOURCE_NS_LINK, pin) &&
+        memcmp(pin, mac, 6) != 0)
+        return;
 
     // Freshness follows the temperature, not the flags — a dial that has
     // sensing hardware but no reading yet (or a battery/hum-only frame, if

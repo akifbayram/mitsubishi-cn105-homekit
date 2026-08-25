@@ -153,6 +153,17 @@ bool RoomAvg::memberAvailable(int bit) {
     return bit == ROOM_MEMBER_INTERNAL;
 }
 
+bool RoomAvg::averageSelectable() {
+    // Internal is excluded for the same reason the blend ignores it (see
+    // loop()): it never counts as one of the averaged remotes.
+    const uint8_t members = settings.get().roomMembers &
+                            (uint8_t)~(1u << ROOM_MEMBER_INTERNAL);
+    int n = 0;
+    for (int bit = ROOM_MEMBER_LINK; bit < ROOM_MEMBER_COUNT; bit++)
+        if ((members & (1u << bit)) && memberAvailable(bit) && ++n >= 2) return true;
+    return false;
+}
+
 bool RoomAvg::legacySrcSelectable(uint8_t src) {
     if (src == SL2_ROOMSRC_INTERNAL) return true;
     if (src == SL2_ROOMSRC_LINK) return memberAvailable(ROOM_MEMBER_LINK);

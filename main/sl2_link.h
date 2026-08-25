@@ -92,6 +92,16 @@ typedef struct sl2_hvac_iface {
      * then omit SL2_FEAT_WIFI_SETUP. Must be idempotent: dials re-send ~1 Hz
      * until STATE shows SL2_SF_SETUP_AP. */
     bool (*wifi_setup)(void *ctx);
+    /* Protocol-v4 named room sources. catalog_page writes at most `cap`
+     * entries beginning at cursor and returns the next cursor (DONE at end).
+     * revision must describe the entire ordered catalog. */
+    bool (*room_catalog_page)(void *ctx, uint16_t cursor,
+                              struct sl2_room_source_entry *entries, uint8_t cap,
+                              uint8_t *count, uint16_t *next_cursor,
+                              uint32_t *revision);
+    bool (*room_source_get)(void *ctx, uint32_t *revision,
+                            uint64_t *source_id, uint8_t *status);
+    uint8_t (*room_source_set)(void *ctx, uint32_t revision, uint64_t source_id);
 } sl2_hvac_iface_t;
 
 /* Assessment of the device cert a dial pushes in DIAL_INFO's TLV tail.
@@ -119,6 +129,15 @@ typedef struct {
     bool     pend_state;      /* STATE changed since this dial last got one */
     bool     wifi_req;        /* Link OTA creds request pending */
     bool     wifi_setup_req;  /* setup-AP request pending */
+    /* Pending v4 room-source requests. Only the fields the reply needs are
+     * kept, not the whole packets — 15 bytes per dial instead of 24, and
+     * known_revision (which nothing acts on) is not stored at all. */
+    bool     room_catalog_req;
+    uint16_t room_catalog_cursor;
+    bool     room_source_req;
+    uint8_t  room_source_request_id;
+    uint32_t room_source_revision;
+    uint64_t room_source_id;
     char     model[24];       /* dial identity (DIAL_INFO); "" until received */
     char     fw[16];
     uint8_t  peer_caps_seq;   /* caps_seq the dial reports applied */

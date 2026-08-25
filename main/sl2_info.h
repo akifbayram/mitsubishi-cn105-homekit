@@ -129,6 +129,22 @@ static inline bool sl2_info_put_room_src(uint8_t *buf, size_t cap, size_t *off,
     return sl2_tlv_put(buf, cap, off, SL2_TLV_ROOM_SRC, v, 2);
 }
 
+/* ROOM_SOURCE_V2 (0x0C): the v4 view of the same selection — stable source id
+ * plus the catalog revision it was chosen from. Emitted ALONGSIDE ROOM_SRC
+ * above, not instead of it, so v3 peers keep the coarse value. Layout matches
+ * struct sl2_room_source_v2 in sl2_proto.h; written byte-wise here so the
+ * encoding does not depend on host order. */
+static inline bool sl2_info_put_room_source_v2(uint8_t *buf, size_t cap,
+                                               size_t *off, uint32_t revision,
+                                               uint64_t source_id,
+                                               uint8_t status) {
+    uint8_t v[13];
+    sl2_info__u32le(v, revision);
+    for (int i = 0; i < 8; i++) v[4 + i] = (uint8_t)(source_id >> (i * 8));
+    v[12] = status;
+    return sl2_tlv_put(buf, cap, off, SL2_TLV_ROOM_SOURCE_V2, v, sizeof v);
+}
+
 /* ── COMPRESSOR value tables (Mitsubishi; wire spec §9) ──────────────────
  * Adapters whose HVAC layer reports these states as strings (e.g. ESPHome
  * cn105 text sensors) map them back to the wire codes here. ASCII

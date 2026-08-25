@@ -163,11 +163,11 @@ static bool wantScan() {
 }
 
 // ── MAC format validator: "AA:BB:CC:DD:EE:FF" (any case) ───────────────────
+// One acceptance rule, shared with the room-source id derivation, so a slot
+// cannot be rejected here yet still produce a selectable catalog entry.
 static bool validMac(const char* str) {
-    if (!str || strlen(str) != 17) return false;
-    unsigned int b[6];
-    return sscanf(str, "%02x:%02x:%02x:%02x:%02x:%02x",
-                  &b[0], &b[1], &b[2], &b[3], &b[4], &b[5]) == 6;
+    uint8_t mac[6];
+    return mac_from_str(str, mac);
 }
 
 // Record a discovered device (deduplicated by MAC). Runs in the NimBLE scan
