@@ -1,14 +1,14 @@
 ## Managed-component bounds.
 ##
-## Only led_strip is a direct dependency of this component; json_parser,
-## json_generator, libsodium and mdns arrive transitively through
-## esp-homekit-sdk's manifest. That manifest bounds all of them EXCEPT mdns,
-## which it declares with no version at all — so a release build would resolve
-## whatever the registry served that day. Bound it here (the project manifest
-## constrains transitive resolution) and keep dependencies.lock committed, so
-## the tagged binary is built from the component set that was tested.
+## Pins direct and transitive dependencies so that all multi-target release
+## builds resolve the exact tested versions without needing a committed
+## target-specific lockfile (which would make multi-target builds dirty).
 ##
 ## Versions below are the ones this release was built and bench-tested against.
 dependencies:
   espressif/led_strip: "~3.0.3"
   espressif/mdns: "~1.11.3"
+  espressif/libsodium: "~1.0.22"
+  espressif/json_parser: "~1.0.3"
+  espressif/json_generator: "~1.1.2"
+  espressif/jsmn: "~1.1.0"
