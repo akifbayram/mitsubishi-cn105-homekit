@@ -49,7 +49,7 @@ assert.deepStrictEqual(parseVer('0.2.6-beta.1').pre, ['beta', 1]);
 assert.strictEqual(parseVer('0.2.6').pre, null);
 assert.deepStrictEqual(parseVer('0.2.6-beta.1-3-gabc1234').pre, ['beta', 1]);
 
-// The fallback PROJECT_VER when git describe cannot run (CMakeLists.txt:13).
+// The fallback PROJECT_VER when git describe cannot run (scripts/project_ver.py).
 // It must sort below every real release so any found build stays installable.
 assert.strictEqual(cmpVer('0.0.0-dev', '0.2.5'), -1);
 

@@ -40,6 +40,22 @@ jobs:
           submodules: recursive
           fetch-depth: 0
 
+      # Hand the pushed tag to the build so the baked version and the manifest the
+      # deploy job publishes below both come from github.ref_name. Why that matters
+      # rather than letting the build re-derive its own: project_ver.py's main().
+      #
+      # It is handed over as a file because the build runs inside
+      # espressif/esp-idf-ci-action's container, and that action's docker run
+      # forwards exactly one variable, -e IDF_TARGET — so no step-level env: can
+      # reach the build command. GITHUB_WORKSPACE is bind-mounted, so a file can.
+      # Written from env: and read back with $(cat) inside the container, the tag
+      # is never interpolated into a shell command by Actions.
+      - name: Record the pushed tag for the build
+        if: github.ref_type == 'tag'
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: printf '%s' "${REF_NAME}" > .release-tag
+
       - name: Set up ESP-IDF
         uses: espressif/esp-idf-ci-action@v1
         with:
@@ -50,10 +66,14 @@ jobs:
           command: |
             # Derive profile macro from name (e.g. nanoc6 -> NANOC6, m5atoms3-lite -> M5ATOMS3_LITE)
             PROFILE=$(echo "${{ matrix.name }}" | tr '[:lower:]' '[:upper:]' | tr '-' '_')
+            # No file on workflow_dispatch, so RELEASE_TAG comes through empty and
+            # project_ver.py falls back to git describe — fetch-depth: 0 above
+            # keeps that working.
             # The ESP-NOW PMK is a public constant since Serin Link v2
             # (SL2_ESPNOW_PMK); trust comes from Ed25519-signed pairing.
+            TAG=$(cat .release-tag 2>/dev/null || true)
             idf.py set-target ${{ matrix.target }}
-            idf.py -DBOARD_PROFILE_${PROFILE}=1 build
+            idf.py "-DRELEASE_TAG=${TAG}" -DBOARD_PROFILE_${PROFILE}=1 build
 
       - name: Collect artifacts
         env:

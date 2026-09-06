@@ -10,6 +10,10 @@ managed_components/
 # the tagged binary would not be built from the component set that was tested.
 # Regenerate deliberately (delete it, build, review the diff, commit).
 
+# Handed to the build by firmware-release.yml so the pushed tag can cross into
+# the esp-idf-ci-action container, which forwards only IDF_TARGET via env.
+.release-tag
+
 # Auto-generated HTML headers (built from web/*.html by scripts/embed_html_idf.py)
 include/
 
@@ -43,3 +47,6 @@ scripts/generate_wifi_qr.py
 
 # Branded build auto-generated markers
 *.brand
+
+# Python bytecode (scripts/ is run by the build and by test/project_ver/)
+__pycache__/
