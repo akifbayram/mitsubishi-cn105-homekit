@@ -151,6 +151,118 @@ same(DEFAULTS.target.min, '16', 'tempSlider ships in Celsius');
   checks++;
 }
 
+// ── Serin Link selected but silent ─────────────────────────────────────────
+// A dial that stops sending sensor frames drops hasLinkSensor, so the selected
+// source used to vanish from the list, the hero fell back to the internal
+// row's NAME ("Heat Pump Sensor · no reading"), no banner fired (the single-
+// mode branch was BLE-only and stale-only), and the header pill sat in neutral
+// gray. The card must keep the row visible with the cause, mark the built-in
+// row as the sensor actually in use, and raise the state to caution tier.
+{
+  // The screenshot scenario: Link selected, dial offline 12 min, two healthy
+  // BLE sensors (one with a low battery, which must NOT win the banner slot).
+  const IDLE_LINK = {
+    roomMode: 0, roomSingle: 1, roomStatus: 2, room: 20,
+    hasLinkSensor: false, linkTemp: null, linkHumidity: null,
+    linkActive: false, linkStale: false, linkStaleMs: 0,
+    remoteBonded: true, remoteLive: false, remoteLastSeen: 720,
+    bleEnabled: true,
+    bleSensors: [
+      { i: 0, name: 'Nightstand', type: 'Govee', temp: 24.3, age: 240000, active: true, stale: false, batt: 17, rssi: -80 },
+      { i: 1, name: 'Wall', type: 'Govee', temp: 23.8, age: 180000, active: true, stale: false, batt: 100, rssi: -75 }
+    ]
+  };
+  const { newRoomRender } = require('./extract.js');
+  const ui = newRoomRender();
+
+  // The selected source stays in the list, with the cause on the sub-line.
+  const model = ui.roomSensors(IDLE_LINK);
+  const link = model.find(m => m.bit === 1);
+  assert.ok(link, 'Serin Link row renders while selected, even with no sensor frame yet');
+  assert.strictEqual(link.sub, 'Dial offline · last seen 12m ago',
+    'silent-dial row says why: offline, with last-seen age');
+  assert.ok(!link.active && !link.stale, 'a never-reported link is neither active nor stale');
+  checks += 3;
+
+  const liveLink = ui.roomSensors(Object.assign({}, IDLE_LINK, { remoteLive: true }))
+    .find(m => m.bit === 1);
+  assert.strictEqual(liveLink.sub, 'Connected · no reading yet',
+    'a live dial with no reading says so instead of claiming offline');
+  const noDial = ui.roomSensors(Object.assign({}, IDLE_LINK, { remoteBonded: false, remoteLive: false }))
+    .find(m => m.bit === 1);
+  assert.strictEqual(noDial.sub, 'No dial paired', 'selected with no bonded dial names the real gap');
+  checks += 2;
+
+  // Unselected and never reported stays hidden (a sensor-less dial is not a row).
+  assert.ok(!ui.roomSensors(Object.assign({}, IDLE_LINK, { roomSingle: 2 })).find(m => m.bit === 1),
+    'an unselected, never-reported link stays out of the list');
+  // …but an Average-mode membership keeps it visible the same way.
+  assert.ok(ui.roomSensors(Object.assign({}, IDLE_LINK, { roomMode: 1, roomMembers: 0b0010 })).find(m => m.bit === 1),
+    'an average-mode member renders even before its first frame');
+  checks += 2;
+
+  // Hero foot names the silent source, not the fallback sensor.
+  ui.renderRoomHero(IDLE_LINK, model);
+  assert.strictEqual(ui.els.heroFoot.textContent,
+    'Serin Link · no reading · using the built-in sensor',
+    'hero foot names the source that is silent');
+  checks++;
+
+  // The banner slot goes to the source failure, not the battery warning.
+  ui.renderRoomBanner(IDLE_LINK, model);
+  assert.strictEqual(ui.els.bleBanner.className, 'ble-banner caution',
+    'selected-but-silent raises a caution banner');
+  assert.ok(/Serin Link/.test(ui.els.bleBanner.textContent) &&
+            /dial is offline/i.test(ui.els.bleBanner.textContent) &&
+            /last seen 12m ago/.test(ui.els.bleBanner.textContent) &&
+            /built-in/.test(ui.els.bleBanner.textContent),
+    'banner states the source, the cause, and the fallback: ' + ui.els.bleBanner.textContent);
+  checks += 2;
+
+  // Header pill leaves neutral gray for caution orange.
+  ui.renderRoomSummary(IDLE_LINK, model);
+  assert.strictEqual(ui.els.roomDot.className, 'status-dot warning', 'summary dot is warning-tier');
+  assert.strictEqual(ui.els.roomStatusLabel.textContent, 'Serin Link · Not reporting',
+    'summary pill says the source is not reporting');
+  checks += 2;
+
+  // The list shows reality: built-in row carries the highlight and "In use",
+  // the configured-but-silent row sits idle with a muted "Selected" badge.
+  const ih = ui.roomRowHtml(IDLE_LINK, model.find(m => m.bit === 0));
+  assert.ok(/class="src-row sel"/.test(ih), 'built-in row takes the selection highlight during fallback');
+  assert.ok(ih.indexOf('status-dot active') >= 0, 'built-in row dot goes green during fallback');
+  assert.ok(ih.indexOf('In use') >= 0, 'built-in row is labeled In use during fallback');
+  const lh = ui.roomRowHtml(IDLE_LINK, link);
+  assert.ok(lh.indexOf('status-dot idle') >= 0, 'silent link row keeps an idle dot');
+  assert.ok(lh.indexOf('Selected · no reading') >= 0, 'silent link row keeps a muted Selected badge');
+  assert.ok(!/class="src-row sel"/.test(lh), 'silent link row gives up the selection highlight');
+  assert.ok(lh.indexOf('aria-checked="true"') >= 0, 'tap semantics still follow the configured selection');
+  checks += 7;
+
+  // Stale Link now gets the single-mode warn banner (it was BLE-only).
+  const staleSt = Object.assign({}, IDLE_LINK, {
+    roomStatus: 1, hasLinkSensor: true, linkTemp: 24.2,
+    linkActive: false, linkStale: true, linkStaleMs: 900000
+  });
+  const staleModel = ui.roomSensors(staleSt);
+  ui.renderRoomBanner(staleSt, staleModel);
+  assert.strictEqual(ui.els.bleBanner.className, 'ble-banner warn', 'stale link raises the warn banner');
+  assert.ok(/Serin Link/.test(ui.els.bleBanner.textContent), 'stale banner names the link source');
+  checks += 2;
+
+  // Healthy selection regression: a live selected BLE row keeps Active + sel,
+  // and the built-in row carries no fallback markers.
+  const okSt = Object.assign({}, IDLE_LINK, { roomSingle: 2, roomStatus: 0 });
+  const okModel = ui.roomSensors(okSt);
+  const okRow = ui.roomRowHtml(okSt, okModel.find(m => m.bit === 2));
+  assert.ok(/class="src-row sel"/.test(okRow) && okRow.indexOf('>Active<') >= 0,
+    'a healthy selected row keeps the highlight and Active badge');
+  const okInternal = ui.roomRowHtml(okSt, okModel.find(m => m.bit === 0));
+  assert.ok(okInternal.indexOf('In use') < 0 && !/class="src-row sel"/.test(okInternal),
+    'the built-in row carries no fallback markers while a remote is live');
+  checks += 2;
+}
+
 // The merge above is only reachable because onState() actually calls it, and
 // that line lives outside the extracted block — deleting it would leave every
 // test here green while restoring the bug. Pin it on the source text, the same

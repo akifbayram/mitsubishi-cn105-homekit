@@ -478,12 +478,14 @@ uint64_t room_source_id_derived(const DeviceSettings &s) {
         // A per-dial pin (NS_LINK) is the only selection roomSingle cannot
         // encode, so it is the only stored id worth preserving — and only for
         // as long as the selection stays on Link. Anything else means the pin
-        // is gone (forgotten dial, source changed elsewhere): fall back to the
-        // automatic Link source rather than keeping a dead MAC.
+        // is gone (forgotten dial, source changed elsewhere).
         uint8_t pin[6];
         if (sl2_room_source_id_mac(s.roomSourceId, SL2_ROOM_SOURCE_NS_LINK, pin))
             return s.roomSourceId;
-        return SL2_ROOM_SOURCE_LINK_AUTO_ID;
+        // Unpinned Link (pre-2026-09 store, or the pinned dial was forgotten):
+        // there is no automatic mode any more, so this resolves to the heat
+        // pump's own sensor until a Link is chosen again.
+        return SL2_ROOM_SOURCE_INTERNAL_ID;
     }
 #ifdef BLE_ENABLE
     int i = s.roomSingle - ROOM_MEMBER_BLE0;

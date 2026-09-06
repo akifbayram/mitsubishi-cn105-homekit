@@ -419,18 +419,27 @@ static inline bool sl2_tlv_next(const uint8_t *buf, size_t len, size_t *off,
 }
 
 /* ── controller-defined room-temperature source catalog (v4) ───────── */
-/* Well-known ids occupy namespace 0; every other namespace is a u8 tag in the
- * high byte with a 6-byte MAC below it. Ids 2..0xFF in namespace 0 and
- * namespaces 4..255 are reserved for core growth. Not every controller
- * produces every id — the ESPHome adapter emits Internal/Link-auto/Link, the
- * HomeKit adopter also emits Average and NS_SENSOR entries. */
+/* Well-known ids occupy namespace 0. Namespaces 1 and 2 are a u8 tag in the
+ * high byte with a 6-byte MAC below it. Namespace 4 is a u8 tag with a 56-bit
+ * FNV-1a of a display name below it (YAML-declared external sources — no
+ * MAC to derive from). Ids 2..0xFF in namespace 0 and namespaces 5..255 are
+ * reserved for core growth. Not every controller produces every id — the
+ * ESPHome adapter emits Internal/External/Link, the HomeKit adopter also
+ * emits Average and NS_SENSOR entries.
+ *
+ * Namespace 3 (automatic "last reporting Link wins") is RETIRED as of
+ * 2026-09-05: no controller lists it and a ROOM_SOURCE_SET naming it is
+ * answered SL2_ROOM_SET_BAD_SOURCE. The constants stay so every vendored copy
+ * of this header remains identical and old stores can be recognised and
+ * migrated. */
 #define SL2_ROOM_SOURCE_INTERNAL_ID UINT64_C(0)
 #define SL2_ROOM_SOURCE_AVERAGE_ID UINT64_C(1)
 #define SL2_ROOM_SOURCE_NS_LINK 1u
 #define SL2_ROOM_SOURCE_NS_SENSOR 2u
-#define SL2_ROOM_SOURCE_NS_LINK_AUTO 3u
+#define SL2_ROOM_SOURCE_NS_LINK_AUTO 3u   /* retired, see above */
+#define SL2_ROOM_SOURCE_NS_EXTERNAL 4u
 #define SL2_ROOM_SOURCE_LINK_AUTO_ID \
-    ((uint64_t) SL2_ROOM_SOURCE_NS_LINK_AUTO << 56)
+    ((uint64_t) SL2_ROOM_SOURCE_NS_LINK_AUTO << 56)   /* retired, see above */
 #define SL2_ROOM_SOURCE_NAME_LEN 24
 #define SL2_ROOM_CATALOG_DONE UINT16_C(0xFFFF)
 #define SL2_ROOM_CATALOG_PAGE_MAX 7
@@ -453,9 +462,23 @@ static inline bool sl2_room_source_id_mac(uint64_t id, uint8_t ns,
     return true;
 }
 
+/* Id for a source that has a NAME but no MAC (YAML-declared external
+ * sources). FNV-1a 64 over the UTF-8 bytes, low 56 bits kept, namespace in
+ * the top byte. Codegen computes the same function to reject colliding
+ * names before they reach the wire; renaming a source therefore changes its
+ * id, which the controller treats exactly like removing it. */
+static inline uint64_t sl2_room_source_name_id(uint8_t ns, const char *name) {
+    uint64_t h = UINT64_C(0xcbf29ce484222325);
+    for (const unsigned char *p = (const unsigned char *) name; *p; p++) {
+        h ^= *p;
+        h *= UINT64_C(0x100000001b3);
+    }
+    return ((uint64_t) ns << 56) | (h & ((UINT64_C(1) << 56) - 1));
+}
+
 enum sl2_room_source_kind {
     SL2_ROOM_KIND_INTERNAL = 0, SL2_ROOM_KIND_SENSOR = 1,
-    SL2_ROOM_KIND_LINK = 2, SL2_ROOM_KIND_AUTO = 3,
+    SL2_ROOM_KIND_LINK = 2, SL2_ROOM_KIND_AUTO = 3, /* AUTO retired 2026-09-05; value kept */
     SL2_ROOM_KIND_AGGREGATE = 4,
 };
 enum { SL2_ROOM_SOURCE_F_SELECTABLE = 1u << 0 };

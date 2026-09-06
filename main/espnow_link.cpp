@@ -121,6 +121,8 @@ struct LinkStatus {
     bool    pairing = false;
     int     secsLeft = 0;
     uint8_t mac0[6] = {};
+    int     dialCount = 0;
+    uint8_t dialMac[SL2_MAX_DIALS][6] = {};
     /* Interned literal from the core (sl2_link.c only ever assigns string
      * constants) — a single aligned pointer store is tear-free for the
      * httpd/console reader tasks, unlike a byte-wise buffer copy. */
@@ -514,24 +516,38 @@ static bool h_apply(void *, uint16_t mask, const struct sl2_cmd_pkt *cmd) {
  * carrying something other than the NOEDIT sentinel (core-verified, see
  * sl2_link.h), but the VALUE still needs validating here — it crossed the
  * air. RoomAvg::legacySrcSelectable() is the same test the web UI applies:
- * it rejects anything past the three known sources, LINK when this same
- * packet's flags say the dial has no sensing hardware to offer (feed() above
- * already applied those flags, so the check reflects this packet, not a stale
- * one), and BLE when no slot is configured. */
+ * it rejects anything past the three known sources, and BLE when no slot is
+ * configured. LINK is deliberately NOT judged through legacySrcSelectable(),
+ * whose LINK case reads the global LinkSensor::hasSensor() flag — once a pin
+ * is in place, feed() above only updates that flag from frames matching the
+ * CURRENT pin (see feed()'s per-dial filter), so it can be stale for any
+ * other dial. A second, sensorless dial asking to pin itself would then be
+ * judged against the pinned dial's flag, not its own. So for LINK this
+ * checks THIS packet's own SL2_DSF_HAS_SENSOR bit instead. */
 static void h_room_sensor(void *, const uint8_t src_mac[6],
                           const struct sl2_dial_sensor_pkt *p, bool is_edit) {
     LinkSensor::feed(src_mac, p);
-    if (is_edit && RoomAvg::legacySrcSelectable(p->want_src)) {
-        auto &st = settings.get();
-        // The dial speaks the legacy enum: an explicit pick is a single-mode
-        // selection, so an edit also drops out of averaging.
-        uint8_t single = room_single_from_legacy(p->want_src);
-        if (st.roomMode != 0 || st.roomSingle != single) {
-            st.roomMode   = 0;
-            st.roomSingle = single;
-            settings.save();   // re-derives roomSource and roomSourceId
-            LOG_INFO("room source -> %u (set from dial)", (unsigned)p->want_src);
-        }
+    if (!is_edit) return;
+    bool selectable = (p->want_src == SL2_ROOMSRC_LINK)
+                           ? (p->flags & SL2_DSF_HAS_SENSOR) != 0
+                           : RoomAvg::legacySrcSelectable(p->want_src);
+    if (!selectable) return;
+    auto &st = settings.get();
+    uint8_t single = room_single_from_legacy(p->want_src);
+    uint64_t pin = single == ROOM_MEMBER_LINK && src_mac
+                       ? sl2_room_source_mac_id(SL2_ROOM_SOURCE_NS_LINK, src_mac)
+                       : st.roomSourceId;
+    if (st.roomMode != 0 || st.roomSingle != single || st.roomSourceId != pin) {
+        st.roomMode     = 0;
+        st.roomSingle   = single;
+        st.roomSourceId = pin;   // a pre-catalog "Link" edit means "use me"
+        settings.save();         // re-derives roomSource; keeps a NS_LINK pin
+        // The feed above ran before the pin moved, so if a DIFFERENT dial
+        // held the old pin, feed()'s per-dial filter discarded this frame's
+        // reading. Re-feed now that this dial's pin is in effect, so the
+        // edit doesn't read UNAVAILABLE until its next ~3 Hz retry.
+        LinkSensor::feed(src_mac, p);
+        LOG_INFO("room source -> %u (set from dial)", (unsigned)p->want_src);
     }
 }
 
@@ -625,16 +641,53 @@ static void room_source_reconcile_catalog(uint32_t now) {
     last_ms = now ? now : 1;
 
     auto &st = settings.get();
-    if (st.roomMode == 0 || RoomAvg::averageSelectable()) return;
-    LOG_WARN("Average no longer has two configured members — using Internal");
-    st.roomMode   = 0;
-    st.roomSingle = ROOM_MEMBER_INTERNAL;
-    settings.save();   // re-derives roomSourceId back to Internal
+    if (st.roomMode == 1 && !RoomAvg::averageSelectable()) {
+        LOG_WARN("Average no longer has two configured members — using Internal");
+        st.roomMode   = 0;
+        st.roomSingle = ROOM_MEMBER_INTERNAL;
+        settings.save();   // re-derives roomSourceId back to Internal
+        return;
+    }
+
+    // Retired automatic mode: a Link selection with no pin (a pre-2026-09
+    // store, or the pinned dial was forgotten while others stayed bonded)
+    // would otherwise accept every dial's reading. Pin the only bonded dial
+    // when there is exactly one; otherwise hand the room back to Internal.
+    // Runs at 1 Hz, so there is a sub-second window right after an unpinned
+    // write (e.g. the web edge racing a bond-table change between its own
+    // bonded-count check and this reconcile) where a dial can observe
+    // roomSingle == LINK together with the internal id, before this repairs
+    // it one way or the other.
+    if (st.roomMode == 0 && st.roomSingle == ROOM_MEMBER_LINK) {
+        uint8_t pin[6];
+        bool pinned = sl2_room_source_id_mac(st.roomSourceId, SL2_ROOM_SOURCE_NS_LINK, pin);
+        bool bonded = false;
+        int dials = sl2_link_dial_count(&s_link);
+        if (pinned) {
+            for (int i = 0; i < dials && !bonded; i++) {
+                uint8_t mac[6];
+                bonded = sl2_link_dial_mac(&s_link, i, mac) && memcmp(mac, pin, 6) == 0;
+            }
+        }
+        if (!bonded) {
+            uint8_t mac[6];
+            if (dials == 1 && sl2_link_dial_mac(&s_link, 0, mac)) {
+                st.roomSourceId = sl2_room_source_mac_id(SL2_ROOM_SOURCE_NS_LINK, mac);
+                LOG_INFO("room source: no valid Link pin — pinned to the only bonded dial");
+            } else {
+                st.roomSingle   = ROOM_MEMBER_INTERNAL;
+                st.roomSourceId = SL2_ROOM_SOURCE_INTERNAL_ID;
+                LOG_INFO("room source: no valid Link pin — reverting to Internal");
+            }
+            settings.save();
+        }
+    }
 }
 
-/* Every dial just went away, so any Link selection — automatic or a per-dial
- * pin — now names a source that cannot report. Hand the room back to the
- * internal thermistor; save() re-derives the id to match. */
+/* Every dial just went away, so a Link selection — only a per-dial pin
+ * exists now, automatic mode is retired — now names a source that cannot
+ * report. Hand the room back to the internal thermistor; save() re-derives
+ * the id to match. */
 static void room_source_drop_link(void) {
     auto &st = settings.get();
     if (st.roomMode != 0 || st.roomSingle != ROOM_MEMBER_LINK) return;
@@ -644,7 +697,8 @@ static void room_source_drop_link(void) {
 
 /* The catalog is small and fully described by settings + the bond table, so
  * it is rebuilt on demand rather than cached. ROOM_CATALOG_MAX bounds it:
- * Internal + Average + every BLE slot + Link-automatic + every bonded dial. */
+ * Internal + Average + every BLE slot + every bonded dial (no automatic-mode
+ * slot any more — that mode is retired). */
 #define ROOM_CATALOG_MAX (2 + ROOM_MAX_BLE_SENSORS + 1 + SL2_MAX_DIALS)
 
 /* Bounded copy, not snprintf: every catalog name is a literal or a stored
@@ -668,7 +722,7 @@ static int room_catalog_build(struct sl2_room_source_entry *a, int cap) {
         n++;
     };
 
-    add(SL2_ROOM_SOURCE_INTERNAL_ID, SL2_ROOM_KIND_INTERNAL, "Internal");
+    add(SL2_ROOM_SOURCE_INTERNAL_ID, SL2_ROOM_KIND_INTERNAL, "Heat pump");
     if (RoomAvg::averageSelectable())
         add(SL2_ROOM_SOURCE_AVERAGE_ID, SL2_ROOM_KIND_AGGREGATE, "Average");
 #ifdef BLE_ENABLE
@@ -681,10 +735,7 @@ static int room_catalog_build(struct sl2_room_source_entry *a, int cap) {
             sensor.name[0] ? sensor.name : "Sensor");
     }
 #endif
-    /* "Automatic" only means something when there is a choice to make. */
     int links = sl2_link_dial_count(&s_link);
-    if (links > 1)
-        add(SL2_ROOM_SOURCE_LINK_AUTO_ID, SL2_ROOM_KIND_AUTO, "Serin Link (automatic)");
     for (int i = 0; i < links; i++) {
         uint8_t mac[6];
         if (!sl2_link_dial_mac(&s_link, i, mac)) continue;
@@ -757,7 +808,6 @@ static uint8_t h_room_source_set(void *, uint32_t rev, uint64_t id) {
 
     int single = -1;
     if (id == SL2_ROOM_SOURCE_INTERNAL_ID)      single = ROOM_MEMBER_INTERNAL;
-    else if (id == SL2_ROOM_SOURCE_LINK_AUTO_ID) single = ROOM_MEMBER_LINK;
 #ifdef BLE_ENABLE
     else for (int i = 0; i < ROOM_MAX_BLE_SENSORS; i++)
         if (room_sensor_id_from_addr(st.bleSensors[i].addr) == id) {
@@ -934,6 +984,11 @@ static void snapshot_status(void) {
     s_stat.pairing  = sl2_link_pairing(&s_link);
     s_stat.secsLeft = sl2_link_pair_seconds_left(&s_link);
     if (!sl2_link_dial_mac(&s_link, 0, s_stat.mac0)) memset(s_stat.mac0, 0, 6);
+    s_stat.dialCount = sl2_link_dial_count(&s_link);
+    for (int i = 0; i < SL2_MAX_DIALS; i++) {
+        if (!sl2_link_dial_mac(&s_link, i, s_stat.dialMac[i]))
+            memset(s_stat.dialMac[i], 0, 6);
+    }
     sl2_dial_view_t dv;
     if (sl2_link_dial_view(&s_link, 0, &dv)) {
         s_stat.lastSeenSec = dv.last_seen_ms < 0 ? -1 : (dv.last_seen_ms / 1000);
@@ -1086,6 +1141,12 @@ void EspnowLink::loop() {
 bool EspnowLink::isBonded() const { return s_stat.bonded; }
 bool EspnowLink::isPeerLive() const { return s_stat.live; }
 void EspnowLink::getPeerMac(uint8_t out[6]) const { memcpy(out, s_stat.mac0, 6); }
+int EspnowLink::bondedDialCount() const { return s_stat.dialCount; }
+bool EspnowLink::bondedDialMac(int slot, uint8_t mac[6]) const {
+    if (slot < 0 || slot >= SL2_MAX_DIALS || slot >= s_stat.dialCount) return false;
+    memcpy(mac, s_stat.dialMac[slot], 6);
+    return true;
+}
 bool EspnowLink::getDialDetail(EspnowDialDetail &out) const {
     if (!s_stat.bonded) return false;
     out.lastSeenSec = s_stat.lastSeenSec;
@@ -1181,6 +1242,8 @@ void EspnowLink::loop() {}
 bool EspnowLink::isBonded() const { return false; }
 bool EspnowLink::isPeerLive() const { return false; }
 void EspnowLink::getPeerMac(uint8_t out[6]) const { for (int i = 0; i < 6; i++) out[i] = 0; }
+int EspnowLink::bondedDialCount() const { return 0; }
+bool EspnowLink::bondedDialMac(int slot, uint8_t mac[6]) const { (void)slot; (void)mac; return false; }
 bool EspnowLink::getDialDetail(EspnowDialDetail &out) const { (void)out; return false; }
 // Simplified default, matching every other query on this stub facade: no
 // link means Link can never be the selected source, so Internal — always

@@ -25,6 +25,7 @@
 #include "espnow_link.h"
 #include "link_sensor.h"
 #include "room_avg.h"
+#include "sl2_proto.h"
 
 static const char *TAG = "web_ws";
 
@@ -114,6 +115,32 @@ esp_err_t WebUI::handleWebSocket(httpd_req_t *req) {
 // The availability rule now lives in RoomAvg (room_avg.h) so the legacy
 // roomSource command and the dial's own source edit apply the same test.
 static inline bool roomMemberAvailable(int bit) { return RoomAvg::memberAvailable(bit); }
+
+// A web-UI write choosing Serin Link as the room source has no way to say
+// *which* dial (unlike a v3 dial edit, which pins the sender) — there is no
+// automatic mode any more, so an unpinned Link write is meaningless: the
+// 1 Hz reconcile in espnow_link.cpp would immediately revert it to Internal,
+// making the write look accepted and then silently snap back. Pin it here,
+// at the moment the web UI asks for Link, when there is exactly one bonded
+// dial to pin to (no ambiguity, no round trip); otherwise reject the write
+// the same way any other invalid write is rejected on this edge. Callers set
+// roomSingle = ROOM_MEMBER_LINK only when this returns true.
+static bool pinSoleLinkOrReject(const char *what) {
+    const int n = espnowLink.bondedDialCount();
+    if (n != 1) {
+        LOG_WARN("Config %s=Link rejected — the Link must be chosen from a "
+                 "dial until per-dial selection exists in the web UI (%d bonded)",
+                 what, n);
+        return false;
+    }
+    uint8_t mac[6];
+    if (!espnowLink.bondedDialMac(0, mac)) {
+        LOG_WARN("Config %s=Link rejected — bonded dial MAC unavailable", what);
+        return false;
+    }
+    settings.get().roomSourceId = sl2_room_source_mac_id(SL2_ROOM_SOURCE_NS_LINK, mac);
+    return true;
+}
 
 void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
     char cmd[16] = {0};
@@ -363,12 +390,16 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
         if (jsonGetInt(msg, "roomSource", &roomSourceVal)) {
             if (roomSourceVal >= 0 && roomSourceVal <= UINT8_MAX &&
                 RoomAvg::legacySrcSelectable((uint8_t)roomSourceVal)) {
+                const uint8_t single = room_single_from_legacy((uint8_t)roomSourceVal);
                 // Legacy enum command (kept for a cached pre-averaging UI):
-                // an explicit pick is a single-mode selection.
-                settings.get().roomMode   = 0;
-                settings.get().roomSingle = room_single_from_legacy((uint8_t)roomSourceVal);
-                settings.save();
-                LOG_INFO("Config roomSource=%d", roomSourceVal);
+                // an explicit pick is a single-mode selection. Link needs a
+                // pin (see pinSoleLinkOrReject) before it can be saved.
+                if (single != ROOM_MEMBER_LINK || pinSoleLinkOrReject("roomSource")) {
+                    settings.get().roomMode   = 0;
+                    settings.get().roomSingle = single;
+                    settings.save();
+                    LOG_INFO("Config roomSource=%d", roomSourceVal);
+                }
             }
             // Push on accept AND reject: the web UI paints its source rows
             // optimistically on tap, and this echo is what confirms the
@@ -397,7 +428,8 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
         if (jsonGetInt(msg, "roomSingle", &roomSingleVal)) {
             roomPush = true;
             if (roomSingleVal >= 0 && roomSingleVal < ROOM_MEMBER_COUNT &&
-                roomMemberAvailable(roomSingleVal)) {
+                roomMemberAvailable(roomSingleVal) &&
+                (roomSingleVal != ROOM_MEMBER_LINK || pinSoleLinkOrReject("roomSingle"))) {
                 settings.get().roomSingle = (uint8_t)roomSingleVal;
                 roomSave = true;
                 LOG_INFO("Config roomSingle=%d", roomSingleVal);

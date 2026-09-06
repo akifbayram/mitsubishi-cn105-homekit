@@ -1736,6 +1736,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   // the bleSensors list) — no client-side inference. Taps paint
   // optimistically and self-correct from the firmware's ack push, which
   // follows every write, accepted or rejected.
+  // ── room-model:start
   var MEMBER_INTERNAL=0,MEMBER_LINK=1,MEMBER_BLE0=2;
   var MAX_BLE_SENSORS=4;   // mirrors ROOM_MAX_BLE_SENSORS (settings.h)
   var CHECK_SVG='<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><use href="#icCheck"/></svg>';
@@ -1783,18 +1784,38 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       if(e.off)e.temp=null;
       list.push(e);
     });
-    if(s.hasLinkSensor){
+    // The Link row also renders while the dial is silent (hasLinkSensor is
+    // only as fresh as the last sensor frame) whenever the user's config
+    // points at it — otherwise the SELECTED source vanishes from the list
+    // the moment the dial goes quiet. Unselected and never reported stays
+    // hidden: a bonded dial without sensing hardware is not a row.
+    var linkWanted=s.roomMode===1?!!((s.roomMembers|0)&(1<<MEMBER_LINK)):s.roomSingle===MEMBER_LINK;
+    if(s.hasLinkSensor||linkWanted){
       var lb=[];
       if(s.linkHumidity!=null)lb.push(s.linkHumidity+'%');
       var lage=fmtAge(s.linkStaleMs);
       if(lage)lb.push(lage);else if(s.linkActive)lb.push('updated now');
+      var lsub;
+      if(!s.linkActive&&!s.linkStale){   // never reported — say why, not "waiting"
+        lsub=linkSilentWhy(s);
+      }else if(s.linkStale){
+        lsub='Last reading '+(s.linkTemp!=null?fmtReadingTemp(s.linkTemp)+'°':'—')+(lage?' · '+lage:'');
+      }else{
+        lsub=lb.join(' · ')||'Waiting for a reading…';
+      }
       list.push({bit:MEMBER_LINK,name:memberName(s,MEMBER_LINK),temp:s.linkTemp,ageMs:s.linkStaleMs,
                  active:!!s.linkActive,stale:!!s.linkStale,off:false,
-                 checkable:true,hasOffset:true,
-                 sub:s.linkStale?('Last reading '+(s.linkTemp!=null?fmtReadingTemp(s.linkTemp)+'°':'—')+(lage?' · '+lage:''))
-                                :(lb.join(' · ')||'Waiting for a reading…')});
+                 checkable:true,hasOffset:true,sub:lsub});
     }
     return list;
+  }
+  // Why the dial is silent, from the ESP-NOW link state that rides the same
+  // push — shared by the row sub-line and the banner.
+  function linkSilentWhy(s){
+    if(!s.remoteBonded)return 'No dial paired';
+    if(s.remoteLive===false)
+      return 'Dial offline'+(s.remoteLastSeen>=0?' · last seen '+fmtAgo(s.remoteLastSeen):'');
+    return 'Connected · no reading yet';
   }
   function offTenths(s,bit){return (s.roomOffs&&s.roomOffs[bit])|0}
   function adjTemp(s,m){return m.temp==null?null:m.temp+offTenths(s,m.bit)/10}
@@ -1820,14 +1841,19 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     var checked=avg?(m.checkable&&!!(s.roomMembers&(1<<m.bit))):s.roomSingle===m.bit;
     var exclStale=avg&&checked&&!m.off&&!!(s.exclStale&(1<<m.bit));
     var off=offTenths(s,m.bit);
-    var cls='src-row'+(checked&&!exclStale&&!m.off?' sel':'')+(exclStale?' stale':'')+(m.off?' dim':'');
+    // While the selected remote is stale or silent the pump reads its own
+    // thermistor, so the selection highlight follows REALITY: the built-in
+    // row shows as in use, the configured row keeps only its radio semantics.
+    var fallback=!avg&&s.roomSingle>0&&(s.roomStatus===1||s.roomStatus===2);
+    var effSel=avg?checked:(fallback?m.bit===MEMBER_INTERNAL:checked);
+    var cls='src-row'+(effSel&&!exclStale&&!m.off?' sel':'')+(exclStale?' stale':'')+(m.off?' dim':'');
     var lead;
     if(internalAvg){
       lead='<span class="chk" style="visibility:hidden"></span>';   // keep column alignment
     }else if(avg){
       lead='<span class="chk'+(checked&&!m.off?' on':'')+'">'+(checked&&!m.off?CHECK_SVG:'')+'</span>';
     }else{
-      var dot=m.off?'idle':m.stale?'error':(m.bit!==MEMBER_INTERNAL&&m.active)?'active':(checked&&m.bit===MEMBER_INTERNAL)?'active':'idle';
+      var dot=m.off?'idle':m.stale?'error':(m.bit!==MEMBER_INTERNAL&&m.active)?'active':(effSel&&m.bit===MEMBER_INTERNAL)?'active':'idle';
       lead='<span class="status-dot '+dot+'"></span>';
     }
     var badges='';
@@ -1839,9 +1865,15 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
         (hadReading?(s.avgFallback?'Stale':'Excluded · stale'):(s.avgFallback?'No data':'Excluded · no data'))+'</span>';
     }
     if(!avg&&checked){
-      // 'stale'/'no data' ride the Active badge only for remote sources
+      // A degraded selection isn't "Active" — the pump reverted. Stale keeps
+      // the red badge; a source that never reported gets a muted one.
       var b=m.bit===MEMBER_INTERNAL?null:s.roomStatus===1?'stale':s.roomStatus===2?'nodata':null;
-      badges+='<span class="src-badge'+(b?' stale':'')+'">'+(b==='stale'?'Active · stale':b==='nodata'?'Active · no data':'Active')+'</span>';
+      badges+=b==='stale'?'<span class="src-badge stale">Selected · stale</span>'
+             :b==='nodata'?'<span class="src-badge mut">Selected · no reading</span>'
+             :'<span class="src-badge">Active</span>';
+    }
+    if(!avg&&!checked&&fallback&&m.bit===MEMBER_INTERNAL){
+      badges+='<span class="src-badge">In use</span>';
     }
     var right='';
     if(m.temp!=null){
@@ -1888,8 +1920,11 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       else if(c===1){footTxt='One sensor'+(ageTxt?' · updated '+ageTxt:'')}
       else{footTxt="Using the heat pump's built-in sensor."}
     }else{
-      var sel=byBit[s.roomSingle]||byBit[MEMBER_INTERNAL];
-      var nm=s.roomSingle===MEMBER_INTERNAL?'Built-in sensor':sel?sel.name:'—';
+      // Name from the bit, not the model row — the silent source's row can be
+      // missing, and falling back to the internal row's name blamed the wrong
+      // sensor ("Heat Pump Sensor · no reading").
+      var sel=byBit[s.roomSingle];
+      var nm=s.roomSingle===MEMBER_INTERNAL?'Built-in sensor':memberName(s,s.roomSingle);
       if(s.roomSingle>0&&s.roomStatus===1){footTxt=nm+' stale · using the built-in sensor';warn=true}
       else if(s.roomSingle>0&&s.roomStatus===2){footTxt=nm+' · no reading · using the built-in sensor'}
       else{var a=sel&&fmtAge(sel.ageMs);footTxt=nm+(a?' · updated '+a:'')}
@@ -1922,12 +1957,27 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       cls='caution';
       msg=(cs.length>=2?cs[0].name+' and '+cs[cs.length-1].name:'The sensors')+' disagree by '+
           dispSpread(s).toFixed(1)+'°. Check sensor placement, or add an offset under Manage Sensors.';
-    }else if(!avg&&s.roomSingle>=MEMBER_BLE0&&s.roomStatus===1){
+    }else if(!avg&&s.roomSingle>0&&s.roomStatus===1){
+      // Any remote source, Serin Link included — not just BLE slots.
       var selM=null;model.forEach(function(m){if(m.bit===s.roomSingle)selM=m});
       cls='warn';
-      msg='No update from '+(selM?selM.name:'the remote sensor')+
+      msg='No update from '+(selM?selM.name:memberName(s,s.roomSingle))+
           (fmtAge(selM&&selM.ageMs)?' for '+fmtAge(selM.ageMs).replace(' ago',''):'')+
-          (s.bleReverted?' — reverted to the built-in sensor':'');
+          (s.bleReverted||s.roomSingle===MEMBER_LINK?' — reverted to the built-in sensor':'');
+    }else if(!avg&&s.roomSingle>0&&s.roomStatus===2){
+      // Selected source has never reported: the pump quietly falls back, so
+      // say what's silent, why, and what's covering. This outranks the
+      // battery banner — a selection that isn't in effect matters more.
+      cls='caution';
+      if(s.roomSingle===MEMBER_LINK){
+        msg=!s.remoteBonded?'Serin Link is selected but no dial is paired.'
+           :s.remoteLive===false?'No reading from Serin Link — the dial is offline'+
+              (s.remoteLastSeen>=0?' (last seen '+fmtAgo(s.remoteLastSeen)+')':'')+'.'
+           :'Serin Link is connected but hasn’t sent a reading yet.';
+      }else{
+        msg='No reading yet from '+memberName(s,s.roomSingle)+'.';
+      }
+      msg+=" Using the heat pump's built-in sensor.";
     }else{
       var low=null;
       if(bleOn)(s.bleSensors||[]).forEach(function(b){if(low==null&&b.batt>=0&&b.batt<=20)low=b});
@@ -1958,11 +2008,15 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     }else{
       var nm=memberName(s,s.roomSingle);
       if(s.roomStatus===1)set('error',nm+' · Stale','var(--red)');
+      // A selected source that never reported is a degraded state (the pump
+      // fell back), not a neutral one — caution orange, not idle gray.
+      else if(s.roomStatus===2&&s.roomSingle>0)set('warning',nm+' · Not reporting','var(--orange)');
       else if(s.roomStatus===2)set('idle',nm+' · No reading','var(--text3)');
       else if(s.roomSingle>0)set('active',nm,'var(--green)');
       else set('idle',nm,'var(--text3)');
     }
   }
+  // ── room-model:end
 
   function renderOffsetRows(s,model){
     var el=$('offsetRows'),html='';

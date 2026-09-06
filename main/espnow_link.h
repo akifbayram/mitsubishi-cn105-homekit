@@ -40,6 +40,10 @@ public:
     bool isBonded() const;               // >=1 dial in the bond table
     bool isPeerLive() const;             // any bonded dial probed recently
     void getPeerMac(uint8_t out[6]) const;   // first bonded dial (00.. if none)
+    // Bond-table access for callers (e.g. the web UI) that need more than the
+    // first dial: how many are bonded, and each one's MAC by slot.
+    int  bondedDialCount() const;
+    bool bondedDialMac(int slot, uint8_t mac[6]) const;   // false if slot is out of range/empty
     bool getDialDetail(EspnowDialDetail &out) const;  // false if not bonded
     // Health of the room-temperature source currently selected in settings
     // (enum sl2_room_status). The same check the INFO TLV publishes to the

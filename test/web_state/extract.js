@@ -116,6 +116,28 @@ const roomFactory = vm.runInThisContext(
   { filename: 'web/index.html#room-writes' }
 )();
 
+// The Room Sensor card's read side: the model roomSensors() builds from a
+// state push and the hero/banner/summary renderers. DOM access is one `$`
+// lookup per element, so a bag of plain objects stands in for the document;
+// fmtReadingTemp/fmtAgo live outside the block and are stubbed to something
+// assertable rather than re-implemented.
+const roomRenderFactory = vm.runInThisContext(
+  '(function(){return function(){\n' +
+  '  var tempUnit="F";\n' +
+  '  function fmtReadingTemp(c){return String(c)}\n' +
+  '  function fmtAgo(sec){return (sec<60?sec+"s":sec<3600?Math.floor(sec/60)+"m":Math.floor(sec/3600)+"h")+" ago"}\n' +
+  '  var els={};\n' +
+  '  function $(id){if(!els[id])els[id]={textContent:"",className:"",innerHTML:"",style:{},\n' +
+  '    _a:{},setAttribute:function(k,v){this._a[k]=v},getAttribute:function(k){return this._a[k]}};\n' +
+  '    return els[id]}\n' +
+  block('room-model') + '\n' +
+  '  return {els:els,roomSensors:roomSensors,roomRowHtml:roomRowHtml,\n' +
+  '    renderRoomHero:renderRoomHero,renderRoomBanner:renderRoomBanner,\n' +
+  '    renderRoomSummary:renderRoomSummary,MEMBER_LINK:MEMBER_LINK};\n' +
+  '};})',
+  { filename: 'web/index.html#room-model' }
+)();
+
 const probe = factory('C');
 for (const name of ['configureSliders', 'cToFTable', 'fToCTable', 'tap']) {
   if (typeof probe[name] !== 'function')
@@ -128,5 +150,10 @@ for (const name of ['setRoomMode', 'selectRoomSingle', 'toggleRoomMember']) {
 }
 if (typeof mergeState !== 'function')
   throw new Error('state-merge block does not define mergeState()');
+const renderProbe = roomRenderFactory();
+for (const name of ['roomSensors', 'roomRowHtml', 'renderRoomHero', 'renderRoomBanner', 'renderRoomSummary']) {
+  if (typeof renderProbe[name] !== 'function')
+    throw new Error(`room-model block does not define ${name}()`);
+}
 
-module.exports = { newUi: factory, newRoom: roomFactory, mergeState, DEFAULTS };
+module.exports = { newUi: factory, newRoom: roomFactory, newRoomRender: roomRenderFactory, mergeState, DEFAULTS };
