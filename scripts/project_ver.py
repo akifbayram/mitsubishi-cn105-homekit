@@ -144,7 +144,10 @@ def lock_dirty(repo):
     -I is hunk-shaped, not positional, so it would also forgive an inserted
     second target: line. exactly_one_target_line() closes that.
     """
-    return bool(git(repo, "diff", "--name-only", "-I" + TARGET_LINE,
+    # Git 2.43 (the ESP-IDF container) ignores -I with --name-only. Request
+    # the filtered patch itself so target-only rewrites are clean there too.
+    return bool(git(repo, "diff", "--no-ext-diff", "--no-textconv", "--no-color",
+                    "--patch", "-I" + TARGET_LINE,
                     "HEAD", "--", "dependencies.lock").strip())
 
 

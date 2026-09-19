@@ -65,6 +65,8 @@ jobs:
           esp_idf_version: v5.5.4
           target: ${{ matrix.target }}
           command: |
+            # Exercise version derivation with the container's Git as well.
+            bash test/project_ver/run.sh
             # Derive profile macro from name (e.g. nanoc6 -> NANOC6, m5atoms3-lite -> M5ATOMS3_LITE)
             PROFILE=$(echo "${{ matrix.name }}" | tr '[:lower:]' '[:upper:]' | tr '-' '_')
             # No file on workflow_dispatch, so RELEASE_TAG comes through empty and
@@ -75,6 +77,12 @@ jobs:
             TAG=$(cat .release-tag 2>/dev/null || true)
             idf.py set-target ${{ matrix.target }}
             idf.py "-DRELEASE_TAG=${TAG}" -DBOARD_PROFILE_${PROFILE}=1 build
+
+      - name: Check release image version
+        if: github.ref_type == 'tag'
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: python3 scripts/check-release-image.py build/mitsubishi-cn105-homekit.bin "$RELEASE_TAG"
 
       - name: Collect artifacts
         env:
