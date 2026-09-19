@@ -22,7 +22,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: Serin-Labs/serin-cn105
-          ref: main
+          ref: cc8cfeb92ab9a9b49f0d2784f7ac8d21824de22f
           path: validation-tools
           sparse-checkout: scripts
           persist-credentials: false

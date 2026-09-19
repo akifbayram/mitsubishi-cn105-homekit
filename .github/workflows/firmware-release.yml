@@ -200,9 +200,9 @@ jobs:
           CHANNEL: ${{ steps.version.outputs.channel }}
           CHANNEL_DIR: ${{ steps.version.outputs.dir }}
         run: |
-          sha() { sha256sum "artifacts/firmware-$1/firmware.bin" | cut -d' ' -f1; }
-          SHA_NANOC6=$(sha nanoc6)
-          SHA_M5ATOMS3=$(sha m5atoms3-lite)
+          sha() { sha256sum "artifacts/firmware-$1/$2" | cut -d' ' -f1; }
+          SHA_NANOC6=$(sha nanoc6 firmware.bin)
+          SHA_M5ATOMS3=$(sha m5atoms3-lite firmware.bin)
 
           # parts[].path stays relative: it resolves against the manifest's own
           # directory in both consumers (the device's update check and the web
@@ -222,10 +222,10 @@ jobs:
                 "board": "nanoc6",
                 "sha256": "${SHA_NANOC6}",
                 "parts": [
-                  { "path": "nanoc6/bootloader.bin", "offset": 0 },
-                  { "path": "nanoc6/partitions.bin", "offset": 32768 },
-                  { "path": "nanoc6/boot_app0.bin", "offset": 57344 },
-                  { "path": "nanoc6/firmware.bin", "offset": 65536 }
+                  { "path": "nanoc6/bootloader.bin", "offset": 0, "sha256": "$(sha nanoc6 bootloader.bin)" },
+                  { "path": "nanoc6/partitions.bin", "offset": 32768, "sha256": "$(sha nanoc6 partitions.bin)" },
+                  { "path": "nanoc6/boot_app0.bin", "offset": 57344, "sha256": "$(sha nanoc6 boot_app0.bin)" },
+                  { "path": "nanoc6/firmware.bin", "offset": 65536, "sha256": "$(sha nanoc6 firmware.bin)" }
                 ]
               },
               {
@@ -233,10 +233,10 @@ jobs:
                 "board": "m5atoms3-lite",
                 "sha256": "${SHA_M5ATOMS3}",
                 "parts": [
-                  { "path": "m5atoms3-lite/bootloader.bin", "offset": 0 },
-                  { "path": "m5atoms3-lite/partitions.bin", "offset": 32768 },
-                  { "path": "m5atoms3-lite/boot_app0.bin", "offset": 57344 },
-                  { "path": "m5atoms3-lite/firmware.bin", "offset": 65536 }
+                  { "path": "m5atoms3-lite/bootloader.bin", "offset": 0, "sha256": "$(sha m5atoms3-lite bootloader.bin)" },
+                  { "path": "m5atoms3-lite/partitions.bin", "offset": 32768, "sha256": "$(sha m5atoms3-lite partitions.bin)" },
+                  { "path": "m5atoms3-lite/boot_app0.bin", "offset": 57344, "sha256": "$(sha m5atoms3-lite boot_app0.bin)" },
+                  { "path": "m5atoms3-lite/firmware.bin", "offset": 65536, "sha256": "$(sha m5atoms3-lite firmware.bin)" }
                 ]
               }
             ]

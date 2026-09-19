@@ -150,6 +150,10 @@ validation before each retry. An unchanged release succeeds without a new
 commit. GitHub Release assets are uploaded only after deployment succeeds.
 Manual runs on branches build artifacts without publishing.
 
+Every multipart release records SHA-256 hashes for the bootloader, partition
+table, OTA-data image and app. Validation checks all four files before any push;
+the build-level hash remains the app hash for device OTA compatibility.
+
 Distribution pushes use the **Serin Firmware Publisher** GitHub App. Configure
 the repository Actions variable `SERIN_PUBLISHER_CLIENT_ID` and secret
 `SERIN_PUBLISHER_PRIVATE_KEY` (the App's PEM key). The guarded deployment job
@@ -189,6 +193,12 @@ idf.py -DWIFI_SSID="MyNetwork" -DWIFI_PASSWORD="MyPassword" build
 ```
 
 The device will connect automatically on boot. WiFi can still be changed later via the web UI.
+
+WiFi network names can use all 32 bytes of the SSID field. WPA passphrases can
+use up to 63 characters, and a raw WPA key can use all 64 hexadecimal characters.
+The driver receives the complete credentials during setup, reconnects, and
+restoration of the previous network after a failed change. These limits count
+bytes; a non-ASCII character can occupy more than one byte.
 
 **Finding the device:** once it joins your network the device advertises itself over mDNS as `serin-xxxx.local` (same suffix as the hotspot name), so you do not need to look up its IP address.
 

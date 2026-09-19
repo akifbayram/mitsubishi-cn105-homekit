@@ -146,6 +146,23 @@ os.execv(real, [real, *sys.argv[1:]])
         self.assertEqual(manifest["version"], "0.9.0")
         self.assertEqual({build["board"] for build in manifest["builds"]}, {"nanoc6", "m5atoms3-lite"})
 
+    def test_generated_manifest_hashes_every_part(self):
+        self.prepare()
+        path = self.checkout / f"firmware/{PRODUCT}/manifest.json"
+        manifest = json.loads(path.read_text())
+        for build in manifest["builds"]:
+            for part in build["parts"]:
+                data = (path.parent / part["path"]).read_bytes()
+                self.assertEqual(part.get("sha256"), hashlib.sha256(data).hexdigest(), part["path"])
+
+    def test_corrupt_bootloader_cannot_publish(self):
+        self.prepare()
+        (self.checkout / f"firmware/{PRODUCT}/nanoc6/bootloader.bin").write_bytes(b"corruption")
+        code, output = self.publish()
+        self.assertNotEqual(code, 0, output)
+        self.assertIn("sha256 does not match", output)
+        self.assertEqual(self.remote_head(), self.initial)
+
     def test_corrupt_candidate_cannot_publish(self):
         self.prepare()
         (self.checkout / f"firmware/{PRODUCT}/nanoc6/firmware.bin").write_bytes(b"corruption")
