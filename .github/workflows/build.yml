@@ -18,7 +18,28 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Checkout distribution validation tools
+        uses: actions/checkout@v6
+        with:
+          repository: Serin-Labs/serin-cn105
+          ref: cc8cfeb92ab9a9b49f0d2784f7ac8d21824de22f
+          path: validation-tools
+          sparse-checkout: scripts
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install release test dependencies
+        run: |
+          python3 -m pip install -r validation-tools/scripts/requirements-validation.txt \
+            -r test/release_workflow/requirements.txt
+
       - name: Run host tests
+        env:
+          SERIN_DISTRIBUTION_ROOT: ${{ github.workspace }}/validation-tools
         run: |
           for t in test/*/run.sh; do
             echo "=== $t ==="

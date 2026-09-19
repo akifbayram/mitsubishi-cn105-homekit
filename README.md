@@ -126,11 +126,46 @@ idf.py -p /dev/ttyACM0 monitor
 
 For any board other than the NanoC6, add its [profile flag](#boards) to the build command. `sdkconfig` is generated and gitignored. `set-target` rewrites it, so switching targets in an existing checkout is safe, but copying someone else's `sdkconfig` is not.
 
-Host-side unit tests need no hardware and no ESP-IDF:
+Host-side tests need no hardware and no ESP-IDF. Use Python 3.12 or newer,
+a C/C++ compiler, and a sibling checkout of the distribution repository with
+its release validator:
 
 ```bash
+git clone https://github.com/Serin-Labs/serin-cn105.git ../serin-cn105
+python3 -m venv .venv
+source .venv/bin/activate
+python3 -m pip install -r ../serin-cn105/scripts/requirements-validation.txt \
+  -r test/release_workflow/requirements.txt
 for t in test/*/run.sh; do bash "$t"; done
 ```
+
+For another checkout location, set `SERIN_DISTRIBUTION_ROOT` to its absolute
+path. The release tests run the workflow's shell steps, the real distribution
+validator, and temporary local Git repositories; they do not publish firmware.
+
+**Release publication:** version tags (`v*`) build both boards, then validate
+the complete candidate distribution before pushing to `Serin-Labs/serin-cn105`
+`main`. A rejected push retries up to three times, with a rebase and full
+validation before each retry. An unchanged release succeeds without a new
+commit. GitHub Release assets are uploaded only after deployment succeeds.
+Manual runs on branches build artifacts without publishing.
+
+Every multipart release records SHA-256 hashes for the bootloader, partition
+table, OTA-data image and app. Validation checks all four files before any push;
+the build-level hash remains the app hash for device OTA compatibility.
+
+Distribution pushes use the **Serin Firmware Publisher** GitHub App. Configure
+the repository Actions variable `SERIN_PUBLISHER_CLIENT_ID` and secret
+`SERIN_PUBLISHER_PRIVATE_KEY` (the App's PEM key). The guarded deployment job
+requests a short-lived token with Contents write access to
+`Serin-Labs/serin-cn105` only; the action revokes it when the job ends. Keep the
+old `SERIN_CN105_PAT` secret until publication using the App has succeeded.
+
+Roll out the distribution repo's `scripts/requirements-validation.txt`, validator,
+public key and legacy artifact index to `main` before enabling these workflows.
+Missing tools or failed validation stop publication. See the
+[distribution validation contract](https://github.com/Serin-Labs/serin-cn105/blob/main/docs/release-validation.md)
+for the checks and their limits.
 
 ### 2. WiFi Provisioning
 
@@ -158,6 +193,12 @@ idf.py -DWIFI_SSID="MyNetwork" -DWIFI_PASSWORD="MyPassword" build
 ```
 
 The device will connect automatically on boot. WiFi can still be changed later via the web UI.
+
+WiFi network names can use all 32 bytes of the SSID field. WPA passphrases can
+use up to 63 characters, and a raw WPA key can use all 64 hexadecimal characters.
+The driver receives the complete credentials during setup, reconnects, and
+restoration of the previous network after a failed change. These limits count
+bytes; a non-ASCII character can occupy more than one byte.
 
 **Finding the device:** once it joins your network the device advertises itself over mDNS as `serin-xxxx.local` (same suffix as the hotspot name), so you do not need to look up its IP address.
 

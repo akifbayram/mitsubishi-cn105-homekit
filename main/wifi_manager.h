@@ -11,6 +11,8 @@ namespace WifiManager {
 
     /// Connect to WiFi with given credentials, stores in NVS "wifi-creds".
     /// Non-blocking: starts connection, returns true if initiated successfully.
+    /// SSID: 1–32 bytes; password: up to 64 bytes (nullptr means open network).
+    /// Oversized input returns false without changing the current connection.
     bool connect(const char* ssid, const char* password);
 
     /// Connection state (set by event handler, non-blocking).

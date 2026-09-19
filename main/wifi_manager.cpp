@@ -218,11 +218,11 @@ void WifiManager::init(const char* hostname, const char* apName, const char* apP
 static void applyStaConfig(const char *ssid, const char *password)
 {
     wifi_config_t cfg = {};
-    // memcpy with explicit strnlen (not strncpy): the revert caller passes
-    // fixed-size arrays, which trips -Werror=stringop-truncation when inlined
-    memcpy(cfg.sta.ssid, ssid, strnlen(ssid, sizeof(cfg.sta.ssid) - 1));
+    // STA fields are fixed-width bytes, not necessarily NUL-terminated.
+    // Full-length credentials use every byte; shorter values keep a zero tail.
+    memcpy(cfg.sta.ssid, ssid, strnlen(ssid, sizeof(cfg.sta.ssid)));
     if (password && password[0] != '\0') {
-        memcpy(cfg.sta.password, password, strnlen(password, sizeof(cfg.sta.password) - 1));
+        memcpy(cfg.sta.password, password, strnlen(password, sizeof(cfg.sta.password)));
         cfg.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
     } else {
         cfg.sta.threshold.authmode = WIFI_AUTH_OPEN;
@@ -237,6 +237,13 @@ bool WifiManager::connect(const char* ssid, const char* password)
 {
     if (!ssid || ssid[0] == '\0') {
         LOG_ERROR("connect() called with empty SSID");
+        return false;
+    }
+    // Reject rather than silently truncating credentials in the driver or
+    // trial snapshots. Do this before changing the active trial or connection.
+    if (strnlen(ssid, sizeof(s_trial.newSsid)) >= sizeof(s_trial.newSsid) ||
+        (password && strnlen(password, sizeof(s_trial.newPass)) >= sizeof(s_trial.newPass))) {
+        LOG_ERROR("WiFi network name or password exceeds its byte limit");
         return false;
     }
 
@@ -429,8 +436,13 @@ void WifiManager::getSSID(char* out, size_t len)
     if (!out || !len) return;
     out[0] = '\0';
     wifi_config_t cfg = {};
-    if (esp_wifi_get_config(WIFI_IF_STA, &cfg) == ESP_OK)
-        strncpy(out, (const char*)cfg.sta.ssid, len - 1);
+    if (esp_wifi_get_config(WIFI_IF_STA, &cfg) == ESP_OK) {
+        // A 32-byte SSID has no terminator in this field. Never read onward
+        // into cfg.sta.password, even when the caller supplies a larger buffer.
+        size_t n = std::min(len - 1, strnlen((const char*)cfg.sta.ssid, sizeof(cfg.sta.ssid)));
+        memcpy(out, cfg.sta.ssid, n);
+        out[n] = '\0';
+    }
 }
 
 void WifiManager::getIP(char* out, size_t len)
