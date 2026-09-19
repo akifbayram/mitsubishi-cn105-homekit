@@ -126,11 +126,42 @@ idf.py -p /dev/ttyACM0 monitor
 
 For any board other than the NanoC6, add its [profile flag](#boards) to the build command. `sdkconfig` is generated and gitignored. `set-target` rewrites it, so switching targets in an existing checkout is safe, but copying someone else's `sdkconfig` is not.
 
-Host-side unit tests need no hardware and no ESP-IDF:
+Host-side tests need no hardware and no ESP-IDF. Use Python 3.12 or newer,
+a C/C++ compiler, and a sibling checkout of the distribution repository with
+its release validator:
 
 ```bash
+git clone https://github.com/Serin-Labs/serin-cn105.git ../serin-cn105
+python3 -m venv .venv
+source .venv/bin/activate
+python3 -m pip install -r ../serin-cn105/scripts/requirements-validation.txt \
+  -r test/release_workflow/requirements.txt
 for t in test/*/run.sh; do bash "$t"; done
 ```
+
+For another checkout location, set `SERIN_DISTRIBUTION_ROOT` to its absolute
+path. The release tests run the workflow's shell steps, the real distribution
+validator, and temporary local Git repositories; they do not publish firmware.
+
+**Release publication:** version tags (`v*`) build both boards, then validate
+the complete candidate distribution before pushing to `Serin-Labs/serin-cn105`
+`main`. A rejected push retries up to three times, with a rebase and full
+validation before each retry. An unchanged release succeeds without a new
+commit. GitHub Release assets are uploaded only after deployment succeeds.
+Manual runs on branches build artifacts without publishing.
+
+Distribution pushes use the **Serin Firmware Publisher** GitHub App. Configure
+the repository Actions variable `SERIN_PUBLISHER_CLIENT_ID` and secret
+`SERIN_PUBLISHER_PRIVATE_KEY` (the App's PEM key). The guarded deployment job
+requests a short-lived token with Contents write access to
+`Serin-Labs/serin-cn105` only; the action revokes it when the job ends. Keep the
+old `SERIN_CN105_PAT` secret until publication using the App has succeeded.
+
+Roll out the distribution repo's `scripts/requirements-validation.txt`, validator,
+public key and legacy artifact index to `main` before enabling these workflows.
+Missing tools or failed validation stop publication. See the
+[distribution validation contract](https://github.com/Serin-Labs/serin-cn105/blob/main/docs/release-validation.md)
+for the checks and their limits.
 
 ### 2. WiFi Provisioning
 

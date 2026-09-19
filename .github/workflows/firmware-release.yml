@@ -3,9 +3,10 @@
 # Builds firmware for all chip targets using ESP-IDF and deploys to the
 # serin-cn105 distribution repo for ESP Web Tools flashing.
 #
-# Required secret:
-#   SERIN_CN105_PAT — Fine-grained PAT scoped to Serin-Labs/serin-cn105
-#                     with Contents: Read and write (Metadata: Read-only)
+# Publisher credentials:
+#   SERIN_PUBLISHER_CLIENT_ID — repository variable for the publishing App
+#   SERIN_PUBLISHER_PRIVATE_KEY — repository secret containing its PEM key
+# The deployment job requests a token for Serin-Labs/serin-cn105 only.
 
 name: Firmware Release
 
@@ -94,6 +95,10 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    # Manual branch runs build artifacts without replacing published firmware.
+    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
     steps:
       - name: Download all firmware artifacts
         uses: actions/download-artifact@v8
@@ -126,12 +131,32 @@ jobs:
             echo "dir=firmware/homekit" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Create distribution token
+        id: publisher-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ vars.SERIN_PUBLISHER_CLIENT_ID }}
+          private-key: ${{ secrets.SERIN_PUBLISHER_PRIVATE_KEY }}
+          owner: Serin-Labs
+          repositories: serin-cn105
+          permission-contents: write
+
       - name: Checkout serin-cn105
         uses: actions/checkout@v6
         with:
           repository: Serin-Labs/serin-cn105
-          token: ${{ secrets.SERIN_CN105_PAT }}
+          token: ${{ steps.publisher-token.outputs.token }}
           path: serin-cn105
+          ref: main
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install distribution validation tools
+        run: python3 -m pip install -r serin-cn105/scripts/requirements-validation.txt
 
       - name: Deploy firmware files
         env:
@@ -221,23 +246,45 @@ jobs:
           python3 -m json.tool "serin-cn105/${CHANNEL_DIR}/manifest.json" > /dev/null
           echo "manifest OK (${CHANNEL})"
 
+      # Consumers read main directly, so validation must finish before the push.
+      - name: Validate distribution manifests
+        run: python3 serin-cn105/scripts/validate-manifests.py
+
       - name: Commit and push to serin-cn105
         env:
           VERSION: ${{ steps.version.outputs.number }}
           CHANNEL: ${{ steps.version.outputs.channel }}
         run: |
+          set -euo pipefail
           cd serin-cn105
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           # Covers both channels: beta/ lives under firmware/homekit/.
           git add firmware/homekit/
+          if git diff --cached --quiet; then
+            echo "Distribution already contains this release."
+            exit 0
+          fi
           git commit -m "chore: update homekit ${CHANNEL} firmware to ${VERSION}"
-          git push
+
+          for attempt in 1 2 3; do
+            if git push origin HEAD:main; then
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              git pull --rebase origin main
+              # Another publisher may have changed any product during the build.
+              # Recheck the entire candidate tree before the next push.
+              python3 scripts/validate-manifests.py
+            fi
+          done
+          echo "Distribution push failed after three attempts." >&2
+          exit 1
 
   release:
-    needs: build
+    needs: [build, deploy]
     runs-on: ubuntu-latest
-    if: github.ref_type == 'tag'
+    if: github.ref_type == 'tag' && startsWith(github.ref_name, 'v')
     permissions:
       contents: write
     steps:
@@ -258,8 +305,7 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           name: ${{ github.ref_name }}
-          # This job runs parallel to deploy, so it cannot read that job's
-          # version-step outputs — it re-derives the same rule from the tag.
+          # Publication waits for validated distribution deployment above.
           prerelease: ${{ contains(github.ref_name, '-') }}
           generate_release_notes: true
           files: release/firmware-*.bin
