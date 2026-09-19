@@ -79,6 +79,8 @@ jobs:
           esp_idf_version: v5.5.4
           target: ${{ matrix.target }}
           command: |
+            # The container can carry an older Git than the host-test runner.
+            bash test/project_ver/run.sh
             idf.py set-target ${{ matrix.target }}
             idf.py ${{ matrix.profile_flag }} build
             idf.py size

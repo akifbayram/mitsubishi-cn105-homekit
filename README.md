@@ -150,6 +150,11 @@ validation before each retry. An unchanged release succeeds without a new
 commit. GitHub Release assets are uploaded only after deployment succeeds.
 Manual runs on branches build artifacts without publishing.
 
+Tagged builds also compare the compiled image's embedded version with the
+release tag before exporting artifacts. A mismatched or `-dirty` image stops
+publication. Version derivation tests run inside the ESP-IDF container as well
+as on the host, covering the container's older Git behavior.
+
 Every multipart release records SHA-256 hashes for the bootloader, partition
 table, OTA-data image and app. Validation checks all four files before any push;
 the build-level hash remains the app hash for device OTA compatibility.
