@@ -247,8 +247,11 @@ lack "CMakeLists.txt does not call git inline again" \
 # with git describe, which tie-breaks two tags on one commit by tagger date
 # while the manifest comes from github.ref_name — and nothing above would fail.
 WORKFLOW="$PWD/../../.github/workflows/firmware-release.yml"
-have "firmware-release.yml passes the pushed tag to the build" \
-     'DRELEASE_TAG=' "$WORKFLOW"
+have "firmware-release.yml delegates to the release build script" \
+     'scripts/build-release.sh' "$WORKFLOW"
+
+have "release build script passes the recorded tag to CMake" \
+     'DRELEASE_TAG=' "$PWD/../../scripts/build-release.sh"
 
 have "CMakeLists.txt forwards RELEASE_TAG to the script" \
      'release-tag' "$CMAKELISTS"

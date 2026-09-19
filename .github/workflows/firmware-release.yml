@@ -64,19 +64,7 @@ jobs:
           # same note in build.yml.
           esp_idf_version: v5.5.4
           target: ${{ matrix.target }}
-          command: |
-            # Exercise version derivation with the container's Git as well.
-            bash test/project_ver/run.sh
-            # Derive profile macro from name (e.g. nanoc6 -> NANOC6, m5atoms3-lite -> M5ATOMS3_LITE)
-            PROFILE=$(echo "${{ matrix.name }}" | tr '[:lower:]' '[:upper:]' | tr '-' '_')
-            # No file on workflow_dispatch, so RELEASE_TAG comes through empty and
-            # project_ver.py falls back to git describe — fetch-depth: 0 above
-            # keeps that working.
-            # The ESP-NOW PMK is a public constant since Serin Link v2
-            # (SL2_ESPNOW_PMK); trust comes from Ed25519-signed pairing.
-            TAG=$(cat .release-tag 2>/dev/null || true)
-            idf.py set-target ${{ matrix.target }}
-            idf.py "-DRELEASE_TAG=${TAG}" -DBOARD_PROFILE_${PROFILE}=1 build
+          command: bash scripts/build-release.sh "${{ matrix.target }}" "${{ matrix.name }}"
 
       - name: Check release image version
         if: github.ref_type == 'tag'
