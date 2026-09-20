@@ -378,7 +378,7 @@ void WebUI::begin(CN105Controller *ctrl) {
     config.stack_size       = 8192;   // Default 4096 too small for WS handlers + log buffers
     config.max_uri_handlers = 12;     // Default 8 too few for all endpoints; 1 spare so
                                        // the next handler doesn't silently fail to register
-    config.max_open_sockets = 7;
+    config.max_open_sockets = WebWsTransport::MAX_CLIENTS;
     config.lru_purge_enable = true;
     config.open_fn          = setTcpNoDelay;
     config.close_fn         = closeClient;
@@ -395,8 +395,8 @@ void WebUI::begin(CN105Controller *ctrl) {
 
     if (!_ws.start(_server)) {
         LOG_ERROR("WS delivery worker allocation failed");
-        httpd_stop(_server);
-        _server = nullptr;
+        if (httpd_stop(_server) == ESP_OK) _server = nullptr;
+        else LOG_ERROR("HTTP server stop failed after WS allocation failure");
         return;
     }
 
@@ -526,13 +526,4 @@ void WebUI::closeClient(httpd_handle_t server, int fd) {
     auto *self = static_cast<WebUI *>(httpd_get_global_user_ctx(server));
     if (self && self->_wsReady.load()) self->_ws.disconnected(fd);
     close(fd); // A custom close_fn owns closing the socket.
-}
-
-void WebUI::stop() {
-    if (!_server) return;
-    _ws.stop(); // callback/worker must finish before HTTPD's handle is freed
-    httpd_stop(_server);
-    _server = nullptr;
-    _wsReady.store(false);
-    _ws.release();
 }

@@ -1,7 +1,7 @@
 #pragma once
 #include <cstddef>
 #include <cstdint>
-#define CONFIG_HTTPD_QUEUE_WORK_BLOCKING 1
+#define CONFIG_HTTPD_QUEUE_WORK_BLOCKING 0
 using esp_err_t = int;
 using httpd_handle_t = void *;
 constexpr int ESP_OK=0, ESP_FAIL=-1, HTTPD_WS_CLIENT_WEBSOCKET=2, HTTPD_WS_TYPE_TEXT=1;

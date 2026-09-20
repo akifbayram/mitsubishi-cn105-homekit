@@ -8,7 +8,7 @@
 #include <freertos/task.h>
 
 // Main only copies complete broadcasts into a bounded mailbox. A small task
-// schedules ONE httpd callback at a time; only httpd touches sessions/sockets,
+// retries an idempotent HTTPD drain callback; only httpd touches sessions/sockets,
 // including SDK-generated PONG/CLOSE and command replies before a reboot.
 class WebWsTransport {
 public:
@@ -19,10 +19,12 @@ public:
     static constexpr size_t MAX_CLIENTS = 7;
 
     bool start(httpd_handle_t server);
-    // Call before httpd_stop(), never from an httpd handler. Waits for the one
-    // outstanding callback, then releases the worker and all owned payloads.
+    // Startup cleanup / host tests only. A successful production transport
+    // lives until reboot: do not add a runtime httpd_stop flow without handling
+    // IDF's lossy UDP shutdown message. stop() joins only our scheduler;
+    // release() requires that HTTPD has exited and ALL callbacks have finished.
     void stop();
-    void release(); // after httpd_stop(): no handler/close callback may still use us
+    void release();
     bool hasClients();
     bool publish(const char *text, Kind kind);
 
@@ -49,12 +51,13 @@ private:
     bool _stopping = false;
     Client _clients[MAX_CLIENTS];
     uint32_t _generation = 0;
-    Message _pending[MAX_PENDING], _inFlight;
+    Message _pending[MAX_PENDING];
     size_t _count = 0, _bytes = 0;
 
     static void run(void *arg);
     static void deliver(void *arg);
-    bool takeNext();
+    bool takeNext(Message &message);
+    bool hasPending();
     void discard(size_t index);
     void sendTo(Client client, const char *text);
 };

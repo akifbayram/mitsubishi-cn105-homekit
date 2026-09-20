@@ -20,6 +20,8 @@ static std::mutex gateMutex, heapMutex;
 static std::condition_variable gateCv;
 static bool releaseSend = false;
 static std::atomic<int> sendCalls{0}, shutdownCalls{0}, callbacks{0};
+static std::atomic<int> dropQueuedWork{1};
+static std::atomic<bool> duplicateNextWork{true};
 static int blockFd = 42, failFd = -1;
 static bool partialSend = false;
 static std::vector<std::pair<int,std::string>> deliveries;
@@ -66,7 +68,10 @@ int xTaskCreate(void (*entry)(void *), const char *, uint32_t, void *arg, int, T
 void vTaskDelete(TaskHandle_t) {}
 int httpd_queue_work(httpd_handle_t, void (*callback)(void *), void *arg) {
     if (failQueue) return ESP_FAIL;
-    {std::lock_guard<std::mutex> lock(workMutex); work.push_back([=]{++callbacks; callback(arg);});}
+    if (dropQueuedWork.exchange(0)>0) return ESP_OK; // UDP mailbox silently discarded work
+    {std::lock_guard<std::mutex> lock(workMutex);
+     work.push_back([=]{++callbacks; callback(arg);});
+     if (duplicateNextWork.exchange(false)) work.push_back([=]{++callbacks; callback(arg);});}
     workCv.notify_one(); return ESP_OK;
 }
 int httpd_ws_get_fd_info(httpd_handle_t, int) {REQUIRE(std::this_thread::get_id()==httpdId); return HTTPD_WS_CLIENT_WEBSOCKET;}
@@ -86,7 +91,7 @@ int httpd_ws_send_frame_async(httpd_handle_t, int fd, httpd_ws_frame_t *frame) {
 class WebUI {
 public:
     void sendWsText(int fd, const char *text);
-    void broadcastWs(const char *text, WebWsTransport::Kind kind = WebWsTransport::Kind::Log);
+    bool broadcastWs(const char *text, WebWsTransport::Kind kind = WebWsTransport::Kind::Log);
     WebWsTransport _ws;
 };
 #include "boundary.inc"
@@ -127,7 +132,7 @@ int main() {
     });
     REQUIRE(ticks.wait_for(500ms)==std::future_status::ready);
     ticks.get();
-    REQUIRE(callbacks==1); // only ONE callback queued or executing
+    REQUIRE(callbacks==1); // only HTTPD executes callbacks; first send is blocked
     std::string discovery(2600,'D');
     REQUIRE(ui._ws.publish(discovery.c_str(),WebWsTransport::Kind::Discovery));
     {std::lock_guard<std::mutex> lock(heapMutex); REQUIRE(maxPayloadBytes<=WebWsTransport::MAX_BYTES);}
@@ -135,7 +140,7 @@ int main() {
     gateCv.notify_all();
     waitFor([]{std::lock_guard<std::mutex> lock(heapMutex); return payloadBytes==0;});
     {std::lock_guard<std::mutex> lock(gateMutex);
-     REQUIRE(std::any_of(deliveries.begin(),deliveries.end(),[&](const auto &delivery){return delivery.second==discovery;}));}
+     REQUIRE(std::count_if(deliveries.begin(),deliveries.end(),[&](const auto &delivery){return delivery.second==discovery;})==1);}
     std::puts("PASS: production WebUI caller keeps ticking while HTTPD send is blocked; memory bounded; one-shot discovery survives saturation");
 
     // Queue while HTTPD is held, then replace fd 42 BEFORE queued delivery.
@@ -165,8 +170,9 @@ int main() {
     failAllocation=false;
     failQueue=true;
     REQUIRE(ui._ws.publish("queue failure",WebWsTransport::Kind::State));
-    waitFor([]{std::lock_guard<std::mutex> lock(heapMutex); return payloadBytes==0;});
+    std::this_thread::sleep_for(20ms);
     failQueue=false;
+    waitFor([]{std::lock_guard<std::mutex> lock(heapMutex); return payloadBytes==0;});
     partialSend=true;
     REQUIRE(WebWsTransport::sendComplete(nullptr,43,"partial",7,0)==-1);
     partialSend=false;
@@ -178,13 +184,16 @@ int main() {
     REQUIRE(ui._ws.publish("in flight at stop",WebWsTransport::Kind::State));
     waitFor([&]{return sendCalls.load()==beforeStop+1;});
     auto stopped=std::async(std::launch::async,[&]{ui._ws.stop();});
-    REQUIRE(stopped.wait_for(20ms)==std::future_status::timeout);
+    REQUIRE(stopped.wait_for(200ms)==std::future_status::ready);
+    {std::lock_guard<std::mutex> lock(heapMutex); REQUIRE(payloadBytes>0);}
     {std::lock_guard<std::mutex> lock(gateMutex); releaseSend=true;}
     gateCv.notify_all();
     REQUIRE(stopped.wait_for(2s)==std::future_status::ready);
     stopped.get();
     REQUIRE(!ui._ws.publish("after stop",WebWsTransport::Kind::State));
     onHttpd([&]{ui._ws.disconnected(43);}); // close callback before release
+    {std::lock_guard<std::mutex> lock(workMutex); stoppingHttpd=true;}
+    workCv.notify_one(); httpd.join(); // no delayed callback can outlive transport
     ui._ws.release();
     failTask=true;
     REQUIRE(!ui._ws.start(reinterpret_cast<void *>(1)));
@@ -192,7 +201,5 @@ int main() {
     REQUIRE(ui._ws.start(reinterpret_cast<void *>(1)));
     ui._ws.stop(); ui._ws.release();
     {std::lock_guard<std::mutex> lock(heapMutex); REQUIRE(payloadBytes==0); REQUIRE(payloadSizes.empty());}
-    {std::lock_guard<std::mutex> lock(workMutex); stoppingHttpd=true;}
-    workCv.notify_one(); httpd.join();
-    std::puts("PASS: allocation/queue/task failures, short writes, stop/restart release resources");
+    std::puts("PASS: dropped-success/failed scheduling recovers; short writes and stop/restart release resources");
 }

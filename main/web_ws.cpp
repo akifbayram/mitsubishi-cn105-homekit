@@ -525,7 +525,7 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
         if (!BleSensor::isBleEnabled()) {
             LOG_WARN("BLE scan rejected — BLE not enabled");
         } else if (!BleSensor::isDiscovering()) {
-            BleSensor::startDiscovery();
+            _discoveryRequested.store(true); // start/reset pending results on main
             LOG_INFO("BLE discovery scan requested");
         }
 #endif
@@ -644,8 +644,8 @@ void WebUI::sendWsText(int fd, const char *text) {
     _ws.sendText(fd, text);
 }
 
-void WebUI::broadcastWs(const char *text, WebWsTransport::Kind kind) {
-    _ws.publish(text, kind);
+bool WebUI::broadcastWs(const char *text, WebWsTransport::Kind kind) {
+    return _ws.publish(text, kind);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -1197,9 +1197,9 @@ void WebUI::sendDeviceInfo(int fd) {
 // BLE discovery results push
 // ══════════════════════════════════════════════════════════════════════════════
 
-void WebUI::pushDiscoveryResults(bool done) {
+bool WebUI::pushDiscoveryResults(bool done) {
 #ifdef BLE_ENABLE
-    if (!_server) return;
+    if (!_server || !_ws.hasClients()) return false;
 
     BleDiscoveredDevice devs[BLE_MAX_DISCOVERED];
     bool truncated = false;
@@ -1230,10 +1230,13 @@ void WebUI::pushDiscoveryResults(bool done) {
 
     if (n >= (int)sizeof(buf)) {
         LOG_WARN("pushDiscoveryResults buffer truncated (%d >= %zu), skipping send", n, sizeof(buf));
-        return;
+        return false;
     }
 
-    broadcastWs(buf, WebWsTransport::Kind::Discovery);
+    return broadcastWs(buf, WebWsTransport::Kind::Discovery);
+#else
+    (void)done;
+    return false;
 #endif
 }
 
@@ -1251,7 +1254,7 @@ void WebUI::loop() {
     }
     // Main only captures state and queues owned messages. Socket waits and
     // client enumeration run on httpd; a full mailbox sheds best-effort logs.
-    // Four log lines cap the formatting/copy work in this 10 ms tick.
+    // Four log lines cap the formatting/copy work in this 100 ms tick.
     char logLine[256];
     for (int i = 0; i < 4; i++) {
         size_t len = logging_drain(logLine, sizeof(logLine));
@@ -1260,10 +1263,21 @@ void WebUI::loop() {
     }
 
 #ifdef BLE_ENABLE
-    if (BleSensor::pollDiscoveryComplete()) {
-        pushDiscoveryResults(true);
-    } else if (BleSensor::pollDiscoveryUpdate()) {
-        pushDiscoveryResults(false);
+    // Completion is a one-shot event, while mailbox admission is best effort.
+    // Keep it pending on main until accepted; HTTPD only posts start requests,
+    // so a new scan cannot race a retry flag or inherit a previous done=true.
+    if (_discoveryRequested.exchange(false)) {
+        BleSensor::startDiscovery();
+        _discoveryDonePending = false;
+        _discoveryPushPending = true;
     }
+    if (BleSensor::pollDiscoveryComplete()) {
+        _discoveryDonePending = true;
+        _discoveryPushPending = true;
+    } else if (BleSensor::pollDiscoveryUpdate()) {
+        _discoveryPushPending = true;
+    }
+    if (_discoveryPushPending && pushDiscoveryResults(_discoveryDonePending))
+        _discoveryPushPending = false;
 #endif
 }

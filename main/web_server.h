@@ -11,7 +11,6 @@
 class WebUI {
 public:
     void begin(CN105Controller *ctrl);
-    void stop();                       // Main task only, before stopping HTTPD
     void loop();                        // Called from main loop to push state updates
     void broadcastLog(const char *msg, size_t len); // Send log line to WS client
     void setAPMode(bool active);        // Toggle AP mode flag (controls page routing)
@@ -21,6 +20,9 @@ private:
     httpd_handle_t   _server = NULL;
     CN105Controller *_ctrl   = nullptr;
     uint32_t _lastStatePush  = 0;
+    std::atomic<bool> _discoveryRequested{false}; // HTTPD -> main command
+    bool _discoveryPushPending = false; // main-owned admission retries
+    bool _discoveryDonePending = false;
     bool _apMode = false;               // True when fallback AP is active
     WebWsTransport _ws;
     std::atomic<bool> _wsReady{false}; // close_fn may run during server startup
@@ -46,9 +48,9 @@ private:
     void handleWsMessage(httpd_req_t *req, const char *msg);
     void sendDeviceInfo(int fd);        // one-shot identity/diagnostics frame on WS connect
     void pushState();
-    void pushDiscoveryResults(bool done);
+    bool pushDiscoveryResults(bool done);
     void sendWsText(int fd, const char *text);
-    void broadcastWs(const char *text, WebWsTransport::Kind kind = WebWsTransport::Kind::Log);
+    bool broadcastWs(const char *text, WebWsTransport::Kind kind = WebWsTransport::Kind::Log);
 
     // ── WiFi credential handling (shared by REST + WS paths) ────────────────
     bool applyWifiCredentials(const char *json, const char **outError);

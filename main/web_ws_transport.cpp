@@ -4,13 +4,6 @@
 #include <initializer_list>
 #include <lwip/sockets.h>
 
-// A scheduling caller may wait for UDP control-mailbox capacity, so it must
-// NEVER be main. With this setting successful admission cannot silently lose
-// the sole outstanding callback and strand its owned payload forever.
-#if !CONFIG_HTTPD_QUEUE_WORK_BLOCKING
-#error "WebWsTransport requires CONFIG_HTTPD_QUEUE_WORK_BLOCKING=y"
-#endif
-
 bool WebWsTransport::start(httpd_handle_t server) {
     if (_mutex || _worker || !server) return false;
     _mutex = xSemaphoreCreateMutex();
@@ -40,6 +33,7 @@ void WebWsTransport::stop() {
         _stopping = true;
         xSemaphoreGive(_mutex);
         xSemaphoreGive(_ready);
+        xSemaphoreGive(_sent); // wake a scheduler waiting for a lost callback
         xSemaphoreTake(_exited, portMAX_DELAY);
         _worker = nullptr;
     }
@@ -148,11 +142,18 @@ bool WebWsTransport::publish(const char *text, Kind kind) {
     return true;
 }
 
-bool WebWsTransport::takeNext() {
+bool WebWsTransport::hasPending() {
+    xSemaphoreTake(_mutex, portMAX_DELAY);
+    const bool pending = !_stopping && _count;
+    xSemaphoreGive(_mutex);
+    return pending;
+}
+
+bool WebWsTransport::takeNext(Message &message) {
     xSemaphoreTake(_mutex, portMAX_DELAY);
     const bool available = !_stopping && _count;
     if (available) {
-        _inFlight = _pending[0];
+        message = _pending[0];
         for (size_t i = 1; i < _count; ++i) _pending[i - 1] = _pending[i];
         _pending[--_count] = {};
         // Keep these bytes charged until the httpd callback finishes.
@@ -165,14 +166,13 @@ void WebWsTransport::run(void *arg) {
     auto &self = *static_cast<WebWsTransport *>(arg);
     for (;;) {
         xSemaphoreTake(self._ready, portMAX_DELAY);
-        while (self.takeNext()) {
-            if (httpd_queue_work(self._server, deliver, &self) == ESP_OK)
-                xSemaphoreTake(self._sent, portMAX_DELAY);
-            xSemaphoreTake(self._mutex, portMAX_DELAY);
-            self._bytes -= self._inFlight.bytes;
-            free(self._inFlight.text);
-            self._inFlight = {};
-            xSemaphoreGive(self._mutex);
+        while (self.hasPending()) {
+            // In IDF's default nonblocking mode a full UDP control mailbox can
+            // lose even a successful-looking submission. Retry at 500 ms, not
+            // once per publish. Work uses only our persistent address; delayed
+            // duplicates safely drain one next message, or do nothing.
+            httpd_queue_work(self._server, deliver, &self);
+            xSemaphoreTake(self._sent, pdMS_TO_TICKS(500));
         }
         xSemaphoreTake(self._mutex, portMAX_DELAY);
         bool stopping = self._stopping;
@@ -185,8 +185,15 @@ void WebWsTransport::run(void *arg) {
 
 void WebWsTransport::deliver(void *arg) {
     auto &self = *static_cast<WebWsTransport *>(arg);
-    for (const auto &client : self._inFlight.clients)
-        if (client.fd >= 0) self.sendTo(client, self._inFlight.text);
+    Message message;
+    if (self.takeNext(message)) {
+        for (const auto &client : message.clients)
+            if (client.fd >= 0) self.sendTo(client, message.text);
+        xSemaphoreTake(self._mutex, portMAX_DELAY);
+        self._bytes -= message.bytes;
+        free(message.text);
+        xSemaphoreGive(self._mutex);
+    }
     xSemaphoreGive(self._sent);
 }
 
