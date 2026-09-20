@@ -370,8 +370,7 @@ esp_err_t WebUI::handleFavicon(httpd_req_t *req) {
 void WebUI::begin(CN105Controller *ctrl) {
     _ctrl = ctrl;
 
-    if (!_wsSendMux) _wsSendMux = xSemaphoreCreateMutex();
-    if (!_wsSendMux) LOG_ERROR("WS send mutex alloc failed — WS output disabled");
+    if (_server) return;
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port      = 80;
@@ -382,6 +381,9 @@ void WebUI::begin(CN105Controller *ctrl) {
     config.max_open_sockets = 7;
     config.lru_purge_enable = true;
     config.open_fn          = setTcpNoDelay;
+    config.close_fn         = closeClient;
+    config.global_user_ctx  = this;
+    config.global_user_ctx_free_fn = [](void *) {}; // static WebUI, not heap-owned
 
     LOG_INFO("Starting HTTP server on port %d", config.server_port);
 
@@ -390,6 +392,15 @@ void WebUI::begin(CN105Controller *ctrl) {
         LOG_ERROR("Failed to start HTTP server: %d", ret);
         return;
     }
+
+    if (!_ws.start(_server)) {
+        LOG_ERROR("WS delivery worker allocation failed");
+        httpd_stop(_server);
+        _server = nullptr;
+        return;
+    }
+
+    _wsReady.store(true);
 
     // Register GET / handler (serve HTML)
     const httpd_uri_t rootUri = {
@@ -509,4 +520,19 @@ void WebUI::begin(CN105Controller *ctrl) {
     applyCaptivePortalHandler();
 
     LOG_INFO("HTTP server started, WebSocket endpoint at /ws");
+}
+
+void WebUI::closeClient(httpd_handle_t server, int fd) {
+    auto *self = static_cast<WebUI *>(httpd_get_global_user_ctx(server));
+    if (self && self->_wsReady.load()) self->_ws.disconnected(fd);
+    close(fd); // A custom close_fn owns closing the socket.
+}
+
+void WebUI::stop() {
+    if (!_server) return;
+    _ws.stop(); // callback/worker must finish before HTTPD's handle is freed
+    httpd_stop(_server);
+    _server = nullptr;
+    _wsReady.store(false);
+    _ws.release();
 }

@@ -12,6 +12,7 @@ idf_component_register(
          "improv_serial.cpp"
          "web_server.cpp"
          "web_ws.cpp"
+         "web_ws_transport.cpp"
          "web_ota.cpp"
          "homekit_setup.cpp"
          "homekit_services_glue.cpp"

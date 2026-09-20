@@ -48,12 +48,14 @@ esp_err_t WebUI::handleWebSocket(httpd_req_t *req) {
     if (req->method == HTTP_GET) {
         int fd = httpd_req_to_sockfd(req);
 
-        // Cap send() blocking time so the httpd task can't hang for minutes when
-        // a client disappears without closing the WebSocket (half-open TCP).
-        // After timeout the send fails, ESP-IDF closes the session, and the
-        // httpd task returns to its select() loop within 5 s.
-        struct timeval tv = {.tv_sec = 5, .tv_usec = 0};
-        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+        // All WS writes (including SDK control frames) run on httpd. Retire
+        // clients that cannot accept a frame promptly instead of retrying
+        // them for seconds on every queued log/state broadcast.
+        struct timeval tv = {.tv_sec = 0, .tv_usec = 250000};
+        if (setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv)) != 0 ||
+            httpd_sess_set_send_override(req->handle, fd, WebWsTransport::sendComplete) != ESP_OK)
+            return ESP_FAIL;
+        webUI._ws.connected(fd);
 
         LOG_INFO("WebSocket client connected (fd=%d)", fd);
         // Push initial state immediately (broadcast reaches this new client too)
@@ -637,66 +639,13 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
 // ══════════════════════════════════════════════════════════════════════════════
 
 void WebUI::sendWsText(int fd, const char *text) {
-    if (fd < 0 || !_server) return;
-
-    // Serialize all frame writes: httpd_ws_send_frame_async() sends on the
-    // CALLER'S task, and senders live on many tasks (log hook on whatever task
-    // logged, state push on main + httpd). Two unserialized sends interleave
-    // mid-frame on the wire and the browser kills the socket (1007 invalid
-    // data). Bounded take: a wedged client can hold a send for the full 5s
-    // SO_SNDTIMEO — drop the frame rather than stall logging tasks behind it
-    // (logs are best-effort; state re-pushes at 1 Hz).
-    if (!_wsSendMux || xSemaphoreTake(_wsSendMux, pdMS_TO_TICKS(100)) != pdTRUE) return;
-
-    esp_err_t ret = ESP_OK;
-    // Skip fds that are no longer live WebSocket sessions (closed / plain HTTP).
-    if (httpd_ws_get_fd_info(_server, fd) == HTTPD_WS_CLIENT_WEBSOCKET) {
-        httpd_ws_frame_t frame;
-        memset(&frame, 0, sizeof(frame));
-        frame.type    = HTTPD_WS_TYPE_TEXT;
-        frame.payload = (uint8_t *)text;
-        frame.len     = strlen(text);
-        ret = httpd_ws_send_frame_async(_server, fd, &frame);
-    }
-    xSemaphoreGive(_wsSendMux);
-
-    if (ret != ESP_OK) {
-        // The warn is queued to the log ring (no re-entry into this send
-        // path); httpd reaps the dead socket on its own.
-        LOG_WARN("WS send to fd=%d failed: %d", fd, ret);
-    }
+    // Command/device-info replies originate on httpd, including replies that
+    // must flush before their handler reboots. Never queue these behind it.
+    _ws.sendText(fd, text);
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// WebSocket client enumeration + broadcast
-// ══════════════════════════════════════════════════════════════════════════════
-
-// Fill `out` with the fds of all live WebSocket clients. Returns the count.
-int WebUI::collectWsClients(int *out, int maxOut) {
-    if (!_server) return 0;
-    size_t cnt = CONFIG_LWIP_MAX_SOCKETS;
-    int fds[CONFIG_LWIP_MAX_SOCKETS];
-    if (httpd_get_client_list(_server, &cnt, fds) != ESP_OK) return 0;
-    int n = 0;
-    for (size_t i = 0; i < cnt && n < maxOut; i++) {
-        if (httpd_ws_get_fd_info(_server, fds[i]) == HTTPD_WS_CLIENT_WEBSOCKET) {
-            out[n++] = fds[i];
-        }
-    }
-    return n;
-}
-
-// Send `text` to every connected WebSocket client. Each socket's LRU counter is
-// refreshed first: a server-push-only WebSocket never *receives* traffic, so
-// esp_http_server's LRU logic would otherwise purge it when the socket pool
-// fills (a browser opening parallel HTTP connections, or a second viewer).
-void WebUI::broadcastWs(const char *text) {
-    int fds[CONFIG_LWIP_MAX_SOCKETS];
-    int n = collectWsClients(fds, CONFIG_LWIP_MAX_SOCKETS);
-    for (int i = 0; i < n; i++) {
-        httpd_sess_update_lru_counter(_server, fds[i]);
-        sendWsText(fds[i], text);
-    }
+void WebUI::broadcastWs(const char *text, WebWsTransport::Kind kind) {
+    _ws.publish(text, kind);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -726,9 +675,7 @@ static void stateAppend(char *buf, size_t cap, int *pos, int *want,
 }
 
 void WebUI::pushState() {
-    int wsFds[CONFIG_LWIP_MAX_SOCKETS];
-    int wsN = collectWsClients(wsFds, CONFIG_LWIP_MAX_SOCKETS);
-    if (wsN == 0) return;  // nobody listening — skip building the JSON
+    if (!_ws.hasClients()) return; // main never reads httpd session storage
 
     const CN105State st = _ctrl->getEffectiveState();
     const DeviceSettings &cfg = settings.get();
@@ -1165,10 +1112,7 @@ void WebUI::pushState() {
         }
     }
 
-    for (int i = 0; i < wsN; i++) {
-        httpd_sess_update_lru_counter(_server, wsFds[i]);
-        sendWsText(wsFds[i], buf);
-    }
+    broadcastWs(buf, WebWsTransport::Kind::State);
     free(buf);
 }
 
@@ -1289,7 +1233,7 @@ void WebUI::pushDiscoveryResults(bool done) {
         return;
     }
 
-    broadcastWs(buf);
+    broadcastWs(buf, WebWsTransport::Kind::Discovery);
 #endif
 }
 
@@ -1305,14 +1249,9 @@ void WebUI::loop() {
         _lastStatePush = now;
         pushState();
     }
-    // Liveness: the 1s push exercises each socket; a dead/half-open socket fails
-    // on send (SO_SNDTIMEO) and esp_http_server reaps it, so the next
-    // collectWsClients() simply omits it. No separate ping loop needed.
-
-    // Drain queued log lines to WS clients — bounded per 10 ms tick so one
-    // slow client send (SO_SNDTIMEO allows up to 5 s) can't monopolize the
-    // main loop. Producers never touch sockets (threading contract in
-    // logging.cpp); this is the single consumer.
+    // Main only captures state and queues owned messages. Socket waits and
+    // client enumeration run on httpd; a full mailbox sheds best-effort logs.
+    // Four log lines cap the formatting/copy work in this 10 ms tick.
     char logLine[256];
     for (int i = 0; i < 4; i++) {
         size_t len = logging_drain(logLine, sizeof(logLine));

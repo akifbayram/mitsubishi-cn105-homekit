@@ -23,8 +23,8 @@ LogLevel currentLogLevel = LOG_LEVEL_INFO;
 //    CONFIG_LOG_VERSION_1 it runs UNLOCKED on the calling task — including
 //    2 KB-stack tasks (Tmr Svc: captured "Stack canary watchpoint
 //    triggered" panic) and the WiFi task (a socket send here can stall it
-//    into beacon loss). Socket I/O lives exclusively in the main-task
-//    drain path.
+//    into beacon loss). The main-task drain only queues owned payloads; socket I/O
+//    runs on the HTTPD task.
 //  - Never call LOG_* while holding s_fmtMux (it is not recursive).
 static LogRing s_ring;
 static SemaphoreHandle_t s_fmtMux = nullptr;
