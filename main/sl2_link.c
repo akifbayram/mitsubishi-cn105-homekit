@@ -73,6 +73,124 @@ static bool epoch_ok(sl2_link_t *l, sl2_dial_rt_t *d, uint16_t e) {
     return false;
 }
 
+/* New session packets always echo the boot epoch: unlike legacy starts,
+ * they never use the compatibility grace period before the epoch latch. */
+static bool wifi_epoch_ok(sl2_link_t *l, sl2_dial_rt_t *d, uint16_t epoch) {
+    if (epoch != l->epoch) {
+        d->pend_state = true;
+        return false;
+    }
+    return epoch_ok(l, d, epoch);
+}
+
+static int wifi_retired_index(const sl2_dial_rt_t *d, uint32_t session) {
+    for (int i = 0; i < SL2_WIFI_SESSION_HISTORY; i++)
+        if (d->wifi_retired[i] == session) return i;
+    return -1;
+}
+
+static void wifi_retire(sl2_dial_rt_t *d, uint32_t session, uint8_t status) {
+    if (!session) return;
+    int i = wifi_retired_index(d, session);
+    if (i < 0) {
+        i = d->wifi_retired_next;
+        d->wifi_retired_next = (uint8_t)((i + 1) % SL2_WIFI_SESSION_HISTORY);
+    }
+    d->wifi_retired[i] = session;
+    d->wifi_retired_status[i] = status;
+}
+
+static bool wifi_is_owner(const sl2_link_t *l, const sl2_dial_rt_t *d,
+                           uint32_t session) {
+    return l->wifi_owner_valid && l->wifi_owner_session == session &&
+           sl2_mac_eq(l->wifi_owner_mac, d->bond.mac);
+}
+
+static void wifi_queue_setup(sl2_link_t *l, sl2_dial_rt_t *d, uint32_t session) {
+    if (session && (wifi_retired_index(d, session) >= 0 ||
+                    (wifi_is_owner(l, d, session) && l->wifi_owner_cancelled)))
+        return;
+    if (!wifi_is_owner(l, d, session) || (!session && l->wifi_owner_cancelled)) {
+        sl2_dial_rt_t *old = l->wifi_owner_valid ?
+            dial_by_mac(l, l->wifi_owner_mac) : NULL;
+        if (old) wifi_retire(old, l->wifi_owner_session, SL2_WIFI_CANCEL_STALE);
+        for (int i = 0; i < l->n_dials; i++) l->dial[i].wifi_setup_req = false;
+        l->wifi_owner_valid = true;
+        memcpy(l->wifi_owner_mac, d->bond.mac, 6);
+        l->wifi_owner_session = session;
+        l->wifi_setup_started = false;
+        l->wifi_owner_cancelled = false;
+    }
+    d->wifi_setup_req = true;
+}
+
+/* A normal connection or timeout can end setup without a CANCEL. Keep its
+ * token retired, but release its authority before a later recovery AP opens.
+ * A queued start has not taken effect; WAITING still needs an adapter verdict. */
+static void wifi_observe_ap_closed(sl2_link_t *l) {
+    if (!l->wifi_owner_valid || !l->wifi_setup_started || l->wifi_owner_cancelled)
+        return;
+    sl2_dial_rt_t *owner = dial_by_mac(l, l->wifi_owner_mac);
+    if (!owner || owner->wifi_setup_req) return;
+    l->wifi_setup_started = false;
+    l->wifi_owner_cancelled = true;
+    l->wifi_owner_cancel_status = SL2_WIFI_CANCEL_CLOSED;
+    wifi_retire(owner, l->wifi_owner_session, SL2_WIFI_CANCEL_CLOSED);
+}
+
+static uint8_t wifi_terminal_status(uint8_t cached, uint8_t ap_status) {
+    return cached == SL2_WIFI_CANCEL_CLOSED || cached == SL2_WIFI_CANCEL_RECOVERY
+        ? ap_status : cached;
+}
+
+/* Cancellation without an executed start must not call the adapter: there
+ * may be an unrelated initial/recovery AP. Report its actual state. */
+static uint8_t wifi_without_start(sl2_link_t *l) {
+    sl2_hvac_state_t state;
+    memset(&state, 0, sizeof state);
+    if (!l->hvac->get_state(l->hvac->ctx, &state) || state.setup_ap)
+        return SL2_WIFI_CANCEL_RECOVERY;
+    return SL2_WIFI_CANCEL_CLOSED;
+}
+
+static void wifi_cancel(sl2_link_t *l, sl2_dial_rt_t *d, uint32_t session) {
+    uint8_t ap_status = wifi_without_start(l);
+    if (ap_status == SL2_WIFI_CANCEL_CLOSED) wifi_observe_ap_closed(l);
+    int retired = wifi_retired_index(d, session);
+    bool owner = wifi_is_owner(l, d, session);
+    uint8_t status;
+    if (!l->hvac->wifi_cancel) {
+        status = SL2_WIFI_CANCEL_UNSUPPORTED;
+    } else if (l->wifi_owner_valid && !owner &&
+               (!l->wifi_owner_cancelled ||
+                l->wifi_owner_cancel_status == SL2_WIFI_CANCEL_WAITING)) {
+        status = SL2_WIFI_CANCEL_STALE;
+    } else if (owner && l->wifi_owner_cancelled &&
+               l->wifi_owner_cancel_status != SL2_WIFI_CANCEL_WAITING) {
+        status = wifi_terminal_status(l->wifi_owner_cancel_status, ap_status);
+    } else if (retired >= 0 &&
+               d->wifi_retired_status[retired] != SL2_WIFI_CANCEL_WAITING) {
+        status = wifi_terminal_status(d->wifi_retired_status[retired], ap_status);
+    } else if (owner && l->wifi_setup_started) {
+        status = l->hvac->wifi_cancel(l->hvac->ctx);
+        if (status > SL2_WIFI_CANCEL_UNSUPPORTED)
+            status = SL2_WIFI_CANCEL_UNSUPPORTED;
+        mark_all_state_pending(l);
+    } else {
+        status = ap_status;
+    }
+    if (owner) {
+        d->wifi_setup_req = false;
+        l->wifi_owner_cancelled = true;
+        l->wifi_owner_cancel_status = status;
+    }
+    wifi_retire(d, session, status);
+    struct sl2_wifi_cancel_ack_pkt ack = {
+        SL2_PKT_WIFI_CANCEL_ACK, SL2_PROTO_VERSION, session, status
+    };
+    l->port->send(l->port->ctx, d->bond.mac, &ack, sizeof ack);
+}
+
 /* ── STATE build + send ───────────────────────────────────────────────── */
 
 static void build_state(sl2_link_t *l, struct sl2_state_pkt *p) {
@@ -91,6 +209,7 @@ static void build_state(sl2_link_t *l, struct sl2_state_pkt *p) {
         p->room_hum_pct = SL2_HUM_NA; p->hum_set_pct = SL2_HUM_NA;
         return;
     }
+    if (!s.setup_ap) wifi_observe_ap_closed(l);
     if (s.hvac_link)        p->flags |= SL2_SF_HVAC_LINK;
     if (s.wifi)             p->flags |= SL2_SF_WIFI;
     if (s.use_f)            p->flags |= SL2_SF_USE_F;
@@ -283,6 +402,12 @@ static void pair_commit(sl2_link_t *l) {
         d = &l->dial[l->n_dials++];
         memset(d, 0, sizeof *d);
     }
+    if (l->wifi_owner_valid && sl2_mac_eq(l->wifi_owner_mac, l->cand_mac))
+        l->wifi_owner_valid = false;
+    d->wifi_setup_req = false;
+    memset(d->wifi_retired, 0, sizeof d->wifi_retired);
+    memset(d->wifi_retired_status, 0, sizeof d->wifi_retired_status);
+    d->wifi_retired_next = 0;
     memset(&d->bond, 0, sizeof d->bond);
     memcpy(d->bond.mac, l->cand_mac, 6);
     memcpy(d->bond.lmk, l->cand_lmk, 16);
@@ -395,12 +520,27 @@ void sl2_link_on_recv(sl2_link_t *l, const uint8_t src[6], const uint8_t dst[6],
         }
         break;
     case SL2_PKT_WIFI_SETUP:
-        if (len >= SL2_WIFI_SETUP_MIN_LEN) {
+        if (len == SL2_WIFI_SETUP_MIN_LEN) {
             struct sl2_wifi_setup_pkt w;
             sl2_decode_pkt(&w, sizeof w, data, len);
             if (!epoch_ok(l, d, w.epoch)) break;
-            d->wifi_setup_req = true;
+            wifi_queue_setup(l, d, 0);
             d->last_probe_ms = now;
+        } else if (len >= SL2_WIFI_SETUP_SESSION_MIN_LEN) {
+            struct sl2_wifi_setup_session_pkt w;
+            sl2_decode_pkt(&w, sizeof w, data, len);
+            if (!w.session || !wifi_epoch_ok(l, d, w.epoch)) break;
+            wifi_queue_setup(l, d, w.session);
+            d->last_probe_ms = now;
+        }
+        break;
+    case SL2_PKT_WIFI_CANCEL:
+        if (len >= SL2_WIFI_CANCEL_MIN_LEN) {
+            struct sl2_wifi_cancel_pkt w;
+            sl2_decode_pkt(&w, sizeof w, data, len);
+            if (!w.session || !wifi_epoch_ok(l, d, w.epoch)) break;
+            d->last_probe_ms = now;
+            wifi_cancel(l, d, w.session);
         }
         break;
     case SL2_PKT_DIAL_INFO:
@@ -497,8 +637,8 @@ static void serve_pulls(sl2_link_t *l, sl2_dial_rt_t *d, uint32_t now) {
     }
     if (d->wifi_setup_req) {
         d->wifi_setup_req = false;
-        if (l->hvac->wifi_setup)
-            l->hvac->wifi_setup(l->hvac->ctx);   /* AP status echoes back via STATE */
+        if (l->hvac->wifi_setup && l->hvac->wifi_setup(l->hvac->ctx))
+            l->wifi_setup_started = true; /* AP status echoes back via STATE */
     }
     if (d->room_catalog_req) {
         d->room_catalog_req = false;
@@ -687,6 +827,8 @@ bool sl2_link_forget_dial(sl2_link_t *l, const uint8_t mac[6]) {
     for (int i = 0; i < l->n_dials; i++) {
         if (!sl2_mac_eq(l->dial[i].bond.mac, mac)) continue;
         l->port->peer_del(l->port->ctx, mac);
+        if (l->wifi_owner_valid && sl2_mac_eq(l->wifi_owner_mac, mac))
+            l->wifi_owner_valid = false;
         for (int j = i; j < l->n_dials - 1; j++) l->dial[j] = l->dial[j + 1];
         l->n_dials--;
         memset(&l->dial[l->n_dials], 0, sizeof l->dial[l->n_dials]);
@@ -701,6 +843,7 @@ void sl2_link_forget_all(sl2_link_t *l) {
         l->port->peer_del(l->port->ctx, l->dial[i].bond.mac);
     memset(l->dial, 0, sizeof l->dial);
     l->n_dials = 0;
+    l->wifi_owner_valid = false;
     persist_bonds(l);
 }
 

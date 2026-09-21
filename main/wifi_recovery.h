@@ -12,10 +12,9 @@ constexpr uint32_t WIFI_RECOVERY_TIMEOUT_NORMAL = 300000;  // 5 min (after norma
 // Delay before disabling AP after WiFi reconnects (lets recovery page confirm)
 constexpr uint32_t WIFI_AP_LINGER_MS = 6000;  // 6 seconds (recovery page polls every 3s)
 
-// Change-network window: the dial's WIFI_SETUP raises the AP while the STA is
-// still connected; if nobody reconfigures, self-close after this long. (A real
-// reprovision drops the STA, which cancels this and runs the normal recovery
-// flow.) Each WIFI_SETUP re-send re-arms the window.
+// Change-network window: every WIFI_SETUP arms this bounded duration, even
+// when the STA is disconnected. Expiry ends abandoned setup; an offline unit
+// retains its recovery AP until reconnection. Submitted trials finish first.
 constexpr uint32_t WIFI_SETUP_WINDOW_MS = 600000;  // 10 minutes
 
 // Button long-press duration for WiFi reset
@@ -40,7 +39,8 @@ public:
     uint32_t buttonHeldMs() const;     // 0 = button not pressed; else ms held so far
     void setChangePending(bool pending); // Set/clear the NVS flag
     void activateNow();                  // Immediately enable fallback AP (no timeout)
-    void beginChangeWindow();            // Dial-initiated: AP now + bounded auto-close while STA stays up
+    void beginChangeWindow();            // Dial-initiated: AP now + bounded setup window
+    uint8_t cancelChangeWindow();        // SL2_WIFI_CANCEL_*; active credential trials finish first
     void noteReprovision();              // Portal applied new credentials — the change window may now
                                          // close on join success (see loop()'s level-based close)
     bool wifiChangeFailed() const;       // SL2 wifi_err: last credential change failed —
@@ -61,12 +61,14 @@ private:
     bool     _wasConnected = false;      // Track previous WiFi state
     uint32_t _disconnectedSince = 0;     // uptime_ms() when WiFi was lost (0 = connected)
     uint32_t _wifiConnectedSince = 0;    // uptime_ms() when WiFi connected (0 = not connected)
-    uint32_t _apShutdownAt = 0;          // uptime_ms() when AP should be disabled (0 = no pending shutdown)
+    uint32_t _apLingerSince = 0;         // Start of the reconnect linger (wrap-safe elapsed clock)
+    bool     _apLingerPending = false;   // Separate flag permits a start at uptime 0
     uint32_t _lastWifiCheck = 0;         // uptime_ms() of last 1 Hz WiFi/AP check
     uint32_t _buttonHeldMs = 0;          // Live hold duration from the last onButton() call
                                          // (0 = not pressed) — see button_input.h ButtonOut::heldMs
     bool     _buttonTriggered = false;   // Prevent repeat triggers
-    bool     _changeWindow = false;      // Dial-initiated change window open (AP up over a live STA).
+    uint32_t _changeWindowSince = 0;     // Start of the bounded setup duration, connected or offline
+    bool     _changeWindow = false;      // Dial-initiated change window open.
                                          // While open WITHOUT a reprovision, STA blips (the portal's
                                          // scan, beacon loss) auto-rejoin the OLD network — those
                                          // edges must not clear the pending flag, cancel the window

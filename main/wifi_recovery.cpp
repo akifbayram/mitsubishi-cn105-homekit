@@ -1,4 +1,5 @@
 #include "wifi_recovery.h"
+#include "sl2_proto.h"
 #include "improv_serial.h"
 #include "espnow_link.h"
 #include "dns_server.h"
@@ -47,6 +48,8 @@ void WifiRecovery::loop() {
     _lastWifiCheck = now;
 
     bool connected = WifiManager::isConnected();
+    bool trialActive = WifiManager::getTrialState() == WifiManager::WIFI_TRIAL_TESTING;
+    bool joinReady = connected && !WifiManager::isJoinPending() && !trialActive;
 
     // Inside a change window with no reprovision yet, a (re)connect edge is
     // the STA blipping back onto the OLD network (the portal's scan or beacon
@@ -62,23 +65,10 @@ void WifiRecovery::loop() {
                  oldNetBlip ? " (old-network blip in change window)" : "");
         _disconnectedSince = 0;
         _wifiConnectedSince = safeUptimeMs();
-
-        if (settings.get().wifiChangePending && !oldNetBlip) {
-            setChangePending(false);
-            LOG_INFO("[WiFiRecovery] Cleared wifiChangePending");
-        }
-
-        if (_apActive && _apShutdownAt == 0 && !oldNetBlip) {
-            // Delay AP shutdown so recovery page can confirm connection
-            _apShutdownAt = safeUptimeMs() + WIFI_AP_LINGER_MS;
-            LOG_INFO("[WiFiRecovery] AP shutdown in %lums (linger for recovery page)",
-                     (unsigned long)WIFI_AP_LINGER_MS);
-        }
     } else if (!connected && _wasConnected) {
         // Just disconnected
         _disconnectedSince = safeUptimeMs();
         _wifiConnectedSince = 0;
-        if (!oldNetBlip) _apShutdownAt = 0;  // Cancel pending AP shutdown (a blip keeps the window deadline)
         LOG_WARN("[WiFiRecovery] WiFi disconnected, starting recovery timer");
     } else if (!connected && _disconnectedSince > 0 && !_apActive) {
         // Still disconnected — check timeout
@@ -102,7 +92,7 @@ void WifiRecovery::loop() {
     // (true); if the STA still isn't up after the change-recovery timeout, the
     // new credentials didn't take. Latch it (fires the AP fallback too, on its
     // own path) so the dial can surface the failure. A successful join calls
-    // setChangePending(false) on the connect edge above, clearing the latch.
+    // setChangePending(false) after the trial verdict below, clearing the latch.
     if (_changeAt != 0 && !connected &&
         uptime_ms() - _changeAt >= WIFI_RECOVERY_TIMEOUT_CHANGE) {
         if (!_changeFailed)
@@ -111,37 +101,32 @@ void WifiRecovery::loop() {
         _changeFailed = true;
     }
 
-    // ── Reprovision completed (change window) ───────────────────────────────
-    // Level, not edge: the 1 Hz poll can miss the deliberate drop entirely
-    // when the new join is fast, so don't rely on the transitions above.
-    // connected && !isJoinPending() == the STA holds an IP obtained with the
-    // credentials the portal applied — collapse the window deadline to the
-    // short linger so the phone's recovery page can confirm, then close.
-    if (_changeWindow && _reprovisioned && _apActive && connected &&
-        !WifiManager::isJoinPending()) {
-        if (settings.get().wifiChangePending) {
-            setChangePending(false);
-            LOG_INFO("[WiFiRecovery] Cleared wifiChangePending (reprovision joined)");
-        }
-        uint32_t lingerAt = safeUptimeMs() + WIFI_AP_LINGER_MS;
-        if (_apShutdownAt == 0 || _apShutdownAt > lingerAt) {
-            _apShutdownAt = lingerAt;
-            LOG_INFO("[WiFiRecovery] Reprovision joined — AP shutdown in %lums",
-                     (unsigned long)WIFI_AP_LINGER_MS);
-        }
+    // The window clock is independent of STA edges and recovery linger.
+    // Never abandon a submitted credential trial before its commit/rollback.
+    if (_changeWindow && now - _changeWindowSince >= WIFI_SETUP_WINDOW_MS &&
+        !trialActive) {
+        cancelChangeWindow();
     }
 
-    // ── Deferred AP shutdown ─────────────────────────────────────────────────
-    if (_apShutdownAt > 0 && uptime_ms() >= _apShutdownAt) {
-        if (_apActive && connected) {
-            _apShutdownAt = 0;
-            disableFallbackAP();
-        } else if (!_apActive) {
-            _apShutdownAt = 0;
+    // Level-based completion also catches a fast join whose disconnect was
+    // missed by this 1 Hz poll, and a pending join that finished after cancel.
+    // GOT_IP alone is insufficient: WifiManager must finish the trial first.
+    bool canClose = joinReady && (!_changeWindow || _reprovisioned);
+    if (canClose) {
+        if (settings.get().wifiChangePending) setChangePending(false);
+        if (_apActive && !_apLingerPending) {
+            _apLingerSince = now;
+            _apLingerPending = true;
+            LOG_INFO("[WiFiRecovery] AP shutdown in %lums (linger for recovery page)",
+                     (unsigned long)WIFI_AP_LINGER_MS);
         }
-        // else: AP up but STA down at the deadline (window expired mid-blip) —
-        // keep the deadline armed and close on the next pass once connected,
-        // instead of consuming it and leaving the AP up forever.
+    } else {
+        _apLingerPending = false;
+    }
+
+    // Unsigned elapsed arithmetic handles uptime wrap and uptime zero.
+    if (_apLingerPending && now - _apLingerSince >= WIFI_AP_LINGER_MS) {
+        disableFallbackAP();
     }
 
     // ── DNS captive portal runs in its own task — no processNextRequest() needed
@@ -182,6 +167,7 @@ void WifiRecovery::disableFallbackAP() {
     dns_captive_stop();
     WifiManager::disableAP();
     _apActive = false;
+    _apLingerPending = false;
     _changeWindow = false;     // every close path ends the change window
     _reprovisioned = false;
     improv_serial_stop();
@@ -192,8 +178,7 @@ void WifiRecovery::setChangePending(bool pending) {
     settings.save();
     // Single choke point for every credential change (dial WIFI_SETUP,
     // portal /wifi-setup, Improv). (Re)start the failure clock on a new
-    // attempt; clear the latch when the change is confirmed by a join, which
-    // is the only caller that passes false (the connect edge in loop()).
+    // attempt; clear the latch on confirmed join or abandoned setup.
     _changeAt = pending ? safeUptimeMs() : 0;
     _changeFailed = false;
     refreshCachedSSID();
@@ -233,11 +218,31 @@ void WifiRecovery::beginChangeWindow() {
         _changeWindow = true;
         _reprovisioned = false;
     }
-    // STA still up = no disconnect will ever tear the AP down; arm the bounded
-    // window instead. It collapses to the short linger once a reprovision
-    // joins (level check in loop()); un-reprovisioned blips leave it alone.
-    if (WifiManager::isConnected())
-        _apShutdownAt = safeUptimeMs() + WIFI_SETUP_WINDOW_MS;
+    _changeWindowSince = uptime_ms();
+    _apLingerPending = false;
+}
+
+uint8_t WifiRecovery::cancelChangeWindow() {
+    // An initial/recovery AP is not owned by the dial's change window.
+    if (!_changeWindow)
+        return _apActive ? SL2_WIFI_CANCEL_RECOVERY : SL2_WIFI_CANCEL_CLOSED;
+
+    // The trial owns submitted credentials through persistence or rollback.
+    // Cancellation only waits; it never interrupts the join or edits credentials.
+    if (WifiManager::getTrialState() == WifiManager::WIFI_TRIAL_TESTING)
+        return SL2_WIFI_CANCEL_WAITING;
+
+    _changeWindow = false;
+    _reprovisioned = false;
+    _apLingerPending = false;
+    if (settings.get().wifiChangePending) setChangePending(false);
+    if (WifiManager::isConnected() && !WifiManager::isJoinPending()) {
+        disableFallbackAP();
+        return SL2_WIFI_CANCEL_CLOSED;
+    }
+    // End abandoned setup but preserve recovery access. The level-based
+    // completion in loop() will close the AP after a later successful join.
+    return SL2_WIFI_CANCEL_RECOVERY;
 }
 
 void WifiRecovery::noteReprovision() {
