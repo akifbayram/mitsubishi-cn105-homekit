@@ -583,6 +583,7 @@ static bool h_get_caps(void *, struct sl2_caps_pkt *out) {
     uint16_t feat = SL2_FEAT_WIFI_INFO | SL2_FEAT_HOMEKIT | SL2_FEAT_OUTSIDE_T |
                     SL2_FEAT_COMPRESSOR | SL2_FEAT_FW_INFO | SL2_FEAT_RUNTIME |
                     SL2_FEAT_LINK_OTA_CREDS | SL2_FEAT_WIFI_SETUP |
+                    SL2_FEAT_WIFI_SETUP_CANCEL |
                     SL2_FEAT_LINK_SENSOR | SL2_FEAT_ROOM_CATALOG;
                                            /* we always accept a dial-sourced
                                               * reading, BLE_ENABLE or not */
@@ -931,6 +932,11 @@ static bool h_wifi_setup(void *) {
     return true;
 }
 
+/* Same main-task context as setup and the recovery loop. */
+static uint8_t h_wifi_cancel(void *) {
+    return wifiRecovery.cancelChangeWindow();
+}
+
 /* ── caps fingerprint ─────────────────────────────────────────────────── */
 
 /* Bonded dials cache CAPS by caps_seq, which the core persists — but the
@@ -1048,6 +1054,7 @@ void EspnowLink::begin(CN105Controller *ctrl) {
     s_hvac.room_sensor = h_room_sensor;
     s_hvac.wifi_creds = h_wifi_creds;
     s_hvac.wifi_setup = h_wifi_setup;
+    s_hvac.wifi_cancel = h_wifi_cancel;
     s_hvac.room_catalog_page = h_room_catalog;
     s_hvac.room_source_get = h_room_source_get;
     s_hvac.room_source_set = h_room_source_set;

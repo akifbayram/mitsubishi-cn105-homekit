@@ -92,6 +92,10 @@ typedef struct sl2_hvac_iface {
      * then omit SL2_FEAT_WIFI_SETUP. Must be idempotent: dials re-send ~1 Hz
      * until STATE shows SL2_SF_SETUP_AP. */
     bool (*wifi_setup)(void *ctx);
+    /* End the owned change window. Return SL2_WIFI_CANCEL_*; WAITING is
+     * polled by duplicate cancels. Never remove saved/submitted credentials
+     * or an initial/recovery AP. NULL = unsupported; omit capability bit. */
+    uint8_t (*wifi_cancel)(void *ctx);
     /* Protocol-v4 named room sources. catalog_page writes at most `cap`
      * entries beginning at cursor and returns the next cursor (DONE at end).
      * revision must describe the entire ordered catalog. */
@@ -117,6 +121,10 @@ typedef enum {
     SL2_CERT_OK,              /* Serin-signed AND bound to the pinned identity */
 } sl2_cert_state_t;
 
+/* Bounded opaque-token history: rejects late starts for the last eight
+ * retired/cancelled sessions per dial (RAM only, reset with controller boot). */
+#define SL2_WIFI_SESSION_HISTORY 8
+
 /* Per-dial runtime slot (private). */
 typedef struct {
     sl2_dial_bond_t bond;
@@ -129,6 +137,9 @@ typedef struct {
     bool     pend_state;      /* STATE changed since this dial last got one */
     bool     wifi_req;        /* Link OTA creds request pending */
     bool     wifi_setup_req;  /* setup-AP request pending */
+    uint32_t wifi_retired[SL2_WIFI_SESSION_HISTORY];
+    uint8_t  wifi_retired_status[SL2_WIFI_SESSION_HISTORY];
+    uint8_t  wifi_retired_next;
     /* Pending v4 room-source requests. Only the fields the reply needs are
      * kept, not the whole packets — 15 bytes per dial instead of 24, and
      * known_revision (which nothing acts on) is not stored at all. */
@@ -164,6 +175,12 @@ typedef struct sl2_link {
     /* bonds */
     sl2_dial_rt_t dial[SL2_MAX_DIALS];
     int      n_dials;
+    bool     wifi_owner_valid;
+    uint8_t  wifi_owner_mac[6];
+    uint32_t wifi_owner_session; /* zero = legacy start, cannot be cancelled */
+    bool     wifi_setup_started;
+    bool     wifi_owner_cancelled;
+    uint8_t  wifi_owner_cancel_status;
     /* shared STATE change detection */
     struct sl2_state_pkt last_state;
     bool     have_last_state;

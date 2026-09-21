@@ -46,7 +46,9 @@ enum sl2_pkt_type {
     SL2_PKT_ROOM_CATALOG_RESP = 14,
     SL2_PKT_ROOM_SOURCE_SET = 15,
     SL2_PKT_ROOM_SOURCE_ACK = 16,
-    /* 17..127 reserved for core growth; 128..255 experiments, never shipped */
+    SL2_PKT_WIFI_CANCEL = 17,
+    SL2_PKT_WIFI_CANCEL_ACK = 18,
+    /* 19..127 reserved for core growth; 128..255 experiments, never shipped */
 };
 
 /* ── semantic HVAC model ──────────────────────────────────────────────── */
@@ -304,6 +306,7 @@ enum {  /* sl2_caps_pkt.features — telemetry/services the controller offers */
     SL2_FEAT_SCREEN         = 1u << 11, /* runs a screen gate (SL2_SF2_SCREEN_*)
                                          * and wants SL2_DSF_SCREEN_* status back */
     SL2_FEAT_ROOM_CATALOG   = 1u << 12, /* named room-source catalog + selection */
+    SL2_FEAT_WIFI_SETUP_CANCEL = 1u << 13, /* session-scoped setup cancellation */
     /* bits 13-15 spare */
 };
 
@@ -557,6 +560,36 @@ struct __attribute__((packed)) sl2_wifi_setup_pkt {
 };
 #define SL2_WIFI_SETUP_MIN_LEN 4
 
+/* Capability-gated extension; preserve the legacy four-byte struct above.
+ * session is nonzero, opaque, and constant across one wizard's retries. */
+struct __attribute__((packed)) sl2_wifi_setup_session_pkt {
+    uint8_t type, version;
+    uint16_t epoch;
+    uint32_t session;
+};
+#define SL2_WIFI_SETUP_SESSION_MIN_LEN 8
+
+struct __attribute__((packed)) sl2_wifi_cancel_pkt {
+    uint8_t type, version;
+    uint16_t epoch;
+    uint32_t session;
+};
+#define SL2_WIFI_CANCEL_MIN_LEN 8
+
+enum sl2_wifi_cancel_status {
+    SL2_WIFI_CANCEL_CLOSED = 0,
+    SL2_WIFI_CANCEL_WAITING = 1,
+    SL2_WIFI_CANCEL_RECOVERY = 2,
+    SL2_WIFI_CANCEL_STALE = 3,
+    SL2_WIFI_CANCEL_UNSUPPORTED = 4,
+};
+struct __attribute__((packed)) sl2_wifi_cancel_ack_pkt {
+    uint8_t type, version;
+    uint32_t session;
+    uint8_t status;
+};
+#define SL2_WIFI_CANCEL_ACK_MIN_LEN 7
+
 /* ── DIAL_INFO (dial -> ctrl, encrypted, push) ────────────────────────────
  * The dial reports its own identity so the unit's UI can show which Link is
  * paired. Sent on connect, on caps_seq change, and ~every 60 s. model/fw are
@@ -653,6 +686,9 @@ SL2_STATIC_ASSERT(sizeof(struct sl2_info_pkt)      == 4,   info_size);
 SL2_STATIC_ASSERT(sizeof(struct sl2_wifi_req_pkt)  == 4,   wifi_req_size);
 SL2_STATIC_ASSERT(sizeof(struct sl2_wifi_resp_pkt) == 103, wifi_resp_size);
 SL2_STATIC_ASSERT(sizeof(struct sl2_wifi_setup_pkt) == 4,  wifi_setup_size);
+SL2_STATIC_ASSERT(sizeof(struct sl2_wifi_setup_session_pkt) == 8, wifi_setup_session_size);
+SL2_STATIC_ASSERT(sizeof(struct sl2_wifi_cancel_pkt) == 8, wifi_cancel_size);
+SL2_STATIC_ASSERT(sizeof(struct sl2_wifi_cancel_ack_pkt) == 7, wifi_cancel_ack_size);
 SL2_STATIC_ASSERT(sizeof(struct sl2_dial_info_pkt) == 43,  dial_info_size);
 SL2_STATIC_ASSERT(sizeof(struct sl2_dial_sensor_pkt) == 9, dial_sensor_size);
 SL2_STATIC_ASSERT(sizeof(struct sl2_room_source_entry) == 34, room_source_entry_size);
