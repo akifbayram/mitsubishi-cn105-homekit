@@ -997,11 +997,20 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
         <button class="btn-secondary" onclick="exportSettings()">Export Settings</button>
         <label class="btn-secondary" style="cursor:pointer">Import Settings<input type="file" accept=".json,application/json" hidden onchange="importSettings(this)"></label>
       </div>
-      <details class="advanced">
+      <details class="advanced" id="deviceAdvanced">
         <summary>Advanced</summary>
         <div class="inset-row" style="padding:13px 0">
           <div><div class="lbl">Poll Interval</div><div class="sub">Lower is more responsive; higher is gentler on the bus. Applied on Save Settings.</div></div>
           <div class="num-chip"><input type="number" id="cfgPoll" min="500" max="30000" step="500" value="2000" aria-label="Poll interval in milliseconds"><span class="unit">ms</span></div>
+        </div>
+        <div class="inset-block" style="padding:13px 0">
+          <div class="lbl">CN105 Baud Rate</div>
+          <div class="sub" style="margin:2px 0 10px;max-width:none">Leave this at 2400 unless the heat pump never connects. Some units, including many SEZ-KD ducted units, need 9600. If it still doesn't connect after switching, power-cycle the indoor unit at its breaker. Applied on Save Settings.</div>
+          <div class="seg compact" id="baudGrp" aria-label="CN105 baud rate">
+            <div class="seg-bg"></div>
+            <button data-v="2400" class="active" onclick="setBaud(this)">2400</button>
+            <button data-v="9600" onclick="setBaud(this)">9600</button>
+          </div>
         </div>
         <p class="setting-caption" style="margin:8px 0 10px">
           Factory reset erases everything — Wi-Fi credentials, HomeKit pairing, paired Link, and all settings — and restarts the device into setup mode. This cannot be undone.
@@ -1205,8 +1214,13 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       bg.style.width=active.offsetWidth+'px';
     });
   }
-  var segGroups=['modeGrp','fanGrp','vaneGrp','wideVaneGrp','unitGrp','vaneTypeGrp','logLevelGrp','roomModeSeg'];
+  var segGroups=['modeGrp','fanGrp','vaneGrp','wideVaneGrp','unitGrp','vaneTypeGrp','logLevelGrp','roomModeSeg','baudGrp'];
   window.addEventListener('resize',function(){segGroups.forEach(updateSegBg)});
+  // The baud control lives in a <details> that starts closed, where the thumb
+  // measures zero — place it once the disclosure opens.
+  document.getElementById('deviceAdvanced').addEventListener('toggle',function(){
+    if(this.open) updateSegBg('baudGrp');
+  });
 
   // ── Collapsible sections ─────────────────────────────────────────────────────
   // Turns a .group-label header into a tappable disclosure row (a real <button>
@@ -2290,6 +2304,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       if(s.deviceName&&!$('cfgDeviceName').matches(':focus')) $('cfgDeviceName').value=s.deviceName;
       if(s.pollInterval!=null&&!$('cfgPoll').matches(':focus')) $('cfgPoll').value=s.pollInterval;
       if(s.vaneConfig!=null) setActive('vaneTypeGrp',String(s.vaneConfig));
+      if(s.cn105Baud!=null) setActive('baudGrp',String(s.cn105Baud));
       if(s.modeMask!=null) applyCapMask(s.modeMask);
     }
     if(s.nightLat!=null&&!$('cfgNightLat').matches(':focus')) $('cfgNightLat').value=s.nightLat;
@@ -3203,6 +3218,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   }
 
   window.setVaneType=function(b){setActive('vaneTypeGrp',b.getAttribute('data-v'));settingsDirty=true;};
+  window.setBaud=function(b){setActive('baudGrp',b.getAttribute('data-v'));settingsDirty=true;};
   // Log level lives in the Logs card, away from the Device card's Save button,
   // so it applies on tap. The firmware's config handler takes each field
   // independently, so a logLevel-only frame is a valid partial config.
@@ -3217,15 +3233,18 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   };
   window.saveConfig=function(){
     var name=$('cfgDeviceName').value.replace(/["\\\n\r]/g,'').trim();
+    var baud=parseInt(getSegVal('baudGrp'));
     var ok=send({
       cmd:'config',
       deviceName:name,
       pollInterval:parseInt($('cfgPoll').value),
+      cn105Baud:baud,
       vaneConfig:parseInt(getSegVal('vaneTypeGrp')),
       modeMask:getCapMask()
     });
     if(ok) settingsDirty=false;
-    showToast(ok?'Settings saved':'Not connected — not saved',!ok);
+    var rebaud=ok&&lastState&&lastState.cn105Baud!=null&&lastState.cn105Baud!==baud;
+    showToast(!ok?'Not connected — not saved':rebaud?'Settings saved — reconnecting at '+baud+' baud':'Settings saved',!ok);
   };
 
   window.saveWifi=function(){
@@ -3662,7 +3681,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     var s=lastState;
     if(!s){showToast('Not connected — nothing to export',true);return}
     var out={app:'cn105-homekit-settings',v:1,fw:RUNNING_FW_VER,exported:new Date().toISOString(),
-      settings:{deviceName:s.deviceName,tempUnit:s.tempUnit,pollInterval:s.pollInterval,logLevel:s.logLevel,
+      settings:{deviceName:s.deviceName,tempUnit:s.tempUnit,pollInterval:s.pollInterval,cn105Baud:s.cn105Baud,logLevel:s.logLevel,
         vaneConfig:s.vaneConfig,modeMask:s.modeMask,heatThresh:s.heatThresh,coolThresh:s.coolThresh}};
     // roomSource is not BLE-specific (Internal/Link don't need BLE at all), so
     // it rides at the top level rather than inside the ble sub-object.
@@ -3695,6 +3714,10 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       if(typeof st.deviceName==='string') cfg.deviceName=st.deviceName.replace(/["\\\n\r]/g,'').trim();
       if(st.tempUnit==='C'||st.tempUnit==='F') cfg.tempUnit=st.tempUnit;
       if(typeof st.pollInterval==='number') cfg.pollInterval=st.pollInterval;
+      // Absent in files from before the setting: the device keeps its rate.
+      // Any number goes through; the firmware accepts only 2400/9600 and logs
+      // a rejection.
+      if(typeof st.cn105Baud==='number') cfg.cn105Baud=st.cn105Baud;
       if(typeof st.logLevel==='number') cfg.logLevel=st.logLevel;
       if(typeof st.vaneConfig==='number') cfg.vaneConfig=st.vaneConfig;
       if(typeof st.modeMask==='number') cfg.modeMask=st.modeMask;

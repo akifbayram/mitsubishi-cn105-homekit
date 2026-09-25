@@ -304,6 +304,21 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
             }
         }
 
+        // Save Settings sends every field, so only an actual change reaches
+        // the UART — re-applying the same rate would drop a working link.
+        if (jsonGetInt(msg, "cn105Baud", &intVal)) {
+            const uint32_t oldBaud = settings.get().cn105Baud;
+            if (!cn105_baud_valid(intVal)) {
+                LOG_WARN("Config cn105Baud=%d rejected (2400 or 9600 only), keeping %lu",
+                         intVal, (unsigned long)oldBaud);
+            } else if ((uint32_t)intVal != oldBaud) {
+                settings.get().cn105Baud = (uint32_t)intVal;
+                _ctrl->setBaudRate((uint32_t)intVal);
+                LOG_INFO("Config cn105Baud=%d (was %lu)", intVal, (unsigned long)oldBaud);
+                changed = true;
+            }
+        }
+
         if (jsonGetInt(msg, "vaneConfig", &intVal)) {
             if (intVal >= 0 && intVal <= 2) {
                 settings.get().vaneConfig = (uint8_t)intVal;
@@ -899,6 +914,7 @@ void WebUI::pushState() {
     stateAppend(buf, bufSz, &n, &want,
         ",\"logLevel\":%d"
         ",\"pollInterval\":%lu"
+        ",\"cn105Baud\":%lu"
         ",\"tempUnit\":\"%s\""
         ",\"betaChannel\":%s"
         ",\"vaneConfig\":%d"
@@ -912,6 +928,7 @@ void WebUI::pushState() {
         ",\"hkSetupURI\":\"%s\"",
         (int)cfg.logLevel,
         (unsigned long)cfg.pollMs,
+        (unsigned long)cfg.cn105Baud,
         cfg.useFahrenheit ? "F" : "C",
         cfg.betaChannel ? "true" : "false",
         (int)cfg.vaneConfig,

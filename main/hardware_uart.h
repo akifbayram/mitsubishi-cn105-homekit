@@ -72,6 +72,16 @@ public:
         uart_flush_input(_uartNum);
     }
 
+    bool setBaudRate(uint32_t baud) override {
+        static const char *TAG = "uart";
+        esp_err_t err = uart_set_baudrate(_uartNum, baud);
+        uint32_t actual = 0;
+        uart_get_baudrate(_uartNum, &actual);
+        LOG_INFO("uart_set_baudrate(%lu): %s, verified baud=%lu",
+                 (unsigned long)baud, esp_err_to_name(err), (unsigned long)actual);
+        return err == ESP_OK;
+    }
+
     bool waitForData(uint32_t timeoutMs) override {
         if (!_eventQueue) return false;
         uart_event_t event;

@@ -8,6 +8,7 @@
 #include "branding.h"
 #include "ble_config.h"
 #include "mode_caps.h"
+#include "cn105_baud.h"
 
 // Bump when a stored key's meaning or encoding changes, and add a
 // `if (storedVer < N) { ...migrate... }` branch in SettingsStore::begin().
@@ -46,6 +47,7 @@ struct BleSensorCfg {
 struct DeviceSettings {
     LogLevel logLevel    = LOG_LEVEL_INFO;
     uint32_t pollMs      = 2000;
+    uint32_t cn105Baud   = CN105_BAUD_DEFAULT;  // 2400 or 9600 (cn105_baud.h)
     char     deviceName[32] = BRAND_NAME;
     float    heatingThreshold = 20.0f;  // AUTO mode heating target
     float    coolingThreshold = 25.0f;  // AUTO mode cooling target

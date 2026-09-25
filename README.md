@@ -376,7 +376,7 @@ The page is organised into cards:
 - **Network · Wi-Fi** — current network and uptime, a scan list of nearby networks, credential entry with trial-before-save, and *Forget Wi-Fi…* under **Advanced**
 - **HomeKit** — pairing status, controller count, setup code with copy button, QR code, and reset pairing
 - **Link** — paired dial model, firmware, signal, last seen; pair, cancel, and forget (see [Serin Link](#serin-link))
-- **Device** — device name, °C/°F, vane type, Unit Capabilities (which HVAC modes your unit actually has), log level, poll interval, settings export/import, and factory reset behind an **Advanced** disclosure
+- **Device** — device name, °C/°F, vane type, Unit Capabilities (which HVAC modes your unit actually has), log level, and settings export/import; poll interval, CN105 baud rate, and factory reset sit behind an **Advanced** disclosure
 - **Firmware** — installed version, Check for Updates, manual `.bin` upload, **Flash LED** to identify the device, and Restart (see [OTA Updates](#ota-updates))
 - **About** — board, firmware, IP, mDNS name, MAC, last reset reason, boot and crash counts, free and lowest-ever heap, WiFi and heat-pump drop counters, a persistent device event log, one-tap **Copy Diagnostics** for support, and the safe-mode banner
 - **Diagnostics · Logs** — real-time log streaming over WebSocket
@@ -397,7 +397,7 @@ Thermostat mode mappings, FAN/DRY mode switches, fan speed percentages, dual set
 
 ## CN105 Protocol
 
-2400 baud, 8E1 serial protocol over the CN105 connector. See [Protocol Reference](docs/protocol.md) for packet format and polling cycle details, and the [muart-group wiki](https://muart-group.github.io/) for community protocol documentation.
+8E1 serial protocol over the CN105 connector, at 2400 baud by default. Some indoor units, including many SEZ-KD ducted units, answer only at 9600: switch **Device** → **Advanced** → *CN105 Baud Rate* if the heat pump never connects. See [Protocol Reference](docs/protocol.md) for packet format and polling cycle details, and the [muart-group wiki](https://muart-group.github.io/) for community protocol documentation.
 
 ## Troubleshooting
 

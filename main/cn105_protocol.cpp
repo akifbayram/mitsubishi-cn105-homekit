@@ -31,9 +31,10 @@ static const uint8_t POLL_TYPES[CN105_POLL_PHASE_COUNT] = {
 
 CN105Controller::CN105Controller() {}
 
-void CN105Controller::begin(uart_port_t uartNum, int rxPin, int txPin) {
+void CN105Controller::begin(uart_port_t uartNum, int rxPin, int txPin, uint32_t baud) {
 #ifndef UNIT_TEST
-    _hwUart = new HardwareUart(uartNum, rxPin, txPin, CN105_BAUD_RATE);
+    _baudRate = baud;
+    _hwUart = new HardwareUart(uartNum, rxPin, txPin, baud);
     begin(_hwUart);
 #endif
 }
@@ -113,6 +114,13 @@ CN105State CN105Controller::getEffectiveState() const {
 
 void CN105Controller::loop() {
     uint32_t now = uptime_ms();
+
+    // ── Baud-rate change (staged by setBaudRate, before any RX at the old rate)
+    taskENTER_CRITICAL(&_mux);
+    const uint32_t newBaud = _pendingBaud;
+    _pendingBaud = 0;
+    taskEXIT_CRITICAL(&_mux);
+    if (newBaud) applyBaudRate(newBaud);
 
     // ── Read any incoming bytes ─────────────────────────────────────────────
     readSerial();
@@ -242,6 +250,40 @@ void CN105Controller::loop() {
         _cycleRunning = false;
         _awaitingResponse = false;
     }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Line rate
+// ════════════════════════════════════════════════════════════════════════════
+
+void CN105Controller::setBaudRate(uint32_t baud) {
+    taskENTER_CRITICAL(&_mux);
+    _pendingBaud = baud;
+    taskEXIT_CRITICAL(&_mux);
+}
+
+// CN105 task only. Everything learned at the old rate is dropped and the
+// handshake starts again from attempt 1, exactly as after a comms loss.
+void CN105Controller::applyBaudRate(uint32_t baud) {
+    if (baud == _baudRate) return;
+    const uint32_t oldBaud = _baudRate;
+    if (!_uart->setBaudRate(baud)) {
+        LOG_ERROR("CN105 baud change %lu -> %lu failed; staying at %lu until restart",
+                  (unsigned long)oldBaud, (unsigned long)baud, (unsigned long)oldBaud);
+        return;
+    }
+    _baudRate = baud;
+    _uart->flush();
+    _rxLen = 0;
+    taskENTER_CRITICAL(&_mux);
+    _state.connected = false;
+    _lastSuccessfulResponse = 0;
+    taskEXIT_CRITICAL(&_mux);
+    _connectRetries = 0;
+    _cycleRunning = false;
+    _awaitingResponse = false;
+    LOG_INFO("CN105 baud %lu -> %lu, restarting connect handshake",
+             (unsigned long)oldBaud, (unsigned long)baud);
 }
 
 // ════════════════════════════════════════════════════════════════════════════

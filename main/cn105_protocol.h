@@ -9,6 +9,7 @@
 #include <freertos/task.h>
 #include "logging.h"
 #include "uart_interface.h"
+#include "cn105_baud.h"
 #ifndef UNIT_TEST
 #include "hardware_uart.h"
 #endif
@@ -102,7 +103,6 @@ constexpr float CN105_TEMP_MAX         = 30.5f;
 
 // ── Timing ──────────────────────────────────────────────────────────────────
 // Follows MitsubishiCN105ESPHome reference project timing
-constexpr uint32_t CN105_BAUD_RATE         = 2400;
 constexpr uint32_t CN105_RESPONSE_TIMEOUT  = 1000;   // ms
 constexpr uint32_t CN105_UPDATE_INTERVAL   = 2000;    // ms — matches reference default (2s)
 constexpr uint32_t CN105_CONNECT_INTERVAL  = 3000;    // ms between connect retries
@@ -179,7 +179,8 @@ public:
     CN105Controller();
 
     /// Initialize UART via ESP-IDF driver (call once in setup)
-    void begin(uart_port_t uartNum, int rxPin, int txPin);
+    void begin(uart_port_t uartNum, int rxPin, int txPin,
+               uint32_t baud = CN105_BAUD_DEFAULT);
 
     /// Initialize with an injected UART (for testing)
     void begin(UartInterface *uart);
@@ -255,6 +256,14 @@ public:
     /// Runtime-configurable update interval (poll period)
     void setUpdateInterval(uint32_t ms) { _updateInterval = ms; }
 
+    /// Switch the UART to `baud` and restart the connect handshake at it.
+    /// Safe to call from any task: the CN105 task applies it from loop().
+    /// Callers validate with cn105_baud_valid() first.
+    void setBaudRate(uint32_t baud);
+
+    /// The rate the UART is running at.
+    uint32_t baudRate() const { return _baudRate; }
+
     /// Communication-loss timeout: 6 × the runtime poll interval, floored at
     /// the compile-time default. The poll interval is user-settable up to
     /// 30 s; a fixed 12 s timeout would falsely declare the link dead there.
@@ -320,14 +329,21 @@ private:
     WantedSettings _wanted;
 
     // One rule for all cross-task protocol state: _staged/_sendRequested,
-    // _wanted, _pendingRemoteTemp*, _state, and _lastSuccessfulResponse are
-    // only touched under this lock — writers (the CN105 task) and readers
-    // alike. Held only for short copies/flag flips — never across UART I/O
-    // or logging.
+    // _wanted, _pendingRemoteTemp*, _pendingBaud, _state, and
+    // _lastSuccessfulResponse are only touched under this lock — writers (the
+    // CN105 task) and readers alike. Held only for short copies/flag flips —
+    // never across UART I/O or logging.
     mutable portMUX_TYPE _mux = portMUX_INITIALIZER_UNLOCKED;
 
     // ── Runtime-configurable timing ─────────────────────────────────────────
     uint32_t _updateInterval = CN105_UPDATE_INTERVAL;
+
+    // ── Line rate ────────────────────────────────────────────────────────────
+    // _baudRate is written only by begin() and the CN105 task; a lone aligned
+    // word, read lock-free like isConnected(). _pendingBaud is setBaudRate()'s
+    // request for the CN105 task, 0 = none.
+    uint32_t _baudRate    = CN105_BAUD_DEFAULT;
+    uint32_t _pendingBaud = 0;
 
     // ── Temperature encoding mode ────────────────────────────────────────
     bool _tempMode = false;  // true = unit supports enhanced temp byte (data[11])
@@ -353,4 +369,5 @@ private:
     void handleInfoResponse(const uint8_t *data, uint8_t dataLen);
     void readSerial();
     void sendRemoteTempPacket(float tempC);
+    void applyBaudRate(uint32_t baud);
 };
