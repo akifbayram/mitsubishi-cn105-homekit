@@ -179,8 +179,7 @@ public:
     CN105Controller();
 
     /// Initialize UART via ESP-IDF driver (call once in setup)
-    void begin(uart_port_t uartNum, int rxPin, int txPin,
-               uint32_t baud = CN105_BAUD_DEFAULT);
+    void begin(uart_port_t uartNum, int rxPin, int txPin, uint32_t baud);
 
     /// Initialize with an injected UART (for testing)
     void begin(UartInterface *uart);
@@ -261,7 +260,8 @@ public:
     /// Callers validate with cn105_baud_valid() first.
     void setBaudRate(uint32_t baud);
 
-    /// The rate the UART is running at.
+    /// The rate the UART is running at. For the startup log, before
+    /// startTask(); afterwards the CN105 task may change it.
     uint32_t baudRate() const { return _baudRate; }
 
     /// Communication-loss timeout: 6 × the runtime poll interval, floored at
@@ -339,8 +339,8 @@ private:
     uint32_t _updateInterval = CN105_UPDATE_INTERVAL;
 
     // ── Line rate ────────────────────────────────────────────────────────────
-    // _baudRate is written only by begin() and the CN105 task; a lone aligned
-    // word, read lock-free like isConnected(). _pendingBaud is setBaudRate()'s
+    // _baudRate is CN105-task state (set by begin(), changed only by
+    // applyBaudRate()), not cross-task. _pendingBaud is setBaudRate()'s
     // request for the CN105 task, 0 = none.
     uint32_t _baudRate    = CN105_BAUD_DEFAULT;
     uint32_t _pendingBaud = 0;
@@ -370,4 +370,5 @@ private:
     void readSerial();
     void sendRemoteTempPacket(float tempC);
     void applyBaudRate(uint32_t baud);
+    void restartHandshake();
 };

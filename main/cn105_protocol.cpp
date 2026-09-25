@@ -243,13 +243,20 @@ void CN105Controller::loop() {
         LOG_ERROR("COMMUNICATION LOST! No response for %lums (timeout=%lums)",
                   (unsigned long)(nowMs - _lastSuccessfulResponse),
                   (unsigned long)commsTimeoutMs());
-        taskENTER_CRITICAL(&_mux);
-        _state.connected = false;
-        taskEXIT_CRITICAL(&_mux);
-        _connectRetries = 0;
-        _cycleRunning = false;
-        _awaitingResponse = false;
+        restartHandshake();
     }
+}
+
+// Back to the connect phase, handshake from attempt 1: the CN105 task's
+// answer to a lost link and to a new line rate.
+void CN105Controller::restartHandshake() {
+    taskENTER_CRITICAL(&_mux);
+    _state.connected = false;
+    _lastSuccessfulResponse = 0;
+    taskEXIT_CRITICAL(&_mux);
+    _connectRetries = 0;
+    _cycleRunning = false;
+    _awaitingResponse = false;
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -262,8 +269,9 @@ void CN105Controller::setBaudRate(uint32_t baud) {
     taskEXIT_CRITICAL(&_mux);
 }
 
-// CN105 task only. Everything learned at the old rate is dropped and the
-// handshake starts again from attempt 1, exactly as after a comms loss.
+// CN105 task only. Bytes buffered at the old rate are discarded and the link
+// restarts as after a comms loss; what was learned about the unit itself
+// (tempMode, error-poll support) is kept.
 void CN105Controller::applyBaudRate(uint32_t baud) {
     if (baud == _baudRate) return;
     const uint32_t oldBaud = _baudRate;
@@ -275,13 +283,7 @@ void CN105Controller::applyBaudRate(uint32_t baud) {
     _baudRate = baud;
     _uart->flush();
     _rxLen = 0;
-    taskENTER_CRITICAL(&_mux);
-    _state.connected = false;
-    _lastSuccessfulResponse = 0;
-    taskEXIT_CRITICAL(&_mux);
-    _connectRetries = 0;
-    _cycleRunning = false;
-    _awaitingResponse = false;
+    restartHandshake();
     LOG_INFO("CN105 baud %lu -> %lu, restarting connect handshake",
              (unsigned long)oldBaud, (unsigned long)baud);
 }

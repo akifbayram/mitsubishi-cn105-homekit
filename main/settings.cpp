@@ -555,7 +555,8 @@ void SettingsStore::save() {
     nvs_commit(_handle);
     _generation++;
 
-    LOG_INFO("[Settings] Saved: logLevel=%d poll=%lums name=%s unit=%s",
-             _settings.logLevel, (unsigned long)_settings.pollMs, _settings.deviceName,
+    LOG_INFO("[Settings] Saved: logLevel=%d poll=%lums baud=%lu name=%s unit=%s",
+             _settings.logLevel, (unsigned long)_settings.pollMs,
+             (unsigned long)_settings.cn105Baud, _settings.deviceName,
              _settings.useFahrenheit ? "F" : "C");
 }

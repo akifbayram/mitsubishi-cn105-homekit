@@ -304,11 +304,16 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
             }
         }
 
+        // Keyed on presence, not on a successful parse, so a string or null
+        // (a hand-edited settings file) is rejected and logged, not skipped.
         // Save Settings sends every field, so only an actual change reaches
         // the UART — re-applying the same rate would drop a working link.
-        if (jsonGetInt(msg, "cn105Baud", &intVal)) {
+        if (strstr(msg, "\"cn105Baud\":")) {
             const uint32_t oldBaud = settings.get().cn105Baud;
-            if (!cn105_baud_valid(intVal)) {
+            if (!jsonGetInt(msg, "cn105Baud", &intVal)) {
+                LOG_WARN("Config cn105Baud rejected (not a number), keeping %lu",
+                         (unsigned long)oldBaud);
+            } else if (!cn105_baud_valid(intVal)) {
                 LOG_WARN("Config cn105Baud=%d rejected (2400 or 9600 only), keeping %lu",
                          intVal, (unsigned long)oldBaud);
             } else if ((uint32_t)intVal != oldBaud) {

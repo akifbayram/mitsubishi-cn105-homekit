@@ -997,7 +997,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
         <button class="btn-secondary" onclick="exportSettings()">Export Settings</button>
         <label class="btn-secondary" style="cursor:pointer">Import Settings<input type="file" accept=".json,application/json" hidden onchange="importSettings(this)"></label>
       </div>
-      <details class="advanced" id="deviceAdvanced">
+      <details class="advanced">
         <summary>Advanced</summary>
         <div class="inset-row" style="padding:13px 0">
           <div><div class="lbl">Poll Interval</div><div class="sub">Lower is more responsive; higher is gentler on the bus. Applied on Save Settings.</div></div>
@@ -1216,11 +1216,16 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   }
   var segGroups=['modeGrp','fanGrp','vaneGrp','wideVaneGrp','unitGrp','vaneTypeGrp','logLevelGrp','roomModeSeg','baudGrp'];
   window.addEventListener('resize',function(){segGroups.forEach(updateSegBg)});
-  // The baud control lives in a <details> that starts closed, where the thumb
-  // measures zero — place it once the disclosure opens.
-  document.getElementById('deviceAdvanced').addEventListener('toggle',function(){
-    if(this.open) updateSegBg('baudGrp');
-  });
+  // A segmented control inside a closed <details> measures zero (Safari lays
+  // none of it out) — place its thumb once the disclosure opens.
+  (function(){
+    var ds=document.querySelectorAll('details');
+    for(var i=0;i<ds.length;i++) ds[i].addEventListener('toggle',function(){
+      if(!this.open) return;
+      var segs=this.querySelectorAll('.seg[id]');
+      for(var j=0;j<segs.length;j++) updateSegBg(segs[j].id);
+    });
+  })();
 
   // ── Collapsible sections ─────────────────────────────────────────────────────
   // Turns a .group-label header into a tappable disclosure row (a real <button>
@@ -3243,8 +3248,8 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       modeMask:getCapMask()
     });
     if(ok) settingsDirty=false;
-    var rebaud=ok&&lastState&&lastState.cn105Baud!=null&&lastState.cn105Baud!==baud;
-    showToast(!ok?'Not connected — not saved':rebaud?'Settings saved — reconnecting at '+baud+' baud':'Settings saved',!ok);
+    var baudChanged=ok&&lastState&&lastState.cn105Baud!=null&&lastState.cn105Baud!==baud;
+    showToast(!ok?'Not connected — not saved':baudChanged?'Settings saved — reconnecting at '+baud+' baud':'Settings saved',!ok);
   };
 
   window.saveWifi=function(){
@@ -3715,9 +3720,9 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       if(st.tempUnit==='C'||st.tempUnit==='F') cfg.tempUnit=st.tempUnit;
       if(typeof st.pollInterval==='number') cfg.pollInterval=st.pollInterval;
       // Absent in files from before the setting: the device keeps its rate.
-      // Any number goes through; the firmware accepts only 2400/9600 and logs
-      // a rejection.
-      if(typeof st.cn105Baud==='number') cfg.cn105Baud=st.cn105Baud;
+      // Any present value goes through unfiltered; the firmware accepts only
+      // 2400/9600 and logs a rejection.
+      if('cn105Baud' in st) cfg.cn105Baud=st.cn105Baud;
       if(typeof st.logLevel==='number') cfg.logLevel=st.logLevel;
       if(typeof st.vaneConfig==='number') cfg.vaneConfig=st.vaneConfig;
       if(typeof st.modeMask==='number') cfg.modeMask=st.modeMask;
