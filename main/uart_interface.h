@@ -23,4 +23,7 @@ public:
     /// Block until data is available or timeout expires.
     /// Returns true if data arrived, false on timeout.
     virtual bool waitForData(uint32_t timeoutMs) { (void)timeoutMs; return false; }
+
+    /// Change the line rate in place. Returns false if the port can't.
+    virtual bool setBaudRate(uint32_t baud) { (void)baud; return false; }
 };

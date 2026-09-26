@@ -125,6 +125,14 @@ inline bool jsonGetInt(const char *json, const char *key, int *out) {
     return true;
 }
 
+// True if the key is present, whatever its value's type. Lets a handler
+// reject (and log) a value the typed getters above would silently skip.
+inline bool jsonHasKey(const char *json, const char *key) {
+    char pattern[64];
+    snprintf(pattern, sizeof(pattern), "\"%s\":", key);
+    return strstr(json, pattern) != nullptr;
+}
+
 // Extract a boolean value for a given key from JSON.
 inline bool jsonGetBool(const char *json, const char *key, bool *out) {
     char pattern[64];

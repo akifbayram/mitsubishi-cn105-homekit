@@ -1,6 +1,6 @@
 # CN105 Protocol
 
-The CN105 connector uses a serial protocol at 2400 baud with 8E1 (even parity). For detailed protocol documentation, see the [muart-group wiki](https://muart-group.github.io/).
+The CN105 connector uses a serial protocol at 2400 baud with 8E1 (even parity). Some indoor units (many SEZ-KD ducted units, MSZ-GC) answer only at 9600; the rate is selectable in the web UI under **Device** → **Advanced** and stored in NVS as `cn105Baud`. For detailed protocol documentation, see the [muart-group wiki](https://muart-group.github.io/).
 
 ## Packet Format
 

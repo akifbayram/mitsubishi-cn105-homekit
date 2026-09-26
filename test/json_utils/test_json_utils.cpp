@@ -84,6 +84,16 @@ int main() {
     // Unterminated value that ends in a backslash must not read past the end
     expectMissing("{\"a\":\"trailing\\", "a");
 
+    // Key presence, whatever the value's type — lets a handler reject and log
+    // a value the typed getters would silently skip
+    assert(jsonHasKey("{\"a\":9600}", "a"));
+    assert(jsonHasKey("{\"a\":\"9600\"}", "a"));
+    assert(jsonHasKey("{\"a\":null}", "a"));
+    assert(!jsonHasKey("{\"ab\":1}", "a"));
+    assert(!jsonHasKey("{\"xa\":1}", "a"));
+    assert(!jsonHasKey("{}", "a"));
+    checks += 6;
+
     printf("json_utils: all %d checks passed\n", checks);
     return 0;
 }

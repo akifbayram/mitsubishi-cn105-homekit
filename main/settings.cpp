@@ -170,6 +170,13 @@ void SettingsStore::begin() {
         _settings.pollMs = val;
     }
 
+    // cn105Baud — uint32_t, only 2400/9600 survive the load
+    {
+        uint32_t val = 0;   // stays 0 when the key is absent
+        nvs_get_u32(_handle, "cn105Baud", &val);
+        _settings.cn105Baud = cn105_baud_load(val);
+    }
+
     // deviceName — string
     {
         size_t len = sizeof(_settings.deviceName);
@@ -417,8 +424,9 @@ void SettingsStore::begin() {
     nvs_get_u64(_handle, "roomSrcId", &_settings.roomSourceId);
     _settings.roomSourceId = room_source_id_derived(_settings);
 
-    LOG_INFO("[Settings] Loaded: logLevel=%d poll=%lums name=%s unit=%s room mode=%u single=%u members=0x%02X",
-             _settings.logLevel, (unsigned long)_settings.pollMs, _settings.deviceName,
+    LOG_INFO("[Settings] Loaded: logLevel=%d poll=%lums baud=%lu name=%s unit=%s room mode=%u single=%u members=0x%02X",
+             _settings.logLevel, (unsigned long)_settings.pollMs,
+             (unsigned long)_settings.cn105Baud, _settings.deviceName,
              _settings.useFahrenheit ? "F" : "C",
              _settings.roomMode, _settings.roomSingle, _settings.roomMembers);
 }
@@ -506,6 +514,7 @@ void SettingsStore::save() {
     nvs_set_u8(_handle, "schemaVer", SETTINGS_SCHEMA_VERSION);
     nvs_set_u8(_handle, "logLevel", _settings.logLevel);
     nvs_set_u32(_handle, "pollMs", _settings.pollMs);
+    nvs_set_u32(_handle, "cn105Baud", _settings.cn105Baud);
     nvs_set_str(_handle, "deviceName", _settings.deviceName);
     nvs_set_blob(_handle, "heatThresh", &_settings.heatingThreshold, sizeof(float));
     nvs_set_blob(_handle, "coolThresh", &_settings.coolingThreshold, sizeof(float));
@@ -546,7 +555,8 @@ void SettingsStore::save() {
     nvs_commit(_handle);
     _generation++;
 
-    LOG_INFO("[Settings] Saved: logLevel=%d poll=%lums name=%s unit=%s",
-             _settings.logLevel, (unsigned long)_settings.pollMs, _settings.deviceName,
+    LOG_INFO("[Settings] Saved: logLevel=%d poll=%lums baud=%lu name=%s unit=%s",
+             _settings.logLevel, (unsigned long)_settings.pollMs,
+             (unsigned long)_settings.cn105Baud, _settings.deviceName,
              _settings.useFahrenheit ? "F" : "C");
 }
