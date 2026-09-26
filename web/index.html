@@ -962,9 +962,9 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       <div class="sub" style="margin:2px 0 10px">Match this to your indoor unit's louvers.</div>
       <div class="seg compact" id="vaneTypeGrp">
         <div class="seg-bg"></div>
-        <button data-v="0" onclick="setVaneType(this)">None</button>
-        <button data-v="1" onclick="setVaneType(this)">Vertical</button>
-        <button data-v="2" class="active" onclick="setVaneType(this)">Vert + Horiz</button>
+        <button data-v="0" onclick="pickSetting(this)">None</button>
+        <button data-v="1" onclick="pickSetting(this)">Vertical</button>
+        <button data-v="2" class="active" onclick="pickSetting(this)">Vert + Horiz</button>
       </div>
     </div>
     <div class="inset-block">
@@ -1008,8 +1008,8 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
           <div class="sub" style="margin:2px 0 10px;max-width:none">Leave this at 2400 unless the heat pump never connects. Some units, including many SEZ-KD ducted units, need 9600. If it still doesn't connect after switching, power-cycle the indoor unit at its breaker. Applied on Save Settings.</div>
           <div class="seg compact" id="baudGrp" aria-label="CN105 baud rate">
             <div class="seg-bg"></div>
-            <button data-v="2400" class="active" onclick="setBaud(this)">2400</button>
-            <button data-v="9600" onclick="setBaud(this)">9600</button>
+            <button data-v="2400" class="active" onclick="pickSetting(this)">2400</button>
+            <button data-v="9600" onclick="pickSetting(this)">9600</button>
           </div>
         </div>
         <p class="setting-caption" style="margin:8px 0 10px">
@@ -1216,16 +1216,17 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   }
   var segGroups=['modeGrp','fanGrp','vaneGrp','wideVaneGrp','unitGrp','vaneTypeGrp','logLevelGrp','roomModeSeg','baudGrp'];
   window.addEventListener('resize',function(){segGroups.forEach(updateSegBg)});
-  // A segmented control inside a closed <details> measures zero (Safari lays
-  // none of it out) — place its thumb once the disclosure opens.
-  (function(){
-    var ds=document.querySelectorAll('details');
-    for(var i=0;i<ds.length;i++) ds[i].addEventListener('toggle',function(){
-      if(!this.open) return;
-      var segs=this.querySelectorAll('.seg[id]');
-      for(var j=0;j<segs.length;j++) updateSegBg(segs[j].id);
-    });
-  })();
+  // Segmented-control thumbs need layout to measure offsets; re-position
+  // those under root once a collapsed section or <details> reveals them
+  // (Safari lays out none of a closed <details>).
+  function refreshSegThumbs(root){
+    var segs=root.querySelectorAll('.seg[id]');
+    for(var j=0;j<segs.length;j++)updateSegBg(segs[j].id);
+  }
+  var detailsEls=document.querySelectorAll('details');
+  for(var di=0;di<detailsEls.length;di++) detailsEls[di].addEventListener('toggle',function(){
+    if(this.open) refreshSegThumbs(this);
+  });
 
   // ── Collapsible sections ─────────────────────────────────────────────────────
   // Turns a .group-label header into a tappable disclosure row (a real <button>
@@ -1309,12 +1310,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     for(var i=0;i<headers.length;i++){
       if(headers[i].getAttribute('data-collapsible')==='false')continue;
       var sec=new CollapsibleSection(headers[i]);
-      // Segmented-control thumbs need layout to measure offsets; re-position any
-      // that were hidden while the section was collapsed once it's revealed.
-      sec.onOpen=function(s){
-        var segs=s.inner.querySelectorAll('.seg[id]');
-        for(var j=0;j<segs.length;j++)updateSegBg(segs[j].id);
-      };
+      sec.onOpen=function(s){refreshSegThumbs(s.inner)};
       // Restore a previously-opened section instantly (no slide animation,
       // no onOpen — the global seg-init pass below repositions any thumbs).
       if(loadSectionOpen(sec.storeKey))sec.setOpen(true,true);
@@ -3222,8 +3218,9 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     updateSegBg('modeGrp');
   }
 
-  window.setVaneType=function(b){setActive('vaneTypeGrp',b.getAttribute('data-v'));settingsDirty=true;};
-  window.setBaud=function(b){setActive('baudGrp',b.getAttribute('data-v'));settingsDirty=true;};
+  // A tap on a Save-Settings segmented control (Vane Type, CN105 Baud Rate):
+  // select it and hold off state pushes until the user saves.
+  window.pickSetting=function(b){setActive(b.parentNode.id,b.getAttribute('data-v'));settingsDirty=true;};
   // Log level lives in the Logs card, away from the Device card's Save button,
   // so it applies on tap. The firmware's config handler takes each field
   // independently, so a logLevel-only frame is a valid partial config.

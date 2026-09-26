@@ -42,9 +42,7 @@ void CN105Controller::begin(uart_port_t uartNum, int rxPin, int txPin, uint32_t 
 void CN105Controller::begin(UartInterface *uart) {
     _uart = uart;
     _uart->flush();
-    _state.connected = false;
-    _connectRetries = 0;
-    _lastSuccessfulResponse = 0;
+    restartHandshake();
     LOG_INFO("Controller initialized, waiting for connection...");
 }
 

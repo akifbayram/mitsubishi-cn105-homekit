@@ -242,9 +242,10 @@ extern "C" void app_main(void)
     // ── 10. CN105 UART init (skipped in safe mode) ─────────────────────
     if (!safeMode) {
         cn105.setUpdateInterval(settings.get().pollMs);
-        cn105.begin(CN105_UART_NUM, PIN_CN105_RX, PIN_CN105_TX, settings.get().cn105Baud);
+        const uint32_t baud = settings.get().cn105Baud;
+        cn105.begin(CN105_UART_NUM, PIN_CN105_RX, PIN_CN105_TX, baud);
         LOG_INFO("CN105 UART started (RX=%d TX=%d baud=%lu)",
-                 PIN_CN105_RX, PIN_CN105_TX, (unsigned long)cn105.baudRate());
+                 PIN_CN105_RX, PIN_CN105_TX, (unsigned long)baud);
     }
 
 #if PIN_BUTTON >= 0

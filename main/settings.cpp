@@ -172,9 +172,9 @@ void SettingsStore::begin() {
 
     // cn105Baud — uint32_t, only 2400/9600 survive the load
     {
-        uint32_t val = 0;
-        bool found = nvs_get_u32(_handle, "cn105Baud", &val) == ESP_OK;
-        _settings.cn105Baud = cn105_baud_load(found, val);
+        uint32_t val = 0;   // stays 0 when the key is absent
+        nvs_get_u32(_handle, "cn105Baud", &val);
+        _settings.cn105Baud = cn105_baud_load(val);
     }
 
     // deviceName — string

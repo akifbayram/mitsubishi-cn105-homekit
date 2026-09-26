@@ -12,10 +12,10 @@ inline bool cn105_baud_valid(long baud) {
     return baud == 2400 || baud == 9600;
 }
 
-// The rate to run at, given what NVS returned: `found` is false when the key
-// is absent (fresh device, factory reset, pre-setting firmware). A stored
-// value outside the accepted set falls back to the default rather than
-// reaching the UART.
-inline uint32_t cn105_baud_load(bool found, uint32_t stored) {
-    return found && cn105_baud_valid(stored) ? stored : CN105_BAUD_DEFAULT;
+// The rate to run at, given what NVS returned into a 0 seed. An absent key
+// (fresh device, factory reset, pre-setting firmware) leaves the 0, and it
+// or any other value outside the accepted set falls back to the default
+// rather than reaching the UART.
+inline uint32_t cn105_baud_load(uint32_t stored) {
+    return cn105_baud_valid(stored) ? stored : CN105_BAUD_DEFAULT;
 }

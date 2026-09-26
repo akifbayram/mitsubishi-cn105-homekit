@@ -260,10 +260,6 @@ public:
     /// Callers validate with cn105_baud_valid() first.
     void setBaudRate(uint32_t baud);
 
-    /// The rate the UART is running at. For the startup log, before
-    /// startTask(); afterwards the CN105 task may change it.
-    uint32_t baudRate() const { return _baudRate; }
-
     /// Communication-loss timeout: 6 × the runtime poll interval, floored at
     /// the compile-time default. The poll interval is user-settable up to
     /// 30 s; a fixed 12 s timeout would falsely declare the link dead there.

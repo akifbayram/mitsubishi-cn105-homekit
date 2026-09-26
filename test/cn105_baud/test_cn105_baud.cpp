@@ -17,18 +17,18 @@ int main() {
         assert(!cn105_baud_valid(baud));
 
     // A fresh device, a factory reset, or firmware from before the setting
-    // existed: no rate stored, so the unit runs at 2400
-    assert(cn105_baud_load(false, 0) == 2400);
+    // existed: no rate stored (the load's 0 seed survives), so the unit runs
+    // at 2400
+    assert(cn105_baud_load(0) == 2400);
 
     // A stored choice survives a reboot or an OTA update
-    assert(cn105_baud_load(true, 2400) == 2400);
-    assert(cn105_baud_load(true, 9600) == 9600);
+    assert(cn105_baud_load(2400) == 2400);
+    assert(cn105_baud_load(9600) == 9600);
 
     // A stored value the firmware never accepts (corrupt NVS, a newer
     // firmware's rate after a downgrade) is not put on the wire
-    assert(cn105_baud_load(true, 0) == 2400);
-    assert(cn105_baud_load(true, 4800) == 2400);
-    assert(cn105_baud_load(true, 115200) == 2400);
+    assert(cn105_baud_load(4800) == 2400);
+    assert(cn105_baud_load(115200) == 2400);
 
     printf("cn105_baud: all tests passed\n");
     return 0;

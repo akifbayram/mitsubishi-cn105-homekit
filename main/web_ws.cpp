@@ -306,9 +306,10 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
 
         // Keyed on presence, not on a successful parse, so a string or null
         // (a hand-edited settings file) is rejected and logged, not skipped.
-        // Save Settings sends every field, so only an actual change reaches
-        // the UART — re-applying the same rate would drop a working link.
-        if (strstr(msg, "\"cn105Baud\":")) {
+        // The controller ignores the rate it already runs at, so the same
+        // value from every Save Settings leaves a working link alone — and
+        // re-saving retries a switch the UART refused.
+        if (jsonHasKey(msg, "cn105Baud")) {
             const uint32_t oldBaud = settings.get().cn105Baud;
             if (!jsonGetInt(msg, "cn105Baud", &intVal)) {
                 LOG_WARN("Config cn105Baud rejected (not a number), keeping %lu",
@@ -316,10 +317,11 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
             } else if (!cn105_baud_valid(intVal)) {
                 LOG_WARN("Config cn105Baud=%d rejected (2400 or 9600 only), keeping %lu",
                          intVal, (unsigned long)oldBaud);
-            } else if ((uint32_t)intVal != oldBaud) {
+            } else {
+                if ((uint32_t)intVal != oldBaud)
+                    LOG_INFO("Config cn105Baud=%d (was %lu)", intVal, (unsigned long)oldBaud);
                 settings.get().cn105Baud = (uint32_t)intVal;
                 _ctrl->setBaudRate((uint32_t)intVal);
-                LOG_INFO("Config cn105Baud=%d (was %lu)", intVal, (unsigned long)oldBaud);
                 changed = true;
             }
         }
@@ -720,11 +722,11 @@ void WebUI::pushState() {
     // (dstLen - 2): header 475 (31-char deviceName + 32-char SSID, both fully
     // escaped, plus roomMembers) + 58 outsideTemp/errorCode/runtime
     // + 183 heap/health + 44 thresholds + 108 night gate + 387 remote/dial
-    // (escaped model + fw) + 310 HomeKit (setup code + URI) + 195 room/Link
-    // + 215 blend + roomOffs + 278 legacy BLE + 928 for four bleSensors[]
-    // entries with 48-char escaped names + 1 closing brace = 3182 B. 4096
-    // keeps ~28% for fields added later; overflow past that degrades (see the
-    // sections below).
+    // (escaped model + fw) + 327 config + HomeKit (setup code + URI) + 195
+    // room/Link + 215 blend + roomOffs + 278 legacy BLE + 928 for four
+    // bleSensors[] entries with 48-char escaped names + 1 closing brace
+    // = 3199 B. 4096 keeps ~28% for fields added later; overflow past that
+    // degrades (see the sections below).
     constexpr size_t bufSz = 4096;
     // Tail the sections can never eat, so the closing brace (and the
     // truncation marker) always fit however full the body ran.
