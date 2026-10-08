@@ -979,7 +979,8 @@ static void caps_announce_if_changed(void) {
 static EspnowPairOutcome outcome_of(const char *r) {
     if (strcmp(r, "paired") == 0) return ESPNOW_PAIR_OK;
     if (strcmp(r, "timeout") == 0 || strcmp(r, "full") == 0 ||
-        strcmp(r, "pin-mismatch") == 0) return ESPNOW_PAIR_FAIL;
+        strcmp(r, "pin-mismatch") == 0 || strcmp(r, "storage-error") == 0)
+        return ESPNOW_PAIR_FAIL;
     return ESPNOW_PAIR_NONE;   /* idle/listening/confirming/cancelled */
 }
 
@@ -1101,12 +1102,24 @@ void EspnowLink::loop() {
      * console (REPL) tasks execute here, in the link's owning task. If both
      * a start and a cancel land within one tick, start runs first and the
      * cancel wins — the same net result as the user's last click. */
-    if (s_reqForgetAll)  { s_reqForgetAll = false;  sl2_link_forget_all(&s_link); room_source_drop_link(); }
+    /* forget_all is transactional (core v5): false = the durable save failed
+     * and the bond table is untouched, so the Link room source stays too. */
+    if (s_reqForgetAll) {
+        s_reqForgetAll = false;
+        if (sl2_link_forget_all(&s_link)) room_source_drop_link();
+    }
     if (s_reqPairStart)  { s_reqPairStart = false;  sl2_link_pair_start(&s_link, PAIR_WINDOW_S * 1000); }
     if (s_reqPairCancel) { s_reqPairCancel = false; sl2_link_pair_cancel(&s_link); }
     if (s_reqForgetRestart) {
         s_reqForgetRestart = false;
-        sl2_link_forget_all(&s_link);
+        if (!sl2_link_forget_all(&s_link)) {
+            /* Bonds are still saved and still in RAM: a restart would only
+             * dress the failure up as success. The core logged the cause. */
+#if PIN_LED_DATA >= 0
+            statusLED.requestHold(SLED_RESULT_FAIL, 3000);
+#endif
+            return;
+        }
         room_source_drop_link();
 #if PIN_LED_DATA >= 0
         /* Main task owns the strip: animate the blink inline. The blocking

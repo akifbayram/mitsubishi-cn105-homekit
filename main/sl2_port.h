@@ -33,6 +33,9 @@ typedef struct sl2_port {
     uint32_t (*now_ms)(void *ctx);           /* monotonic; wraps ok (u32 math) */
     /* storage: false from kv_get = absent; *len in = cap, out = actual */
     bool (*kv_get)(void *ctx, const char *key, void *buf, size_t *len);
+    /* true = durable replacement, false = failure. Preserve the previous
+     * value on failure when storage is healthy. Core bond transactions keep
+     * the old RAM state on false; damaged media can need recovery at reboot. */
     bool (*kv_set)(void *ctx, const char *key, const void *buf, size_t len);
     /* optional: NULL ok. level: 0 err, 1 warn, 2 info, 3 debug */
     void (*log)(void *ctx, int level, const char *msg);
