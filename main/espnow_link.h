@@ -19,7 +19,7 @@ class CN105Controller;
 enum EspnowPairOutcome : uint8_t {
     ESPNOW_PAIR_NONE = 0,
     ESPNOW_PAIR_OK,        // "paired"
-    ESPNOW_PAIR_FAIL,      // "timeout" / "full" / "pin-mismatch"
+    ESPNOW_PAIR_FAIL,      // "timeout" / "full" / "pin-mismatch" / "storage-error"
 };
 
 // Read-only detail for the primary bonded dial, for the web UI Link card.
@@ -54,7 +54,7 @@ public:
     bool pairingActive() const;
     int  pairingSecondsLeft() const;
     const char *pairResult() const;      // idle/listening/confirming/paired/
-                                         // timeout/full/pin-mismatch/cancelled
+                                         // timeout/full/pin-mismatch/storage-error/cancelled
     EspnowPairOutcome pairOutcome() const;   // pairResult() classified for LED/UI
 };
 

@@ -2456,6 +2456,8 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
         ps.textContent='Pairing failed: this unit already has the maximum number of Links. Forget one and retry.';
       }else if(s.remotePairResult==='pin-mismatch'){
         ps.textContent='Pairing failed: confirmation mismatch. Retry pairing.';
+      }else if(s.remotePairResult==='storage-error'){
+        ps.textContent='Pairing failed: the Link could not be saved to this unit. Retry pairing.';
       }else if(s.remoteBonded){
         ps.textContent='';
       }else{

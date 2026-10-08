@@ -27,10 +27,14 @@ static const unsigned char GOLDEN_V3[9] = {
 };
 
 static void test_wire_layout(void) {
-    assert(sizeof(struct sl2_dial_sensor_pkt) == 9);
+    /* Wire spec 10d: the v5 packet is 11 bytes, preserving all nine
+     * historical bytes, with the epoch echo at offset 9. */
+    assert(sizeof(struct sl2_dial_sensor_pkt) == 11);
     assert(offsetof(struct sl2_dial_sensor_pkt, temp_cc)  == 3);
     assert(offsetof(struct sl2_dial_sensor_pkt, hum_cc)   == 5);
     assert(offsetof(struct sl2_dial_sensor_pkt, want_src) == 7);
+    assert(offsetof(struct sl2_dial_sensor_pkt, epoch)    == 9);
+    assert(SL2_ROOM_EPOCH_MIN_VER == 5);
     /* MIN_LEN must cover hum_cc, which is 2 bytes wide as of v3. A MIN_LEN of
      * 6 accepts a frame whose humidity is half-present. */
     assert(SL2_DIAL_SENSOR_MIN_LEN == 7);
