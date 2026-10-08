@@ -21,7 +21,7 @@
 extern "C" {
 #endif
 
-#define SL2_PROTO_VERSION    4
+#define SL2_PROTO_VERSION    5
 #define SL2_PROTO_MIN_COMPAT 1
 
 /* esp_now_set_pmk() input: a documented PUBLIC constant (16 bytes). It only
@@ -48,7 +48,9 @@ enum sl2_pkt_type {
     SL2_PKT_ROOM_SOURCE_ACK = 16,
     SL2_PKT_WIFI_CANCEL = 17,
     SL2_PKT_WIFI_CANCEL_ACK = 18,
-    /* 19..127 reserved for core growth; 128..255 experiments, never shipped */
+    SL2_PKT_PAIR_CONFIRM = 19, /* dial -> ctrl, encrypted, LMK proof */
+    SL2_PKT_PAIR_ACK = 20,     /* ctrl -> dial, encrypted, LMK proof */
+    /* 21..127 reserved for core growth; 128..255 experiments, never shipped */
 };
 
 /* ── semantic HVAC model ──────────────────────────────────────────────── */
@@ -247,6 +249,16 @@ struct __attribute__((packed)) sl2_pair_resp_pkt {
                              * a doctored channel fails verification. */
 };
 #define SL2_PAIR_MIN_LEN 136   /* through sig[]; channel may be absent */
+
+/* New/re-pairing requires v5 on both peers; old bonds still carry traffic.
+ * Ordinary decrypted frames cannot confirm: they may predate a queued rekey. */
+#define SL2_PAIR_AUTH_MIN_VER 5
+struct __attribute__((packed)) sl2_pair_auth_pkt {
+    uint8_t type;           /* SL2_PKT_PAIR_CONFIRM or SL2_PKT_PAIR_ACK */
+    uint8_t version;
+    uint8_t tag[32];        /* HMAC-SHA256(candidate LMK, domain + roles/MACs) */
+};
+#define SL2_PAIR_AUTH_MIN_LEN 34
 
 /* Signed transcripts, domain-separated. Layouts are wire-frozen. */
 #define SL2_REQ_TRANSCRIPT_LEN  (8 + 2 + 6 + 32 + 32)            /* 80 */
@@ -507,7 +519,10 @@ struct __attribute__((packed)) sl2_room_source_set_pkt {
     uint8_t type, version, request_id, reserved;
     uint32_t revision;
     uint64_t source_id;
+    uint16_t epoch;          /* v5: latest STATE.epoch */
 };
+#define SL2_ROOM_SOURCE_SET_MIN_LEN 16
+#define SL2_ROOM_EPOCH_MIN_VER 5
 enum sl2_room_source_result {
     SL2_ROOM_SET_OK = 0, SL2_ROOM_SET_BAD_SOURCE = 1,
     SL2_ROOM_SET_STALE_CATALOG = 2, SL2_ROOM_SET_UNSUPPORTED = 3,
@@ -656,6 +671,7 @@ struct __attribute__((packed)) sl2_dial_sensor_pkt {
     uint16_t hum_cc;         /* centi-%, 0..10000; SL2_HUM_CC_NA = no reading */
     uint8_t  want_src;       /* enum sl2_room_src; NOEDIT = reading only */
     uint8_t  reserved[1];    /* senders zero-fill, receivers ignore */
+    uint16_t epoch;          /* v5: latest STATE.epoch */
 };
 #define SL2_DIAL_SENSOR_MIN_LEN 7   /* through hum_cc; want_src may be absent */
 /* The first version whose DIAL_SENSOR temp/hum fields are centi (v2 and
@@ -690,11 +706,13 @@ SL2_STATIC_ASSERT(sizeof(struct sl2_wifi_setup_session_pkt) == 8, wifi_setup_ses
 SL2_STATIC_ASSERT(sizeof(struct sl2_wifi_cancel_pkt) == 8, wifi_cancel_size);
 SL2_STATIC_ASSERT(sizeof(struct sl2_wifi_cancel_ack_pkt) == 7, wifi_cancel_ack_size);
 SL2_STATIC_ASSERT(sizeof(struct sl2_dial_info_pkt) == 43,  dial_info_size);
-SL2_STATIC_ASSERT(sizeof(struct sl2_dial_sensor_pkt) == 9, dial_sensor_size);
+SL2_STATIC_ASSERT(sizeof(struct sl2_dial_sensor_pkt) == 11, dial_sensor_size);
 SL2_STATIC_ASSERT(sizeof(struct sl2_room_source_entry) == 34, room_source_entry_size);
 SL2_STATIC_ASSERT(sizeof(struct sl2_room_catalog_req_pkt) == 8, room_catalog_req_size);
 SL2_STATIC_ASSERT(sizeof(struct sl2_room_catalog_resp_pkt) == 250, room_catalog_resp_size);
-SL2_STATIC_ASSERT(sizeof(struct sl2_room_source_set_pkt) == 16, room_source_set_size);
+SL2_STATIC_ASSERT(sizeof(struct sl2_room_source_set_pkt) == 18, room_source_set_size);
+SL2_STATIC_ASSERT(SL2_ROOM_SOURCE_SET_MIN_LEN <= (int)sizeof(struct sl2_room_source_set_pkt),
+                  room_source_set_minlen);
 SL2_STATIC_ASSERT(sizeof(struct sl2_room_source_ack_pkt) == 20, room_source_ack_size);
 SL2_STATIC_ASSERT(sizeof(struct sl2_room_source_v2) == 13, room_source_v2_size);
 SL2_STATIC_ASSERT(SL2_DIAL_INFO_MIN_LEN <= (int)sizeof(struct sl2_dial_info_pkt), dial_info_minlen);
@@ -703,6 +721,7 @@ SL2_STATIC_ASSERT(SL2_STATE_MIN_LEN <= (int)sizeof(struct sl2_state_pkt), state_
 SL2_STATIC_ASSERT(SL2_CMD_MIN_LEN   <= (int)sizeof(struct sl2_cmd_pkt),   cmd_minlen);
 SL2_STATIC_ASSERT(SL2_PROBE_MIN_LEN <= (int)sizeof(struct sl2_probe_pkt), probe_minlen);
 SL2_STATIC_ASSERT(SL2_CAPS_MIN_LEN  <= (int)sizeof(struct sl2_caps_pkt),  caps_minlen);
+SL2_STATIC_ASSERT(sizeof(struct sl2_pair_auth_pkt) == 34, pair_auth_size);
 SL2_STATIC_ASSERT(SL2_PAIR_MIN_LEN  <= (int)sizeof(struct sl2_pair_req_pkt), pair_minlen);
 SL2_STATIC_ASSERT(sizeof(struct sl2_dial_info_pkt) + 2 + 112 <= 250,
                   dial_info_cert_fits);   /* ESP-NOW payload ceiling */
