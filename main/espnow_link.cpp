@@ -631,24 +631,25 @@ static uint8_t room_src_status(void) {
     }
 }
 
-/* Averaging needs two members to average. Membership can lose one without any
- * save of ours (a dial drops off, a BLE slot is cleared), so the invariant is
- * repaired from the loop rather than at the edit sites. Once per second is far
- * more often than a configuration can realistically change, and it keeps the
- * member scan — which locks per Link/BLE probe — off a 10 ms path. */
+/* Repairs a Link selection the bond table can no longer back. The bond table
+ * changes without any save of ours, so this runs from the loop rather than at
+ * the edit sites; once per second is far more often than a configuration can
+ * realistically change.
+ *
+ * Average is deliberately NOT repaired here. Whether it has two members
+ * "available" is a runtime fact — BleSensor::begin() has run, a dial has
+ * reported — so it is false for every member on the first pass after boot,
+ * and for a user who taps Average before ticking a sensor, which is the only
+ * order the web UI allows. Rewriting the selection on that erased Average on
+ * every restart and made it impossible to enter. An Average short of members
+ * stands: RoomAvg falls back to the internal thermistor, the health reads
+ * stale, and room_catalog_build() keeps the entry listed. */
 static void room_source_reconcile_catalog(uint32_t now) {
     static uint32_t last_ms = 0;
     if (last_ms && (uint32_t)(now - last_ms) < 1000) return;
     last_ms = now ? now : 1;
 
     auto &st = settings.get();
-    if (st.roomMode == 1 && !RoomAvg::averageSelectable()) {
-        LOG_WARN("Average no longer has two configured members — using Internal");
-        st.roomMode   = 0;
-        st.roomSingle = ROOM_MEMBER_INTERNAL;
-        settings.save();   // re-derives roomSourceId back to Internal
-        return;
-    }
 
     // Retired automatic mode: a Link selection with no pin (a pre-2026-09
     // store, or the pinned dial was forgotten while others stayed bonded)
@@ -714,18 +715,25 @@ static void copy_name(char *dst, size_t cap, const char *src) {
 
 static int room_catalog_build(struct sl2_room_source_entry *a, int cap) {
     int n = 0;
-    auto add = [&](uint64_t id, uint8_t kind, const char *name) {
+    auto add = [&](uint64_t id, uint8_t kind, const char *name,
+                   uint8_t flags = SL2_ROOM_SOURCE_F_SELECTABLE) {
         if (n >= cap) return;
         a[n].id    = id;
         a[n].kind  = kind;
-        a[n].flags = SL2_ROOM_SOURCE_F_SELECTABLE;
+        a[n].flags = flags;
         copy_name(a[n].name, sizeof a[n].name, name);
         n++;
     };
 
     add(SL2_ROOM_SOURCE_INTERNAL_ID, SL2_ROOM_KIND_INTERNAL, "Heat pump");
-    if (RoomAvg::averageSelectable())
-        add(SL2_ROOM_SOURCE_AVERAGE_ID, SL2_ROOM_KIND_AGGREGATE, "Average");
+    /* Offered once two members are available, and still listed — not
+     * selectable — while it is the selection: a dial names the selected
+     * source by looking its id up here, and an Average short of members
+     * stays selected (see room_source_reconcile_catalog). */
+    const bool selectable = RoomAvg::averageSelectable();
+    if (selectable || settings.get().roomMode == 1)
+        add(SL2_ROOM_SOURCE_AVERAGE_ID, SL2_ROOM_KIND_AGGREGATE, "Average",
+            selectable ? SL2_ROOM_SOURCE_F_SELECTABLE : 0);
 #ifdef BLE_ENABLE
     for (int i = 0; i < ROOM_MAX_BLE_SENSORS; i++) {
         /* isConfigured(), not addr[0]: a malformed address is not a sensor

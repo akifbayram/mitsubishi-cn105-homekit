@@ -50,8 +50,9 @@ namespace RoomAvg {
 
     /* Is Average worth offering at all? It is a policy over remote members,
      * so it needs at least two of them available; with fewer, the blend is
-     * just that one source (or internal) wearing a different name. Same
-     * shared-rule contract as memberAvailable — every writer that can select
-     * Average gates on this. */
+     * just that one source (or internal) wearing a different name. The dial's
+     * writer gates on this. The web editor does not — its members can only be
+     * ticked from inside Average — so an Average short of members is a state
+     * the firmware carries, never one it repairs by changing the selection. */
     bool averageSelectable();
 }
