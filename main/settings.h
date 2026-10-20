@@ -83,6 +83,11 @@ struct DeviceSettings {
     bool     wifiChangePending = false; // True after WiFi creds changed via web UI (shorter fallback timeout)
     uint8_t  vaneConfig = 2;          // 0=no vanes, 1=vertical only, 2=vertical+horizontal
     uint8_t  modeMask = MODE_CAP_ALL; // MODE_CAP_* bits — operating modes this unit supports (mode_caps.h)
+    // Low heat: heat setpoints below the unit's own floor (CN105_LOW_HEAT_MIN
+    // in cn105_protocol.h). lowHeatTarget is the controller's low target,
+    // persisted because the unit itself only ever holds the floor. NAN = none.
+    bool     lowHeatEnabled = false;
+    float    lowHeatTarget = NAN;
     // Which source drives the heat pump's room temperature. Outside the BLE
     // ifdef on purpose: a build without BLE still chooses Internal vs Link.
     // DERIVED from (roomMode, roomSingle) on every save — kept stored so the

@@ -125,16 +125,20 @@ static void homekit_set_setup_id(const char* setupId)
 // hap_update_config_number() when it changes.
 //
 // Shape byte: bits 0-4 = the boot-time mode capability mask (MODE_CAP_*),
+// bit 6 = low heat (widens the target temperature range),
 // bit 7 = Remote Sensor accessory present.
+static constexpr uint8_t SHAPE_LOW_HEAT       = 0x40;
 static constexpr uint8_t SHAPE_SENSOR_PRESENT = 0x80;
 
 static bool s_started = false;   // hap_start() has succeeded
 
 static uint8_t s_bootModeMask = MODE_CAP_ALL;
+static bool    s_bootLowHeat  = false;
 
 static uint8_t current_service_shape(void)
 {
     uint8_t shape = s_bootModeMask;
+    if (s_bootLowHeat) shape |= SHAPE_LOW_HEAT;
 #ifdef BLE_ENABLE
     if (homekit_sensor_is_present()) shape |= SHAPE_SENSOR_PRESENT;
 #endif
@@ -211,6 +215,11 @@ uint8_t homekit_get_boot_mode_mask(void)
     return s_bootModeMask;
 }
 
+bool homekit_get_boot_low_heat(void)
+{
+    return s_bootLowHeat;
+}
+
 bool homekit_is_started(void)
 {
     return s_started;
@@ -231,6 +240,7 @@ bool homekit_init(const char* name, const char* manufacturer,
     static bool s_handlerRegistered = false;
 
     s_bootModeMask = settings.get().modeMask;
+    s_bootLowHeat  = settings.get().lowHeatEnabled;
 
     if (!s_coreInited) {
         hap_cfg_t hap_cfg;

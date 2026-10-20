@@ -4,7 +4,7 @@
 #include "branding.h"
 #include "mode_caps.h"
 enum LogLevel : uint8_t {LOG_LEVEL_ERROR, LOG_LEVEL_WARN, LOG_LEVEL_INFO, LOG_LEVEL_DEBUG_TEST};
-constexpr float CN105_TEMP_MIN=16.0f, CN105_TEMP_MAX=30.5f;
+constexpr float CN105_TEMP_MIN=16.0f, CN105_TEMP_MAX=30.5f, CN105_LOW_HEAT_MIN=10.0f;
 using esp_err_t=int;using nvs_handle_t=uint32_t;
 constexpr int ESP_OK=0,ESP_FAIL=-1,ESP_ERR_NVS_NOT_FOUND=1;
 constexpr int NVS_READONLY=0,NVS_READWRITE=1,ESP_ERR_NVS_NOT_INITIALIZED=2;
