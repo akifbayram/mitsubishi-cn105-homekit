@@ -452,9 +452,50 @@ button.wifi-row:active{background:var(--surface3);}
 .fw-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding-bottom:14px;border-bottom:1px solid var(--sep);}
 .fw-installed-ver{font-size:12.5px;color:var(--text2);margin-top:3px;font-family:ui-monospace,Menlo,monospace;}
 .fw-badge{display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:500;}
-.fw-status{font-size:13px;color:var(--text2);margin:12px 0 0;}
-.fw-status.avail{color:var(--orange);font-weight:500;}
-.fw-notes{font-size:12.5px;color:var(--accent);text-decoration:none;margin-top:8px;display:inline-block;}
+/* Version menu: a button on the Installed row and a popover under it. The
+   menu hangs past the card, so its collapsible section stops clipping while
+   it is open (.fw-menu-open, set from JS). */
+.fw-card{position:relative;}
+.section-body>.section-body-inner.fw-menu-open{overflow:visible;}
+.fw-ver-btn{display:inline-flex;align-items:center;gap:6px;flex:none;border:none;border-radius:999px;padding:8px 12px 8px 14px;
+  font-family:inherit;font-size:13px;font-weight:600;background:var(--surface2);color:var(--accent);cursor:pointer;
+  transition:background .2s,color .2s,opacity .15s;}
+.fw-ver-btn svg{width:10px;height:10px;transition:transform .2s;}
+.fw-ver-btn[aria-expanded="true"] svg{transform:rotate(180deg);}
+.fw-ver-btn.update{background:color-mix(in srgb,var(--orange) 18%,var(--surface2));color:var(--orange);}
+.fw-ver-btn:disabled{opacity:.55;cursor:default;}
+.fw-ver-menu{position:absolute;right:8px;z-index:5;width:min(340px,calc(100% - 16px));max-height:340px;overflow:auto;
+  overscroll-behavior:contain;background:var(--surface2);border-radius:16px;padding:6px 0;
+  box-shadow:0 18px 44px -10px rgba(0,0,0,.45),0 0 0 1px var(--border);}
+.fw-ver-head{font-size:11.5px;font-weight:500;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;padding:8px 14px 4px;}
+.fw-ver-sep{height:1px;background:var(--sep);margin:6px 0;}
+.fw-ver-row{display:flex;align-items:center;gap:6px;width:100%;min-height:42px;border:none;background:none;padding:9px 14px;
+  font-family:inherit;color:var(--text);text-align:left;cursor:pointer;}
+.fw-ver-row:hover,.fw-ver-row:focus-visible{background:var(--surface3);outline:none;}
+.fw-ver-row[aria-disabled="true"]{cursor:default;}
+.fw-ver-row[aria-disabled="true"]:hover{background:none;}
+.fw-ver-row .v{flex:none;white-space:nowrap;font-family:ui-monospace,Menlo,monospace;font-size:13.5px;}
+/* The date takes what the version and tags leave. When the whole date does
+   not fit (a beta that is also installed, on the narrowest phones) it wraps
+   onto a second line that the fixed height clips, so it disappears instead of
+   colliding or showing half a month: the empty ::before item grows to push it
+   right while it fits, and lets it wrap as soon as it doesn't. (::before needs
+   the line's height, or its empty first line is 0 tall and line 2 shows.) */
+.fw-ver-row .d{flex:1 1 0;min-width:0;display:flex;flex-wrap:wrap;align-content:flex-start;justify-content:flex-end;
+  height:16px;line-height:16px;overflow:hidden;padding-left:6px;font-size:12px;color:var(--text2);
+  font-variant-numeric:tabular-nums;white-space:nowrap;}
+.fw-ver-row .d::before{content:"";flex:1 1 0;height:16px;}
+.fw-tag{flex:none;white-space:nowrap;font-size:10.5px;font-weight:600;line-height:1;padding:3px 6px;border-radius:5px;letter-spacing:.2px;}
+.fw-tag.latest{color:var(--orange);background:color-mix(in srgb,var(--orange) 16%,transparent);}
+.fw-tag.beta{color:var(--red);background:color-mix(in srgb,var(--red) 15%,transparent);}
+.fw-tag.installed{color:var(--accent);background:color-mix(in srgb,var(--accent) 15%,transparent);}
+.fw-ver-msg{display:flex;flex-direction:column;align-items:flex-start;gap:10px;padding:12px 14px;font-size:13px;color:var(--text2);}
+.fw-ver-msg .spin-row{display:flex;align-items:center;gap:9px;}
+.fw-ver-msg svg{width:15px;height:15px;}
+.fw-ver-retry{border:none;background:var(--surface3);color:var(--accent);font-family:inherit;font-size:13px;font-weight:600;
+  padding:7px 12px;border-radius:9px;cursor:pointer;}
+.fw-ver-foot{display:flex;align-items:center;gap:5px;padding:10px 14px 8px;font-size:13px;color:var(--accent);text-decoration:none;}
+.fw-ver-foot svg{width:11px;height:11px;}
 .fw-manual{margin-top:14px;padding-top:14px;border-top:1px solid var(--sep);}
 .fw-file-row{display:flex;gap:9px;align-items:center;}
 .fw-file-name{font-size:12px;color:var(--text3);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
@@ -1035,33 +1076,25 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
 
   <!-- ===== FIRMWARE ===== -->
   <h2 class="group-label">Firmware<span class="section-summary" id="fwBadge" style="display:none"><span class="status-dot warning"></span><span class="summary-text" style="color:var(--orange)">Update available</span></span></h2>
-  <div class="card" id="firmwareBody">
+  <div class="card fw-card" id="firmwareBody">
     <div class="fw-row">
       <div><div class="card-title">Installed</div><div class="fw-installed-ver" id="fwInstalled">{{FW_VERSION}}</div></div>
+      <button type="button" class="fw-ver-btn" id="fwVerBtn" style="display:none" aria-haspopup="menu" aria-expanded="false" aria-controls="fwVerMenu" onclick="toggleVerMenu()">
+        <span id="fwVerLabel">Versions</span>
+        <svg viewBox="0 0 10 10" aria-hidden="true"><path d="M1.5 3.5 5 7l3.5-3.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
     </div>
-    <div id="fwUpdateCheck" style="display:none">
-      <div class="fw-status" id="fwCheckResult" style="display:none"></div>
-      <button class="save-btn" id="fwCheckBtn" style="margin-top:14px" onclick="checkForUpdate()">Check for Updates</button>
-      <div id="fwInstallRow" style="display:none;margin-top:9px">
-        <button class="save-btn" id="fwInstallBtn" onclick="installUpdate()">Install</button>
-        <a id="fwNotesLink" class="fw-notes" href="#" target="_blank" rel="noopener" style="display:none">What's new</a>
-      </div>
-      <div id="fwStableRow" style="display:none;margin-top:9px">
-        <button class="btn-secondary" id="fwStableBtn" onclick="returnToStable()">Return to stable</button>
-        <p class="setting-caption">Downgrading may reset stored settings.</p>
-      </div>
-      <p class="setting-caption" id="fwCheckHelp">Checks the release server for a newer build, then installs it over the air.</p>
-      <div class="inset-row" id="fwBetaRow" style="padding-left:0;padding-right:0;border-bottom:none">
-        <div><div class="lbl">Beta updates</div><div class="sub">Get pre-release builds early. They may be unstable.</div></div>
-        <label class="ios-toggle">
-          <input type="checkbox" id="fwBetaToggle" onchange="toggleBetaChannel()" aria-label="Receive beta updates">
-          <span class="ios-toggle-slider"></span>
-        </label>
-      </div>
-    </div>
+    <div class="fw-ver-menu" id="fwVerMenu" role="menu" aria-label="Firmware versions" hidden></div>
     <div id="otaProgress" style="display:none;margin-top:12px">
       <div class="ota-bar-wrap"><div class="ota-bar" id="otaBar"></div></div>
       <div class="ota-status" id="otaStatus"></div>
+    </div>
+    <div class="inset-row" id="fwBetaRow" style="display:none;padding-left:0;padding-right:0;border-bottom:none">
+      <div><div class="lbl">Beta updates</div><div class="sub">Show new pre-releases as updates.</div></div>
+      <label class="ios-toggle">
+        <input type="checkbox" id="fwBetaToggle" onchange="toggleBetaChannel()" aria-label="Receive beta updates">
+        <span class="ios-toggle-slider"></span>
+      </label>
     </div>
     <div class="fw-manual">
       <div class="card-label" style="margin-bottom:9px">Manual .bin Upload</div>
@@ -1602,6 +1635,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       setConnState('connected');
       if(reconnTimer){clearTimeout(reconnTimer);reconnTimer=null}
       reconnDelay=0;
+      fwBack(true);                               // no-op unless an install is out
       try{ws.send('{"cmd":"diag"}')}catch(e){}   // populate the device events list
       lastMsgTime=Date.now();
       if(hbTimer) clearInterval(hbTimer);
@@ -1617,6 +1651,9 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       setConnState('reconnecting');
       ws=null;
       if(hbTimer){clearInterval(hbTimer);hbTimer=null}
+      // An install's socket dropped: its restart is under way, so the next
+      // connect, not the timer, ends the install.
+      clearTimeout(fwWait);fwWait=null;
       scheduleReconnect();
     };
 
@@ -2344,16 +2381,12 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     }
 
     // The update channel is device state, so the toggle follows the device
-    // rather than this browser. The daily auto-check waits for it to arrive:
-    // checking before we know the channel would check the wrong one.
+    // rather than this browser. A change re-renders from the list in hand
+    // (only on change: this runs every push, and an open menu would lose its
+    // focus); it never fetches.
     if(s.betaChannel!==undefined){
-      betaChannel=!!s.betaChannel;
-      $('fwBetaToggle').checked=betaChannel;
-      if(fwAutoCheckDue){
-        fwAutoCheckDue=false;
-        localStorage.setItem('fwAutoCheckAt',String(Date.now()));
-        setTimeout(function(){checkForUpdate(true)},3000);
-      }
+      $('fwBetaToggle').checked=!!s.betaChannel;
+      if(!!s.betaChannel!==betaChannel){betaChannel=!!s.betaChannel;renderFw()}
     }
 
     if(s.deviceName){
@@ -3381,8 +3414,9 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     });
   }
 
-  // POST a firmware ArrayBuffer to /upload with progress UI.
-  function flashBuffer(buf,hash){
+  // POST a firmware ArrayBuffer to /upload with progress UI. done(ok), when
+  // given, hears whether the device accepted it.
+  function flashBuffer(buf,hash,done){
     var prog=$('otaProgress'),bar=$('otaBar'),status=$('otaStatus');
     prog.style.display='block';
     bar.style.width='0%';
@@ -3408,10 +3442,12 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
         bar.style.background='var(--red)';
         status.textContent='Upload failed: '+xhr.responseText;
       }
+      if(done) done(xhr.status===200);
     };
     xhr.onerror=function(){
       bar.style.background='var(--red)';
       status.textContent='Upload failed: network error';
+      if(done) done(false);
     };
     xhr.send(new Uint8Array(buf));
   }
@@ -3444,15 +3480,19 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     });
   };
 
-  // ── Update Check (manual, via serin-cn105 manifest) ───────────────────────
+  // ── Version menu (browser-mediated, via the serin-cn105 release index) ────
   var BOARD_FW_ID='{{BOARD_FW_ID}}';
-  var UPDATE_MANIFEST_URL='{{UPDATE_MANIFEST_URL}}';
-  var UPDATE_MANIFEST_BETA_URL='{{UPDATE_MANIFEST_BETA_URL}}';
+  var UPDATE_VERSIONS_URL='{{UPDATE_VERSIONS_URL}}';
   var RUNNING_FW_VER='{{FW_VERSION}}';
-  var fwLatest=null;          // the build the Install button would write
-  var fwStable=null;          // stable's build, kept for the way back off a beta
+  var RELEASES_URL='https://github.com/akifbayram/mitsubishi-cn105-homekit/releases';
   var betaChannel=false;      // mirrors settings.betaChannel from the device
-  var fwAutoCheckDue=false;   // daily silent check, fired once cfg has landed
+  var fwList=null;            // readVersions() of the last load; kept until reload
+  var fwMenu='';              // what the open menu shows: loading, error or list
+  var fwLoad=0;               // bumped per fetch, so a superseded one is dropped
+  var fwBusy=false;           // an install is running: the button is locked
+  var fwSent=null;            // the entry the device accepted, until it is back
+  var fwWait=null;            // gives up on a restart that never dropped the socket
+  var fwRunningVer='';        // the newest word on what runs; see fwRunning()
 
   // ── ver-compare:start
   // Semver-with-prerelease ordering. Extracted and tested by
@@ -3500,161 +3540,252 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   }
   // ── ver-compare:end
 
-  // Show the managed-update controls only on builds with a manifest baked in.
-  // The indexOf guard keeps it hidden when viewing the raw unsubstituted file.
-  // (Manual .bin upload is always visible, so no else-branch is needed.)
-  // Also runs a silent daily auto-check (browser-side, so the device itself
-  // still does no GitHub I/O): only a found update surfaces in the UI.
-  if(BOARD_FW_ID&&UPDATE_MANIFEST_URL&&BOARD_FW_ID.indexOf('{{')<0){
-    $('fwUpdateCheck').style.display='block';
-    // A build with no beta manifest baked in has no channel to offer.
-    if(!UPDATE_MANIFEST_BETA_URL||UPDATE_MANIFEST_BETA_URL.indexOf('{{')>=0)
-      $('fwBetaRow').style.display='none';
-    // Armed here, fired by the cfg handler once the channel is known.
-    if(Date.now()-(+localStorage.getItem('fwAutoCheckAt')||0)>86400e3) fwAutoCheckDue=true;
+  // ── ver-menu:start
+  // Release index (versions.json) -> the Firmware card's version menu.
+  // Extracted and tested by test/version_menu/; uses the ver-compare block.
+  //
+  // One Entry per release this board can install, newest first. An index row
+  // is skipped unless it is installable as written: a version that starts with
+  // a digit, a build for this board, and that build's path and sha256. Unlike
+  // the manifests' builds array, a row's builds is an object keyed by board:
+  //   {version, date, release_url, builds: {nanoc6: {path, sha256}, ...}}
+  // binUrl is relative to the index, like the manifests' part paths.
+  function readVersions(idx,indexUrl,board){
+    var out=[],vs=idx&&idx.versions;
+    if(!Array.isArray(vs))return out;
+    var base=String(indexUrl).slice(0,String(indexUrl).lastIndexOf('/')+1);
+    vs.forEach(function(r){
+      if(!r||!/^\d/.test(String(r.version)))return;
+      var bs=r.builds;
+      if(!bs||typeof bs!=='object'||Array.isArray(bs))return;
+      // Own property only: a board named constructor or __proto__ must not
+      // resolve to something on the prototype chain.
+      var b=Object.prototype.hasOwnProperty.call(bs,board)?bs[board]:null;
+      if(!b||typeof b.path!=='string'||!b.path||!/^[0-9a-f]{64}$/i.test(String(b.sha256)))return;
+      out.push({
+        version:String(r.version),
+        date:String(r.date||''),
+        binUrl:base+b.path,
+        sha256:String(b.sha256).toLowerCase()
+      });
+    });
+    return out.sort(function(a,b){return cmpVer(b.version,a.version)});
   }
 
-  function fetchManifest(url){
-    return fetch(url+'?t='+Date.now()).then(function(r){
+  // list is readVersions() output, so "first" means newest. Pinned rows are the
+  // newest beta (Beta updates on, and only when it beats the newest stable),
+  // the newest stable, and the installed build when neither is it; the rest
+  // are others. offer is what the Install button would write, and only when it
+  // is newer than what is running — a dev build at the same version is not
+  // offered, so an untagged tree is never nagged about the release it sits on.
+  // A dev build is never marked installed: it is not that release's binary.
+  // Tags are ordered latest, beta, installed.
+  function menuModel(list,running,betaOn){
+    var stable=null,beta=null,inst=null,dev=parseVer(running).dev;
+    list.forEach(function(e){
+      if(parseVer(e.version).pre){if(!beta)beta=e}
+      else if(!stable)stable=e;
+      if(!dev&&!inst&&cmpVer(e.version,running)===0)inst=e;
+    });
+    var showBeta=!!(betaOn&&beta&&(!stable||cmpVer(beta.version,stable.version)>0));
+    var cand=showBeta?beta:stable;
+    function row(e){
+      var t=[];
+      if(e===stable)t.push('latest');
+      if(parseVer(e.version).pre)t.push('beta');
+      if(e===inst)t.push('installed');
+      return {entry:e,tags:t,installed:e===inst};
+    }
+    var pin=[];
+    if(showBeta)pin.push(beta);
+    if(stable)pin.push(stable);
+    if(inst&&pin.indexOf(inst)<0)pin.push(inst);
+    return {
+      pinned:pin.map(row),
+      others:list.filter(function(e){return pin.indexOf(e)<0}).map(row),
+      offer:cand&&cmpVer(cand.version,running)>0?cand:null
+    };
+  }
+  // ── ver-menu:end
+
+  // Show the version menu only on builds with a release index baked in. The
+  // indexOf guard keeps it hidden when viewing the raw unsubstituted file.
+  // (Manual .bin upload is always visible, so no else-branch is needed.)
+  // The index is fetched by the browser, so the device itself still does no
+  // GitHub I/O, and only when the menu opens: never on load, on a timer or
+  // on a Beta flip.
+  if(BOARD_FW_ID&&UPDATE_VERSIONS_URL&&BOARD_FW_ID.indexOf('{{')<0&&UPDATE_VERSIONS_URL.indexOf('{{')<0){
+    $('fwVerBtn').style.display='';
+    $('fwBetaRow').style.display='';
+  }
+
+  // The page was served by RUNNING_FW_VER. Later, whichever came last wins:
+  // deviceInfo.fw, or the entry just installed once the device is back (builds
+  // before v0.2.5-beta.1 send no deviceInfo, so that is all they ever give).
+  function fwRunning(){return fwRunningVer||RUNNING_FW_VER}
+
+  // Button and section summary from the list in hand. Every page load starts
+  // at "Versions": orange needs a load this session to have found something
+  // newer to offer. Re-renders an open list too (Beta flip, new running build).
+  function renderFw(){
+    var md=fwList&&menuModel(fwList,fwRunning(),betaChannel);
+    var up=!fwBusy&&!!(md&&md.offer),b=$('fwVerBtn');
+    $('fwVerLabel').textContent=fwBusy?'Installing…':(up?'Update available':'Versions');
+    b.classList.toggle('update',up);
+    b.disabled=fwBusy;
+    $('fwBadge').style.display=up?'':'none';
+    if(fwMenu==='list') renderVerList();
+  }
+
+  function fwEl(tag,cls,text){
+    var e=document.createElement(tag);
+    if(cls) e.className=cls;
+    if(text!=null) e.textContent=text;
+    return e;
+  }
+
+  // The index date is a UTC calendar day; formatting it in UTC keeps a
+  // browser west of Greenwich from showing the day before.
+  function fmtFwDate(s){
+    var m=/^(\d{4})-(\d\d)-(\d\d)$/.exec(s||''),d;
+    if(!m) return '';
+    d=new Date(Date.UTC(+m[1],m[2]-1,+m[3]));
+    if(d.getUTCMonth()!==m[2]-1||d.getUTCDate()!==+m[3]) return '';
+    return d.toLocaleDateString(undefined,{month:'short',day:'numeric',timeZone:'UTC'});
+  }
+
+  window.toggleVerMenu=function(){
+    if($('fwVerMenu').hidden) openVerMenu();
+    else closeVerMenu(false);
+  };
+
+  function openVerMenu(){
+    var m=$('fwVerMenu'),b=$('fwVerBtn');
+    if(fwBusy) return;
+    m.style.top=(b.offsetTop+b.offsetHeight+8)+'px';
+    m.hidden=false;
+    b.setAttribute('aria-expanded','true');
+    $('firmwareBody').parentNode.classList.add('fw-menu-open');
+    loadVersions();
+  }
+
+  function closeVerMenu(focusBtn){
+    var m=$('fwVerMenu');
+    if(m.hidden) return;
+    m.hidden=true;
+    fwMenu='';
+    $('fwVerBtn').setAttribute('aria-expanded','false');
+    $('firmwareBody').parentNode.classList.remove('fw-menu-open');
+    if(focusBtn) $('fwVerBtn').focus();
+  }
+
+  // Every open is a fresh, cache-busted fetch. A load that lands after the
+  // menu closed still updates the button; one a later open superseded is
+  // dropped.
+  function loadVersions(){
+    var seq=++fwLoad;
+    fwMenu='loading';
+    renderVerMsg();
+    fetch(UPDATE_VERSIONS_URL+'?t='+Date.now()).then(function(r){
       if(!r.ok) throw new Error('HTTP '+r.status);
       return r.json();
+    }).then(function(idx){
+      if(seq!==fwLoad) return;
+      fwList=readVersions(idx,UPDATE_VERSIONS_URL,BOARD_FW_ID);
+      var shown=fwMenu==='loading';
+      if(shown) fwMenu='list';
+      renderFw();
+      if(shown) focusVerItem(0);
+    }).catch(function(){
+      if(seq!==fwLoad||fwMenu!=='loading') return;
+      fwMenu='error';
+      renderVerMsg();
     });
   }
 
-  // This board's entry in one manifest, or null when the manifest has nothing
-  // for us. `version` is reported separately from `build` so a manifest that
-  // names a release we cannot install still says so instead of going quiet.
-  function readManifest(man,url,channel){
-    var out={version:'',build:null,channel:channel};
-    if(!man||!Array.isArray(man.builds))return out;
-    var v=normVer(man.version||'');
-    if(!/^\d/.test(v))return out;
-    out.version=v;
-    var b=null;
-    man.builds.forEach(function(x){if(x.board===BOARD_FW_ID)b=x});
-    if(!b||!b.sha256)return out;
-    var part=null;
-    (b.parts||[]).forEach(function(p){if(p.path&&p.path.indexOf('firmware.bin')>=0)part=p});
-    if(!part)return out;
-    out.build={
-      version:v,
-      binUrl:url.slice(0,url.lastIndexOf('/')+1)+part.path,
-      sha256:String(b.sha256).toLowerCase(),
-      channel:channel,
-      notes:(man.release_url&&/^https?:\/\//.test(man.release_url))?man.release_url:''
-    };
-    return out;
-  }
-
-  function showCheckBtn(on){ $('fwCheckBtn').style.display=on?'':'none' }
-
-  // The caption is pre-check advice about the Check button. Any result on
-  // screen answers it — and may be about going back rather than "installing a
-  // newer build over the air" — so the first rendered result retires it.
-  function showFwResult(){
-    $('fwCheckResult').style.display='block';
-    $('fwCheckHelp').style.display='none';
-  }
-
-  window.checkForUpdate=function(silent){
-    var btn=$('fwCheckBtn'),res=$('fwCheckResult'),row=$('fwInstallRow');
-    btn.disabled=true;
-    if(!silent){
-      showFwResult();
-      res.classList.remove('avail');
-      res.textContent='Checking…';
-      row.style.display='none';
-    }
-    fwLatest=null;fwStable=null;
-    // A missing beta manifest is "no beta right now", not a failed check: the
-    // directory does not exist until the first prerelease is published.
-    var betaReq=(betaChannel&&UPDATE_MANIFEST_BETA_URL&&UPDATE_MANIFEST_BETA_URL.indexOf('{{')<0)
-      ? fetchManifest(UPDATE_MANIFEST_BETA_URL).catch(function(){return null})
-      : Promise.resolve(null);
-    Promise.all([fetchManifest(UPDATE_MANIFEST_URL),betaReq]).then(function(m){
-      // Cleared on every check, including silent ones: only renderNoUpdate
-      // puts it back, so a stale offer can never outlive the state that made it.
-      $('fwStableRow').style.display='none';
-      var st=readManifest(m[0],UPDATE_MANIFEST_URL,'stable');
-      var bt=readManifest(m[1],UPDATE_MANIFEST_BETA_URL,'beta');
-      fwStable=st.build;
-      if(!st.version&&!bt.version) throw new Error('no release info');
-
-      // The channel offers whichever manifest names the higher version, so a
-      // stable release supersedes a beta with no new beta being cut.
-      var best=st.build;
-      if(bt.build&&(!best||cmpVer(bt.build.version,best.version)>0)) best=bt.build;
-
-      var cur=normVer(RUNNING_FW_VER);
-      // A build between tags (git-describe tail) or an unparseable version.
-      // 0.2.6-beta.1 is a real release and must NOT count as a dev build.
-      var devBuild=parseVer(cur).dev||!/^\d/.test(cur);
-
-      // Highest version any manifest named, installable or not.
-      var named=st.version;
-      if(bt.version&&(!named||cmpVer(bt.version,named)>0)) named=bt.version;
-
-      // Only declare "up to date" when we can compare a clean running version.
-      // A dev build falls through at equal versions so an untagged tree can be
-      // put back on the clean release it sits on top of. Below the running
-      // version is a downgrade, never an update — dev build or not.
-      if(named&&(devBuild?cmpVer(named,cur)<0:cmpVer(named,cur)<=0)){ renderNoUpdate(cur,silent); return; }
-      if(!best){
-        if(named){
-          showFwResult();
-          res.textContent='v'+named+' available — manifest missing install data, install manually below.';
-        } else if(!silent) res.textContent='Check failed: no build for this board';
-        return;
-      }
-
-      fwLatest=best;
-      var tag=best.channel==='beta'?' · beta':'';
-      showFwResult();
-      res.textContent=devBuild
-        ?('Release v'+best.version+tag+' available (running dev build)')
-        :('Version '+best.version+tag+' available');
-      res.classList.add('avail');
-      $('fwBadge').style.display='';
-      $('fwInstallBtn').textContent='Install v'+best.version+tag;
-      $('fwInstallBtn').disabled=false;
-      var notes=$('fwNotesLink');
-      if(best.notes){notes.href=best.notes;notes.style.display='block'}
-      else{notes.style.display='none'}
-      showCheckBtn(false);
-      row.style.display='block';
-    }).catch(function(e){
-      if(!silent) res.textContent='Check failed: '+e.message;
-    }).then(function(){btn.disabled=false});
-  };
-
-  // Three ways to have nothing to install: current; ahead of stable on a
-  // prerelease with the channel still on (stable will pass it eventually); or
-  // ahead with the channel off, which is the one that needs a way back.
-  function renderNoUpdate(cur,silent){
-    var res=$('fwCheckResult'),row=$('fwStableRow');
-    row.style.display='none';
-    // Nothing on offer, so nothing to advertise — a silent check never clears
-    // these on its own way in.
-    res.classList.remove('avail');
-    $('fwBadge').style.display='none';
-    $('fwInstallRow').style.display='none';
-    showCheckBtn(true);
-    // Ahead of what stable names, with the channel off: offer the way back,
-    // worded as the downgrade it is. Covers a tagged prerelease and a tree
-    // built past the last release.
-    if(!betaChannel&&fwStable&&cmpVer(fwStable.version,cur)<0){
-      showFwResult();
-      res.textContent=parseVer(cur).pre
-        ?"You're on a pre-release build."
-        :"You're on a development build.";
-      $('fwStableBtn').textContent='Return to stable · v'+fwStable.version;
-      $('fwStableBtn').disabled=false;
-      row.style.display='block';
+  function renderVerMsg(){
+    var m=$('fwVerMenu'),box=fwEl('div','fw-ver-msg'),r,b;
+    m.textContent='';
+    m.appendChild(box);
+    if(fwMenu==='loading'){
+      r=fwEl('div','spin-row');
+      r.innerHTML='<svg class="spin-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7"/></svg>';
+      r.appendChild(fwEl('span',null,'Loading versions…'));
+      box.appendChild(r);
       return;
     }
-    if(!silent)res.textContent='Up to date · v'+cur;
+    box.appendChild(fwEl('span',null,"Couldn't reach the release server."));
+    b=fwEl('button','fw-ver-retry','Try again');
+    b.type='button';
+    // The reload re-renders the menu and detaches this button, so the click
+    // must not reach the outside-click handler, which would close the menu.
+    b.onclick=function(e){e.stopPropagation();loadVersions()};
+    box.appendChild(b);
+    b.focus();
   }
 
+  function renderVerList(){
+    var m=$('fwVerMenu'),md=menuModel(fwList,fwRunning(),betaChannel),a;
+    m.textContent='';
+    if(!fwList.length){
+      m.appendChild(fwEl('div','fw-ver-msg','No published builds for this board.'));
+      return;
+    }
+    md.pinned.forEach(function(r){m.appendChild(verRow(r))});
+    if(md.others.length){
+      if(md.pinned.length) m.appendChild(fwEl('div','fw-ver-sep'));
+      m.appendChild(fwEl('div','fw-ver-head','Other versions'));
+      md.others.forEach(function(r){m.appendChild(verRow(r))});
+    }
+    m.appendChild(fwEl('div','fw-ver-sep'));
+    a=fwEl('a','fw-ver-foot','Release notes');
+    a.href=RELEASES_URL;a.target='_blank';a.rel='noopener';
+    a.setAttribute('role','menuitem');
+    a.insertAdjacentHTML('beforeend','<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M4 2h6v6M10 2 3 9" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>');
+    m.appendChild(a);
+  }
+
+  // One version. Same words whichever direction: web_ota.cpp has no version
+  // gate, so an older build installs exactly like a newer one.
+  function verRow(r){
+    var e=r.entry,b=fwEl('button','fw-ver-row');
+    b.type='button';
+    b.setAttribute('role','menuitem');
+    b.appendChild(fwEl('span','v','v'+e.version));
+    r.tags.forEach(function(t){b.appendChild(fwEl('span','fw-tag '+t,t))});
+    b.appendChild(fwEl('span','d',fmtFwDate(e.date)));
+    if(r.installed){b.setAttribute('aria-disabled','true');return b}
+    b.onclick=function(){
+      closeVerMenu(true);
+      if(confirm('Install v'+e.version+'? The device will restart.')) runInstall(e);
+    };
+    return b;
+  }
+
+  function verItems(){
+    return Array.prototype.slice.call($('fwVerMenu').querySelectorAll('.fw-ver-row,.fw-ver-foot,.fw-ver-retry'));
+  }
+  function focusVerItem(i){
+    var it=verItems();
+    if(it.length) it[Math.max(0,Math.min(i,it.length-1))].focus();
+  }
+
+  document.addEventListener('keydown',function(e){
+    if($('fwVerMenu').hidden) return;
+    if(e.key==='Escape'){e.preventDefault();closeVerMenu(true);return}
+    if(e.key!=='ArrowDown'&&e.key!=='ArrowUp') return;
+    var it=verItems(),i=it.indexOf(document.activeElement);
+    if(i<0&&document.activeElement!==$('fwVerBtn')) return;
+    e.preventDefault();
+    focusVerItem(e.key==='ArrowDown'?i+1:i-1);
+  });
+  document.addEventListener('click',function(e){
+    var m=$('fwVerMenu');
+    if(!m.hidden&&!m.contains(e.target)&&!$('fwVerBtn').contains(e.target)) closeVerMenu(false);
+  });
+
+  // Betas are listed either way; the toggle only decides whether a newer one
+  // counts as the update. Re-rendered from the list in hand: no fetch.
   window.toggleBetaChannel=function(){
     var on=$('fwBetaToggle').checked;
     if(!send({cmd:'config',betaChannel:on})){
@@ -3662,10 +3793,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       return;
     }
     betaChannel=on;
-    // Re-check on both edges: switching on should surface a waiting beta at
-    // once, and switching off is what reveals the way back to stable.
-    showCheckBtn(true);
-    checkForUpdate();
+    renderFw();
   };
 
   // Hide the footer support link when the build doesn't provide a URL
@@ -3675,46 +3803,67 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     if(a&&(!h||h.indexOf('{{')>=0)) a.style.display='none';
   })();
 
-  // `down` is the deliberate backwards flash: same transport, same hash check,
-  // different words. There is no version gate in web_ota.cpp to bypass — it
-  // enforces chip/project identity and the SHA-256, and nothing else.
-  function runInstall(target,down){
-    if(!target) return;
-    var btn=down?$('fwStableBtn'):$('fwInstallBtn');
-    if(btn.disabled) return;
-    if(!confirm(down
-      ?('Return to stable v'+target.version+'? The device will restart, and stored settings may not survive a downgrade.')
-      :('Download and install v'+target.version+'? The device will restart.'))) return;
-    $('fwInstallBtn').disabled=true;
-    $('fwStableBtn').disabled=true;
-    var res=$('fwCheckResult');
-    res.textContent='Downloading v'+target.version+'...';
-    fetch(target.binUrl+'?t='+Date.now()).then(function(r){
+  // Download one index entry and flash it. Always sends the index hash so the
+  // device verifies the received bytes even when the browser cannot
+  // (crypto.subtle needs https). The button stays locked through the restart
+  // until fwBack.
+  function runInstall(e){
+    var bar=$('otaBar'),status=$('otaStatus');
+    fwBusy=true;
+    renderFw();
+    $('otaProgress').style.display='block';
+    bar.style.width='0%';
+    bar.style.background='var(--accent)';
+    status.textContent='Downloading v'+e.version+'...';
+    fetch(e.binUrl+'?t='+Date.now()).then(function(r){
       if(!r.ok) throw new Error('HTTP '+r.status);
       return r.arrayBuffer();
     }).then(function(buf){
       return sha256Hex(buf).then(function(hash){
-        if(hash&&hash!==target.sha256) throw new Error('checksum mismatch — aborted');
-        res.textContent=hash?'Checksum verified. Installing...':'Installing... (device will verify checksum)';
-        // Always send the manifest hash so the device verifies the received
-        // bytes even when the browser cannot (crypto.subtle needs https).
-        flashBuffer(buf,target.sha256);
+        if(hash&&hash!==e.sha256) throw new Error('checksum mismatch — aborted');
+        flashBuffer(buf,e.sha256,function(ok){
+          if(!ok){fwBusy=false;renderFw();return}
+          fwSent=e;
+          // The device answers, waits 1 s and restarts; the heartbeat drops
+          // the silent socket ~5-7 s later. Still up after 30 s means no
+          // restart came. (Already down: the next connect is the answer.)
+          if(wsReady()) fwWait=setTimeout(function(){fwBack(false)},30000);
+        });
       });
-    }).catch(function(e){
-      res.textContent=(down?'Return to stable failed: ':'Install failed: ')+e.message;
-      $('fwInstallBtn').disabled=false;
-      $('fwStableBtn').disabled=false;
+    }).catch(function(err){
+      bar.style.background='var(--red)';
+      status.textContent='Install failed: '+err.message;
+      fwBusy=false;
+      renderFw();
     });
   }
-
-  window.installUpdate=function(){runInstall(fwLatest,false)};
-  window.returnToStable=function(){runInstall(fwStable,true)};
 
   // ── About card: device info, events, diagnostics ───────────────────────────
   var deviceInfo=null, lastEvents=null, lastState=null;
 
+  // The device is back from an install. restarted: the socket reconnected
+  // after the upload, which only a restart allows (the upload handler holds the
+  // web server until esp_restart), so the new entry is what runs — unless a
+  // deviceInfo that follows says otherwise, e.g. after a rollback. Not
+  // restarted: the socket never dropped, so the old build still runs.
+  function fwBack(restarted){
+    if(!fwSent) return;
+    if(restarted){
+      fwRunningVer=fwSent.version;
+      $('fwInstalled').textContent=fwRunningVer;
+      $('abFw').textContent=fwRunningVer;
+    }
+    fwSent=null;fwBusy=false;
+    clearTimeout(fwWait);fwWait=null;
+    $('otaProgress').style.display='none';
+    renderFw();
+  }
+
   function onDeviceInfo(d){
     deviceInfo=d;
+    if(d.fw) fwRunningVer=d.fw;
+    $('fwInstalled').textContent=fwRunning();
+    renderFw();
     $('abBoard').textContent=d.board||'--';
     $('abFw').textContent=d.fw||'--';
     // Identity fields are shown twice — About card and Wi-Fi card detail rows.

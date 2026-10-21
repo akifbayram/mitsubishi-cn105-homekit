@@ -70,19 +70,13 @@ if(NOT _explicit_profile_set)
     endif()
 endif()
 
-# ── Update check (browser-mediated OTA via serin-cn105 manifest) ─────────────
-# BOARD_FW_ID maps the board profile to its serin-cn105 firmware directory.
-# Empty = no published prebuilt (CUSTOM, ESP32S3_DEVKIT) → update UI hidden.
-# -DUPDATE_MANIFEST_URL="" disables the feature; branded builds may point elsewhere.
-if(NOT DEFINED UPDATE_MANIFEST_URL)
-    set(UPDATE_MANIFEST_URL "https://raw.githubusercontent.com/Serin-Labs/serin-cn105/main/firmware/homekit/manifest.json")
-endif()
-
-# The opt-in beta channel's manifest — same shape as stable, one directory down.
-# -DUPDATE_MANIFEST_BETA_URL="" hides the beta toggle and leaves the update
-# check reading stable only.
-if(NOT DEFINED UPDATE_MANIFEST_BETA_URL)
-    set(UPDATE_MANIFEST_BETA_URL "https://raw.githubusercontent.com/Serin-Labs/serin-cn105/main/firmware/homekit/beta/manifest.json")
+# ── Version menu (browser-mediated OTA via the serin-cn105 release index) ────
+# BOARD_FW_ID maps the board profile to its build key in the index.
+# Empty = no published prebuilt (CUSTOM, ESP32S3_DEVKIT) → version menu hidden.
+# -DUPDATE_VERSIONS_URL="" hides the version menu and the Beta toggle.
+# Branded builds may point elsewhere.
+if(NOT DEFINED UPDATE_VERSIONS_URL)
+    set(UPDATE_VERSIONS_URL "https://raw.githubusercontent.com/Serin-Labs/serin-cn105/main/firmware/homekit/versions.json")
 endif()
 
 set(BOARD_FW_ID "")
@@ -187,8 +181,7 @@ add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/web_ui.html.gz
         --brand-theme-color "${BRAND_THEME_COLOR}"
         --fw-version "${PROJECT_VER}"
         --board-fw-id "${BOARD_FW_ID}"
-        --update-manifest-url "${UPDATE_MANIFEST_URL}"
-        --update-manifest-beta-url "${UPDATE_MANIFEST_BETA_URL}"
+        --update-versions-url "${UPDATE_VERSIONS_URL}"
         --support-url "${BRAND_SUPPORT_URL}"
     DEPENDS ${PROJECT_DIR}/web/index.html ${PROJECT_DIR}/scripts/embed_html_idf.py
     COMMENT "Generating web_ui.html.gz"

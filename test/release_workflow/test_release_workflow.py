@@ -17,7 +17,7 @@ PRODUCT = "homekit"
 DISTRIBUTION = Path(os.environ.get("SERIN_DISTRIBUTION_ROOT", ROOT.parent / "serin-cn105"))
 WORKFLOW = yaml.safe_load((ROOT / ".github/workflows/firmware-release.yml").read_text())
 STEPS = WORKFLOW["jobs"]["deploy"]["steps"]
-GENERATE = next(i for i, step in enumerate(STEPS) if step["name"] == "Generate manifest.json")
+INDEX = next(i for i, step in enumerate(STEPS) if step["name"] == "Update version index")
 DEPLOY = next(i for i, step in enumerate(STEPS) if step["name"] == "Deploy firmware files")
 
 
@@ -99,11 +99,11 @@ class ReleaseWorkflowTests(unittest.TestCase):
         if beta:
             self.env.update(VERSION="0.9.0-beta.1", TAG="v0.9.0-beta.1", CHANNEL="beta",
                             CHANNEL_DIR=f"firmware/{PRODUCT}/beta")
-        code, output = self.run_steps(STEPS[DEPLOY:GENERATE + 1])
+        code, output = self.run_steps(STEPS[DEPLOY:INDEX + 1])
         self.assertEqual(code, 0, output)
 
     def publish(self):
-        return self.run_steps(STEPS[GENERATE + 1:])
+        return self.run_steps(STEPS[INDEX + 1:])
 
     def intercept_push(self, competitor=None, reject=False):
         # Inject a competing publisher at the network boundary. Clone, commit,
@@ -262,6 +262,38 @@ os.execv(real, [real, *sys.argv[1:]])
             manifest = json.loads(self.git(self.remote, "show",
                                            "main:firmware/homekit/beta/manifest.json"))
             self.assertEqual(manifest["channel"], "beta")
+
+    def test_release_is_archived_and_indexed(self):
+        self.prepare()
+        code, output = self.publish()
+        self.assertEqual(code, 0, output)
+        self.assertEqual(self.git(self.remote, "show", f"main:firmware/{PRODUCT}/archive/0.9.0/nanoc6/firmware.bin"),
+                         "nanoc6/firmware.bin")
+        entry = json.loads(self.git(self.remote, "show", f"main:firmware/{PRODUCT}/versions.json"))["versions"][0]
+        self.assertEqual(entry["version"], "0.9.0")
+        self.assertTrue(entry["release_url"].endswith("/releases/tag/v0.9.0"))
+
+    def test_beta_and_stable_share_one_index(self):
+        self.prepare()
+        code, output = self.publish()
+        self.assertEqual(code, 0, output)
+        self.prepare(beta=True)
+        code, output = self.publish()
+        self.assertEqual(code, 0, output)
+        index = json.loads(self.git(self.remote, "show", f"main:firmware/{PRODUCT}/versions.json"))
+        self.assertEqual([entry["version"] for entry in index["versions"]], ["0.9.0", "0.9.0-beta.1"])
+
+    def test_next_stable_release_keeps_the_older_archive(self):
+        self.prepare()
+        code, output = self.publish()
+        self.assertEqual(code, 0, output)
+        self.env.update(VERSION="0.9.1", TAG="v0.9.1")
+        self.prepare()
+        code, output = self.publish()
+        self.assertEqual(code, 0, output)
+        for version in ("0.9.0", "0.9.1"):
+            self.assertEqual(self.git(self.remote, "show", f"main:firmware/{PRODUCT}/archive/{version}/nanoc6/firmware.bin"),
+                             "nanoc6/firmware.bin")
 
 
 if __name__ == "__main__":

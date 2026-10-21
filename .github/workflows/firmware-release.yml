@@ -170,9 +170,10 @@ jobs:
             # Named board directories, NOT a glob. Two reasons: this is what
             # unpublishes the broken 8 MB-header esp32-devkit and esp32c3-mini
             # binaries v0.2.4 left behind (they are no longer built — see the
-            # matrix above), and a glob here would delete firmware/homekit/beta
-            # along with them, silently unpublishing the beta channel on every
-            # stable release.
+            # matrix above), and a glob here would delete firmware/homekit/beta,
+            # archive/ and versions.json along with them, silently unpublishing
+            # the beta channel and the version menu's history on every stable
+            # release.
             rm -rf firmware/homekit/nanoc6 \
                    firmware/homekit/m5atoms3-lite \
                    firmware/homekit/esp32-devkit \
@@ -241,6 +242,18 @@ jobs:
 
           python3 -m json.tool "serin-cn105/${CHANNEL_DIR}/manifest.json" > /dev/null
           echo "manifest OK (${CHANNEL})"
+
+      - name: Update version index
+        env:
+          VERSION: ${{ steps.version.outputs.number }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          python3 serin-cn105/scripts/homekit_index.py add \
+            --index serin-cn105/firmware/homekit/versions.json \
+            --version "${VERSION}" --date "$(date -u +%F)" \
+            --release-url "https://github.com/akifbayram/mitsubishi-cn105-homekit/releases/tag/${TAG}" \
+            --build nanoc6=artifacts/firmware-nanoc6/firmware.bin \
+            --build m5atoms3-lite=artifacts/firmware-m5atoms3-lite/firmware.bin
 
       # Consumers read main directly, so validation must finish before the push.
       - name: Validate distribution manifests

@@ -359,7 +359,7 @@ curl --data-binary @build/mitsubishi-cn105-homekit.bin \
      http://<device-ip>/upload
 ```
 
-**Check for updates:** The **Firmware** card has a "Check for Updates" button. Your browser fetches the release manifest, compares it against the running version, and offers a one-click install when a newer build is available (the device itself does no GitHub I/O). This is hidden on custom and untracked builds.
+**Version menu:** The **Firmware** card has a version menu next to the installed version. The latest release and the installed one are pinned at the top (with **Beta updates** on, a newer pre-release too), then every other published release follows, newest first, each with its date. Picking one installs it, newer or older. Your browser fetches the release list only when you open the menu (the device itself does no GitHub I/O). Custom and S3 DevKitC-1 builds have no menu; the other unpublished profiles show it with "No published builds for this board."
 
 **Wrong-image rejection:** The device inspects the ESP application header as the upload streams in and refuses firmware built for a different chip or a different application before writing any of it to flash. SHA256 only proves the file arrived intact, so an image built for the wrong device passes it. One gap remains: two board profiles that share a chip and a project name (Atom S3 Lite and S3 DevKitC-1) are indistinguishable at this layer, so still pick the right board in the flasher.
 
@@ -379,7 +379,7 @@ The page is organised into cards:
 - **HomeKit** — pairing status, controller count, setup code with copy button, QR code, and reset pairing
 - **Link** — paired dial model, firmware, signal, last seen; pair, *Pair another Link*, and cancel; a per-dial *Forget* plus *Forget All* once two or more dials are paired (see [Serin Link](#serin-link))
 - **Device** — device name, °C/°F, vane type, Unit Capabilities (which HVAC modes your unit actually has), log level, and settings export/import; poll interval, CN105 baud rate, and factory reset sit behind an **Advanced** disclosure
-- **Firmware** — installed version, Check for Updates, manual `.bin` upload, **Flash LED** to identify the device, and Restart (see [OTA Updates](#ota-updates))
+- **Firmware** — installed version, the version menu, manual `.bin` upload, **Flash LED** to identify the device, and Restart (see [OTA Updates](#ota-updates))
 - **About** — board, firmware, IP, mDNS name, MAC, last reset reason, boot and crash counts, free and lowest-ever heap, WiFi and heat-pump drop counters, a persistent device event log, one-tap **Copy Diagnostics** for support, and the safe-mode banner
 - **Diagnostics · Logs** — real-time log streaming over WebSocket
 

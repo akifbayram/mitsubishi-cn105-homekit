@@ -5,7 +5,7 @@ Usage:
     python3 embed_html_idf.py --input <html_file> --output <gz_file> \
         [--brand-name X] [--brand-ap-prefix X] [--brand-ap-password X] \
         [--brand-model X] [--brand-theme-color X] [--fw-version X] \
-        [--board-fw-id X] [--update-manifest-url X]
+        [--board-fw-id X] [--update-versions-url X]
 """
 
 import argparse
@@ -110,9 +110,8 @@ def main() -> None:
     parser.add_argument("--brand-model", default=DEFAULTS["BRAND_MODEL"])
     parser.add_argument("--brand-theme-color", default=DEFAULTS["BRAND_THEME_COLOR"])
     parser.add_argument("--fw-version", default="0.0.0-dev", help="Firmware version from git/CMake")
-    parser.add_argument("--board-fw-id", default="", help="serin-cn105 firmware dir name; empty hides update check")
-    parser.add_argument("--update-manifest-url", default="", help="Manifest URL for update check; empty disables")
-    parser.add_argument("--update-manifest-beta-url", default="", help="Beta channel manifest URL; empty hides the beta toggle")
+    parser.add_argument("--board-fw-id", default="", help="Board key in the release index; empty hides the version menu")
+    parser.add_argument("--update-versions-url", default="", help="Release index (versions.json) URL; empty hides the version menu and the beta toggle")
     parser.add_argument("--support-url", default="", help="Help & Support link in the footer; empty hides it")
     args = parser.parse_args()
 
@@ -124,8 +123,7 @@ def main() -> None:
         "BRAND_THEME_COLOR": args.brand_theme_color,
         "FW_VERSION": args.fw_version,
         "BOARD_FW_ID": args.board_fw_id,
-        "UPDATE_MANIFEST_URL": args.update_manifest_url,
-        "UPDATE_MANIFEST_BETA_URL": args.update_manifest_beta_url,
+        "UPDATE_VERSIONS_URL": args.update_versions_url,
         "SUPPORT_URL": args.support_url,
     }
 
