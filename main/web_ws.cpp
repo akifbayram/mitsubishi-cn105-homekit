@@ -355,6 +355,15 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
             changed = true;
         }
 
+        // The controller picks this up from the main loop; HomeKit's target
+        // range on the next restart (lowHeatBoot below).
+        bool lowHeatVal;
+        if (jsonGetBool(msg, "lowHeat", &lowHeatVal)) {
+            settings.get().lowHeatEnabled = lowHeatVal;
+            LOG_INFO("Config lowHeat=%s", lowHeatVal ? "ON" : "OFF");
+            changed = true;
+        }
+
         char unitVal[4];
         if (jsonGetString(msg, "tempUnit", unitVal, sizeof(unitVal))) {
             bool useF = (strcmp(unitVal, "F") == 0);
@@ -786,10 +795,10 @@ void WebUI::pushState() {
     // (dstLen - 2): header 475 (31-char deviceName + 32-char SSID, both fully
     // escaped, plus roomMembers) + 58 outsideTemp/errorCode/runtime
     // + 183 heap/health + 44 thresholds + 108 night gate + 387 remote/dial
-    // (escaped model + fw) + 304 remoteDials (four bonded dials) + 470
+    // (escaped model + fw) + 304 remoteDials (four bonded dials) + 506
     // config + HomeKit (setup code + URI) + 195 room/Link + 215 blend +
     // roomOffs + 278 legacy BLE + 928 for four bleSensors[] entries with
-    // 48-char escaped names + 1 closing brace = 3646 B. 4096 keeps ~11% for
+    // 48-char escaped names + 1 closing brace = 3682 B. 4096 keeps ~10% for
     // fields added later; overflow past that degrades (see the sections
     // below).
     constexpr size_t bufSz = 4096;
@@ -1020,6 +1029,8 @@ void WebUI::pushState() {
         ",\"modeMask\":%d"
         ",\"modeMaskBoot\":%d"
         ",\"trustedHost\":\"%s\""
+        ",\"lowHeat\":%s"
+        ",\"lowHeatBoot\":%s"
         ",\"hkReady\":%s"
         ",\"hkPaired\":%s"
         ",\"hkControllers\":%d"
@@ -1035,6 +1046,8 @@ void WebUI::pushState() {
         (int)cfg.modeMask,
         (int)(hkReady ? homekit_get_boot_mode_mask() : cfg.modeMask),
         escHost,
+        cfg.lowHeatEnabled ? "true" : "false",
+        (hkReady ? homekit_get_boot_low_heat() : cfg.lowHeatEnabled) ? "true" : "false",
         hkReady ? "true" : "false",
         (cfg.homekitPaired || hkControllers > 0) ? "true" : "false",
         hkControllers,

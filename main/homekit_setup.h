@@ -46,6 +46,10 @@ bool homekit_is_started(void);
 // Differs from settings.get().modeMask after a web-UI change until restart.
 uint8_t homekit_get_boot_mode_mask(void);
 
+// Low heat setting the thermostat's target range was built with at boot.
+// Differs from settings.get().lowHeatEnabled after a web-UI change until restart.
+bool homekit_get_boot_low_heat(void);
+
 /// Reconcile the live HAP service shape (mode-gated services + Remote Sensor
 /// accessory presence) against the shape recorded in NVS, bumping the HAP
 /// config number on mismatch so paired Home apps refresh their cached

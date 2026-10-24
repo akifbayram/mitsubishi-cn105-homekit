@@ -51,7 +51,7 @@ const DEFAULTS = {
 };
 
 // A range input keeps min/max/step/value as STRINGS, and configureSliders()
-// leans on that with a loose `min==61`. Coerce on set so a tightening to `===`
+// leans on that with a loose `step==1`. Coerce on set so a tightening to `===`
 // fails here instead of in a browser. Clamping and step snapping are not
 // modelled: setSliderAttrs() always writes min/max/step before value, and every
 // value it writes sits inside the range it just set.
@@ -88,6 +88,7 @@ const factory = vm.runInThisContext(
   '    cmdArmed:function(){return lastCmdTime!==0},\n' +
   '    sent:sent,\n' +
   '    configureSliders:configureSliders,\n' +
+  '    setTargetMin:function(c){targetMinC=c},\n' +
   '    cToFTable:cToFTable,fToCTable:fToCTable,\n' +
   '    tap:function(u){window.setTempUnit({getAttribute:function(){return u}})}};\n' +
   '};})',

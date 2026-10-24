@@ -270,6 +270,24 @@ void SettingsStore::begin() {
         _settings.betaChannel = (val != 0);
     }
 
+    // lowHeatEnabled: bool stored as uint8_t; missing reads as off
+    {
+        uint8_t val = 0;
+        nvs_get_u8(_handle, "lowHeat", &val);
+        _settings.lowHeatEnabled = (val != 0);
+    }
+
+    // lowHeatTarget: float stored as blob. Anything outside the low band
+    // reads as none; the controller would refuse it anyway.
+    {
+        float val = NAN;
+        size_t len = sizeof(val);
+        if (nvs_get_blob(_handle, "lowHeatT", &val, &len) == ESP_OK && len == sizeof(float) &&
+            val >= CN105_LOW_HEAT_MIN && val < CN105_TEMP_MIN) {
+            _settings.lowHeatTarget = val;
+        }
+    }
+
     // setupCode — string
     {
         size_t len = sizeof(_settings.setupCode);
@@ -585,6 +603,8 @@ void SettingsStore::save() {
     nvs_set_u8(_handle, "wifiChgPend", _settings.wifiChangePending ? 1 : 0);
     nvs_set_u8(_handle, "vaneConfig", _settings.vaneConfig);
     nvs_set_u8(_handle, "modeMask", _settings.modeMask);
+    nvs_set_u8(_handle, "lowHeat", _settings.lowHeatEnabled ? 1 : 0);
+    nvs_set_blob(_handle, "lowHeatT", &_settings.lowHeatTarget, sizeof(float));
     // Legacy roomSrc stays written (derived) so the dial and a downgrade to
     // the pre-averaging firmware keep their source.
     _settings.roomSource = room_source_derived(_settings);

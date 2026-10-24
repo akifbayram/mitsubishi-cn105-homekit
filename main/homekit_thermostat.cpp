@@ -1,4 +1,5 @@
 #include "homekit_services.h"
+#include "homekit_setup.h"
 #include "cn105_strings.h"
 #include "auto_band.h"
 #include "room_avg.h"
@@ -31,6 +32,11 @@ static hap_char_t *s_statusFault   = nullptr;
 static hap_char_t *s_heatThresh    = nullptr;
 static hap_char_t *s_coolThresh    = nullptr;
 static hap_char_t *s_statusActive  = nullptr;
+
+// Floor of the target temperature char, fixed when the service is built: the
+// low heat floor if that setting was on at boot (homekit_setup.cpp folds it
+// into the service shape, so paired controllers re-read the range).
+static float s_targetMin = CN105_TEMP_MIN;
 
 // ── Sync state ──────────────────────────────────────────────────────────────
 static uint32_t s_lastSync = 0;
@@ -304,8 +310,10 @@ void homekit_create_thermostat(hap_acc_t *acc)
     // Set constraints on current temperature
     hap_char_float_set_constraints(s_currentTemp, -10.0f, 50.0f, 0.5f);
 
-    // Set constraints on target temperature
-    hap_char_float_set_constraints(s_targetTemp, CN105_TEMP_MIN, CN105_TEMP_MAX, 0.5f);
+    // Set constraints on target temperature. The AUTO thresholds below keep
+    // the unit's own floor: low heat only works in HEAT.
+    s_targetMin = homekit_get_boot_low_heat() ? CN105_LOW_HEAT_MIN : CN105_TEMP_MIN;
+    hap_char_float_set_constraints(s_targetTemp, s_targetMin, CN105_TEMP_MAX, 0.5f);
 
     // Add optional characteristics
     s_statusFault = hap_char_status_fault_create(0);
@@ -340,7 +348,7 @@ void homekit_create_thermostat(hap_acc_t *acc)
     hap_acc_add_serv(acc, serv);
 
     LOG_INFO("[HK:Thermo] Service created (mask=0x%02X, %.0f-%.0f C)",
-             mask, CN105_TEMP_MIN, CN105_TEMP_MAX);
+             mask, s_targetMin, CN105_TEMP_MAX);
 }
 
 // ── Sync function (called from main loop) ───────────────────────────────────
@@ -403,7 +411,8 @@ void homekit_sync_thermostat(CN105Controller &cn105)
     // Current temperature — when the averaging blend is feeding the pump,
     // report its effective (offset-applied) value so Apple Home matches what
     // the pump is actually controlling on; otherwise the pump's own reported
-    // room temp (which already echoes any single-source feed).
+    // room temp (which already echoes any single-source feed, and under low
+    // heat is the real reading, not the shifted one the unit sees).
     if (s_currentTemp) {
         float room = s.roomTemp;
         RoomAvg::Status av = RoomAvg::status();
@@ -422,7 +431,9 @@ void homekit_sync_thermostat(CN105Controller &cn105)
         // (e.g. 31.0 set from the IR remote; char max is 30.5), and
         // hap_char_update_val rejects out-of-range values outright, freezing
         // the Home-app display — clamp before syncing.
-        float target = std::clamp(s.targetTemp, CN105_TEMP_MIN, CN105_TEMP_MAX);
+        // A low heat target turned on since boot sits below a 16 C char
+        // floor the same way.
+        float target = std::clamp(s.targetTemp, s_targetMin, CN105_TEMP_MAX);
         const hap_val_t *cur = hap_char_get_val(s_targetTemp);
         if (forceSync || !cur || fabsf(cur->f - target) > 0.1f) {
             LOG_DEBUG("[HK:Thermo] sync targetTemp: %.1f C", target);

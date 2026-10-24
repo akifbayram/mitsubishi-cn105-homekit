@@ -80,6 +80,29 @@ same(DEFAULTS.target.min, '16', 'tempSlider ships in Celsius');
   }
 }
 
+// Low heat widens only the target slider, down to 50 °F / 10 °C, and the
+// 50-60 °F rows round-trip like the rest of the table.
+{
+  const ui = newUi('C');
+  ui.setTargetMin(10);
+  ui.configureSliders();
+  same([ui.target.min, ui.heat.min, ui.cool.min], ['10', '16', '16'], 'low heat lowers the target floor alone (°C)');
+  ui.target.value = '13';
+  ui.tap('F');
+  same([ui.target.min, ui.target.value, ui.heat.min], ['50', '55', '61'], 'low heat floor and a 13 °C target in °F');
+  ui.tap('C');
+  same(ui.target.value, '13', '55 °F comes back as 13 °C');
+  ui.setTargetMin(16);
+  ui.configureSliders();
+  same(ui.target.min, '16', 'leaving low heat restores the floor');
+  for (let f = 50; f <= 60; f++) {
+    const c = ui.fToCTable(f);
+    assert.ok(c >= 10 && c < 16, `${f} °F is a low heat setpoint`);
+    same(ui.cToFTable(c), f, `${f} °F → ${c} °C → ${f} °F`);
+  }
+  same(ui.fToCTable(40), 10, 'below the table clamps to 50 °F');
+}
+
 // ── Partial state frames ───────────────────────────────────────────────────
 // pushState() rolls back whole sections when a frame outgrows its buffer and
 // flags the loss with "trunc". The fields those sections carried are then

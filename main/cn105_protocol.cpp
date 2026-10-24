@@ -80,7 +80,9 @@ bool CN105Controller::isHealthy() const {
 CN105State CN105Controller::getState() const {
     taskENTER_CRITICAL(&_mux);
     CN105State s = _state;
+    const float lowC = _lowHeatTargetC, realC = _remoteRealC;
     taskEXIT_CRITICAL(&_mux);
+    applyLowHeat(s, _lowHeatEnabled, lowC, realC);
     return s;
 }
 
@@ -88,6 +90,7 @@ CN105State CN105Controller::getEffectiveState() const {
     taskENTER_CRITICAL(&_mux);
     CN105State eff = _state;
     const WantedSettings w = _wanted;
+    const float lowC = _lowHeatTargetC, realC = _remoteRealC;
     taskEXIT_CRITICAL(&_mux);
     // Wanted fields mask the actual heat pump values while in the grace
     // window (echavet pattern: suppress until the heat pump confirms). The
@@ -102,7 +105,37 @@ CN105State CN105Controller::getEffectiveState() const {
         if (w.hasVane)     eff.vane       = w.vane;
         if (w.hasWideVane) eff.wideVane   = w.wideVane;
     }
+    applyLowHeat(eff, _lowHeatEnabled, lowC, realC);
     return eff;
+}
+
+// While low heat is shifting it, the unit runs in its own terms: a setpoint
+// of CN105_TEMP_MIN and a room temperature raised by the shift. Readers get
+// the real values instead: the room as the source fed it, and the target the
+// user asked for. The room is taken from the feed whenever one is running,
+// not only while shifted, so the one poll the unit takes to echo a new shift
+// never shows. Without a feed there is no shift: the unit really is holding
+// CN105_TEMP_MIN on its own thermistor, and that is what is reported.
+void CN105Controller::applyLowHeat(CN105State &s, bool enabled, float lowC, float realC) {
+    if (!enabled || !std::isfinite(realC)) return;
+    s.roomTemp = quantizeRemoteTemp(realC);
+    if (s.mode == CN105_MODE_HEAT && std::isfinite(lowC) &&
+        fabsf(s.targetTemp - CN105_TEMP_MIN) < 0.3f)
+        s.targetTemp = lowC;
+}
+
+// Both helpers below expect _mux held.
+uint8_t CN105Controller::effectiveModeLocked(uint32_t now) const {
+    return (_wanted.hasMode && now - _wanted.lastChange < CN105_GRACE_SAFETY_MS)
+        ? _wanted.mode : _state.mode;
+}
+
+// How far the fed room temperature is raised, 0 when low heat is not in play.
+float CN105Controller::lowHeatShiftLocked(uint8_t mode) const {
+    if (!_lowHeatEnabled || mode != CN105_MODE_HEAT ||
+        !std::isfinite(_lowHeatTargetC) || !std::isfinite(_remoteRealC))
+        return 0.0f;
+    return CN105_TEMP_MIN - _lowHeatTargetC;
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -181,13 +214,31 @@ void CN105Controller::loop() {
         if (clear) LOG_INFO("No room source since boot — clearing any remote temperature the unit kept");
     }
 
+    // ── Low heat: re-feed when the shift changes ─────────────────────────
+    // A new low target, a mode change or the setting toggled all change the
+    // shift. Resend the last reading at once rather than wait for the source's
+    // keepalive, so the unit never runs on a shift for a target it lost.
+    taskENTER_CRITICAL(&_mux);
+    if (!_pendingRemoteTemp && std::isfinite(_remoteRealC) &&
+        lowHeatShiftLocked(effectiveModeLocked(now)) != _remoteShiftSentC) {
+        _pendingRemoteTemp = true;
+        _pendingRemoteTempC = _remoteRealC;
+    }
+    taskEXIT_CRITICAL(&_mux);
+
     // ── Send pending remote temperature (same deferred pattern) ──────────
     if (_pendingRemoteTemp && !_cycleRunning) {
         taskENTER_CRITICAL(&_mux);
         const float remoteTempC = _pendingRemoteTempC;
+        const float shiftC = std::isnan(remoteTempC)
+            ? 0.0f : lowHeatShiftLocked(effectiveModeLocked(now));
         _pendingRemoteTemp = false;
         taskEXIT_CRITICAL(&_mux);
-        sendRemoteTempPacket(remoteTempC);
+        _remoteShiftSentC = shiftC;
+        if (shiftC != 0.0f)
+            LOG_DEBUG("Low heat: room %.1f%sC fed as %.1f%sC", remoteTempC, "\xC2\xB0",
+                     remoteTempC + shiftC, "\xC2\xB0");
+        sendRemoteTempPacket(remoteTempC + shiftC);
         _lastWriteMs = uptime_ms();
         _writeDeferred = true;
         return;
@@ -349,8 +400,18 @@ void CN105Controller::setMode(uint8_t mode) {
 
 void CN105Controller::setTargetTemp(float tempC) {
     if (!std::isfinite(tempC)) return;
-    float clamped = std::clamp(tempC, CN105_TEMP_MIN, CN105_TEMP_MAX);
-    LOG_INFO("CMD: setTargetTemp(%.1f%sC)", clamped, "\xC2\xB0");
+    float clamped = std::clamp(tempC, minTargetTemp(), CN105_TEMP_MAX);
+    // Below the unit's own floor, the unit is sent the floor and the real
+    // target is kept as the low heat target, on the wire's 0.5 °C grid.
+    const float half = roundf(clamped * 2.0f) / 2.0f;
+    const float lowC = (half < CN105_TEMP_MIN) ? half : NAN;
+    if (std::isnan(lowC)) {
+        LOG_INFO("CMD: setTargetTemp(%.1f%sC)", clamped, "\xC2\xB0");
+    } else {
+        clamped = CN105_TEMP_MIN;
+        LOG_INFO("CMD: setTargetTemp(%.1f%sC, low heat: unit held at %.1f%sC)",
+                 lowC, "\xC2\xB0", clamped, "\xC2\xB0");
+    }
     uint32_t now = uptime_ms();
     taskENTER_CRITICAL(&_mux);
     _staged.flags1 |= CN105_FLAG_TEMP;
@@ -360,7 +421,38 @@ void CN105Controller::setTargetTemp(float tempC) {
     _wanted.hasBeenSent = false;
     _wanted.sentFlags &= ~CN105_FLAG_TEMP;
     _wanted.lastChange = now;
+    _lowHeatTargetC = lowC;
+    const bool unfed = !std::isnan(lowC) && !std::isfinite(_remoteRealC);
     taskEXIT_CRITICAL(&_mux);
+    if (unfed)
+        LOG_WARN("Low heat needs a room sensor feeding the unit; it holds %.1f%sC until one does",
+                 CN105_TEMP_MIN, "\xC2\xB0");
+}
+
+void CN105Controller::setLowHeatEnabled(bool on) {
+    if (on == _lowHeatEnabled) return;
+    taskENTER_CRITICAL(&_mux);
+    _lowHeatEnabled = on;
+    if (!on) _lowHeatTargetC = NAN;
+    taskEXIT_CRITICAL(&_mux);
+    LOG_INFO("Low heat %s", on ? "enabled" : "disabled");
+}
+
+float CN105Controller::lowHeatTarget() const {
+    taskENTER_CRITICAL(&_mux);
+    const float lowC = _lowHeatTargetC;
+    taskEXIT_CRITICAL(&_mux);
+    return lowC;
+}
+
+void CN105Controller::restoreLowHeatTarget(float tempC) {
+    if (!_lowHeatEnabled || !std::isfinite(tempC)) return;
+    const float half = roundf(tempC * 2.0f) / 2.0f;
+    if (half < CN105_LOW_HEAT_MIN || half >= CN105_TEMP_MIN) return;
+    taskENTER_CRITICAL(&_mux);
+    _lowHeatTargetC = half;
+    taskEXIT_CRITICAL(&_mux);
+    LOG_INFO("Low heat target %.1f%sC restored", half, "\xC2\xB0");
 }
 
 void CN105Controller::setFanSpeed(uint8_t speed) {
@@ -426,6 +518,7 @@ void CN105Controller::sendRemoteTemperature(float tempC) {
     taskENTER_CRITICAL(&_mux);
     _pendingRemoteTemp = true;
     _pendingRemoteTempC = tempC;
+    _remoteRealC = tempC;
     _remoteWritten = true;
     taskEXIT_CRITICAL(&_mux);
     LOG_DEBUG("CMD: sendRemoteTemperature(%.1f%sC)", tempC, "\xC2\xB0");
@@ -435,6 +528,7 @@ void CN105Controller::clearRemoteTemperature() {
     taskENTER_CRITICAL(&_mux);
     _pendingRemoteTemp = true;
     _pendingRemoteTempC = NAN;
+    _remoteRealC = NAN;
     _remoteWritten = true;
     taskEXIT_CRITICAL(&_mux);
     LOG_DEBUG("CMD: clearRemoteTemperature()");
@@ -963,5 +1057,19 @@ void CN105Controller::handleInfoResponse(const uint8_t *data, uint8_t dataLen) {
         }
         _wanted.hasTemp = false;
     }
+    // Low heat: the unit holding anything but CN105_TEMP_MIN in HEAT (set
+    // from the IR remote, or our SET never landed) means the low target no
+    // longer describes it. Not while a SET of ours may still be on its way.
+    bool lowDropped = false;
+    if (settingsDecoded && std::isfinite(_lowHeatTargetC) &&
+        next.mode == CN105_MODE_HEAT &&
+        !(_wanted.hasTemp && now - _wanted.lastChange < CN105_GRACE_SAFETY_MS) &&
+        fabsf(next.targetTemp - CN105_TEMP_MIN) >= 0.3f) {
+        _lowHeatTargetC = NAN;
+        lowDropped = true;
+    }
     taskEXIT_CRITICAL(&_mux);
+    if (lowDropped)
+        LOG_INFO("Unit holds %.1f%sC in HEAT; low heat target dropped",
+                 next.targetTemp, "\xC2\xB0");
 }

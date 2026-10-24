@@ -327,6 +327,14 @@ The **Room Sensor** card carries the BLE settings on boards with Bluetooth:
 - **Manage Sensors** — rename or remove a sensor, and set a calibration offset per sensor (±9.9 °C, entered in the display unit), applied to each reading before it is used or averaged
 - **Indicators** — green (healthy), orange (stale or no data yet), gray (not configured)
 
+### Low Heat
+
+Mitsubishi units won't accept a heat setpoint below 61 °F (16 °C). For a garage or workshop, turn on **Low Heat** under Unit Capabilities to allow heat setpoints down to 50 °F (10 °C), then restart so Apple Home picks up the wider range.
+
+Below 61 °F the unit is held at 61 °F, and the room temperature it is fed is raised by the difference. With a 55 °F target and the garage at 53 °F, the unit is told the room is 59 °F, so it heats until the garage reaches 55 °F. Apple Home and the web UI show the real room temperature and the real target.
+
+This needs a room sensor (BLE or Serin Link) feeding the unit. With no sensor, or when the sensor goes stale, the unit falls back to its own thermistor and holds a real 61 °F, and that is what Apple Home shows. Low heat applies in Heat mode only. Setting a different temperature from the IR remote cancels it.
+
 ## Serin Link
 
 Serin Link is an accessory physical dial with a display that mirrors the unit's live state and controls power, mode, setpoint, fan, and vanes over an encrypted wireless link. All HVAC logic stays on the unit, so the dial and Apple Home always report the same state.

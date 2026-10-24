@@ -241,6 +241,10 @@ extern "C" void app_main(void)
     // during initial WiFi provisioning.
 
     // ── 10. CN105 UART init (skipped in safe mode) ─────────────────────
+    // Low heat first and even in safe mode: the main loop persists whatever
+    // low target the controller holds, so it must start from the stored one.
+    cn105.setLowHeatEnabled(settings.get().lowHeatEnabled);
+    cn105.restoreLowHeatTarget(settings.get().lowHeatTarget);
     if (!safeMode) {
         cn105.setUpdateInterval(settings.get().pollMs);
         // Clear a remote temperature the pump kept across our restart only if
@@ -407,6 +411,20 @@ extern "C" void app_main(void)
         static uint32_t lastEventScan = 0;
         if (now - lastEventScan >= 1000) {
             lastEventScan = now;
+
+            // Low heat: follow the setting, and persist the controller's low
+            // target (the unit only ever holds the floor, so after a restart
+            // nothing else remembers it).
+            cn105.setLowHeatEnabled(settings.get().lowHeatEnabled);
+            {
+                const float lowC = cn105.lowHeatTarget();
+                float &stored = settings.get().lowHeatTarget;
+                if (std::isnan(lowC) != std::isnan(stored) ||
+                    (!std::isnan(lowC) && lowC != stored)) {
+                    stored = lowC;
+                    settings.save();
+                }
+            }
 
             static bool sntpStarted = false;
             if (!sntpStarted && WifiManager::isConnected()) {
