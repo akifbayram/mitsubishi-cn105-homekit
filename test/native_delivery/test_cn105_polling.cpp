@@ -63,6 +63,13 @@ int main(int, char** argv) {
   c.sendRemoteTemperature(21);ticks(c,100,100);
   CHECK(pump.remoteSets==1);CHECK(pump.remoteClears==0);
  }
+ CASE("enhanced_to_legacy_reconnect_changes_wire_encoding") {
+  now_ms=5000;c.begin(&pump);ticks(c);CHECK(c.quantizeSetpoint(22.5f)==22.5f);
+  pump.legacy=true;now_ms+=4000;c.begin(&pump);ticks(c);
+  CHECK(c.quantizeSetpoint(22.5f)==22);
+  c.setTargetTemp(23.5f);c.sendPendingChanges();ticks(c);
+  CHECK(pump.legacyC==23);CHECK(pump.sent.back()[19]==0);
+ }
  // External Auto changes: a wall controller or IR remote writing the Auto
  // setpoint, or putting the unit into Auto, is a SETTINGS change this
  // controller did not command. Pump SETTINGS: target 172 = 22.0, 166 = 19.0.

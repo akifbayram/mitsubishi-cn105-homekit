@@ -531,6 +531,13 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
 /* Utility */
 .hidden{display:none !important;}
 .spin-svg{animation:spin 1s linear infinite;}
+.range-setting{gap:12px;padding-left:0;padding-right:0;align-items:flex-start;border-bottom:none}
+.range-setting+.range-setting{border-top:1px solid var(--sep)}
+.range-fields{display:flex;flex-direction:column;align-items:flex-end;gap:8px}
+.range-fields select{font:inherit;font-size:13px;color:var(--text2);background:var(--bg);border:1px solid var(--sep);border-radius:7px;padding:5px}
+.range-bounds{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--text3)}
+.range-bounds[hidden]{display:none}
+.range-bounds input{width:55px;min-width:0;border:1px solid var(--sep);border-radius:5px;background:transparent;color:var(--text2);padding:4px;font:inherit;text-align:right}
 </style>
 </head>
 <body>
@@ -591,6 +598,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
           <div class="temp-source" id="tempSource"></div>
         </div>
       </div>
+      <div class="sub hidden" id="rangeNotApplied" role="status"></div>
       <div class="slider-row" id="sliderRow">
         <button class="temp-step" onclick="stepTemp(-1)" aria-label="Decrease temperature">&minus;</button>
         <input type="range" id="tempSlider" min="16" max="30.5" step="0.5" value="22" oninput="onSliderInput()" onchange="onSliderChange()" aria-label="Target temperature">
@@ -965,6 +973,32 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
         <button data-v="C" class="active" onclick="setTempUnit(this)">&deg;C</button>
         <button data-v="F" onclick="setTempUnit(this)">&deg;F</button>
       </div>
+    </div>
+    <div class="inset-block">
+      <div class="lbl">Temperature Ranges</div>
+      <div class="sub">Choose automatic limits or a custom range. Values are in °C.</div>
+      <div class="range-setting inset-row">
+        <div><label class="lbl" for="rangeHeatSource">Heat</label><div class="sub" id="rangeHeatReference">Waiting for settings</div></div>
+        <div class="range-fields">
+          <select id="rangeHeatSource" aria-label="Heat range" onchange="editRange('Heat')"><option value="automatic">Automatic</option><option value="manual">Custom</option></select>
+          <div id="rangeHeatBounds" class="range-bounds" hidden><input type="number" id="rangeHeatMin" min="10" max="31" step="0.5" aria-label="Heat minimum Celsius" oninput="editRange('Heat')"><span>–</span><input type="number" id="rangeHeatMax" min="10" max="31" step="0.5" aria-label="Heat maximum Celsius" oninput="editRange('Heat')"><span>°C</span></div>
+        </div>
+      </div>
+      <div class="range-setting inset-row">
+        <div><label class="lbl" for="rangeCoolSource">Cool / Dry</label><div class="sub" id="rangeCoolReference">Waiting for settings</div></div>
+        <div class="range-fields">
+          <select id="rangeCoolSource" aria-label="Cool / Dry range" onchange="editRange('Cool')"><option value="automatic">Automatic</option><option value="manual">Custom</option></select>
+          <div id="rangeCoolBounds" class="range-bounds" hidden><input type="number" id="rangeCoolMin" min="10" max="31" step="0.5" aria-label="Cool / Dry minimum Celsius" oninput="editRange('Cool')"><span>–</span><input type="number" id="rangeCoolMax" min="10" max="31" step="0.5" aria-label="Cool / Dry maximum Celsius" oninput="editRange('Cool')"><span>°C</span></div>
+        </div>
+      </div>
+      <div class="range-setting inset-row">
+        <div><label class="lbl" for="rangeAutoSource">Auto</label><div class="sub" id="rangeAutoReference">Waiting for settings</div></div>
+        <div class="range-fields">
+          <select id="rangeAutoSource" aria-label="Auto range" onchange="editRange('Auto')"><option value="automatic">Automatic</option><option value="manual">Custom</option></select>
+          <div id="rangeAutoBounds" class="range-bounds" hidden><input type="number" id="rangeAutoMin" min="10" max="31" step="0.5" aria-label="Auto minimum Celsius" oninput="editRange('Auto')"><span>–</span><input type="number" id="rangeAutoMax" min="10" max="31" step="0.5" aria-label="Auto maximum Celsius" oninput="editRange('Auto')"><span>°C</span></div>
+        </div>
+      </div>
+      <div class="sub" id="rangeSaveStatus" role="status"></div>
     </div>
     <div class="inset-block">
       <div class="lbl">Vane Type</div>
@@ -1384,10 +1418,14 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     if(fi<61)fi=61;if(fi>88)fi=88;
     return F_TABLE[fi-61][1];
   }
+  function setpointF(c){
+    var ranges=state&&state.setpointRanges;
+    return (ranges&&ranges.ftabId===0)||c<16||c>30.5?Math.round(c*9/5+32):cToFTable(c);
+  }
   // ── temp-unit:end
   function fmtTemp(c){
     if(c==null) return '--';
-    if(tempUnit==='F') return cToFTable(c).toString();
+    if(tempUnit==='F') return setpointF(c).toString();
     return c.toFixed(1);
   }
   // Readings (room/outside/BLE sensor): always one decimal. The Mitsubishi
@@ -1640,6 +1678,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       try{
         var msg=JSON.parse(ev.data);
         if(msg.type==='state') onState(msg);
+        else if(msg.type==='rangeResult') onRangeResult(msg);
         else if(msg.type==='log') onLog(msg.msg);
         else if(msg.type==='deviceInfo') onDeviceInfo(msg);
         else if(msg.type==='events') onEvents(msg);
@@ -1700,7 +1739,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   // Shared by onState() (server push) and setMode() (optimistic on click) so
   // the slider's visibility tracks mode changes instantly instead of waiting
   // for the post-command lockout to expire.
-  function fmtHandle(v){return (tempUnit==='F')?Math.round(v).toString():v.toFixed(1);}
+  function fmtHandle(v){return fmtTemp(v);}
   // Update the two AUTO threshold cards (value text + slider fill).
   function renderBand(){
     var h=parseFloat(heatSlider.value), c=parseFloat(coolSlider.value);
@@ -1712,14 +1751,14 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   var MIN_GAP_C=2.0;  // matches the firmware's bidirectional clamp
   // Keep cool >= heat + 2°C, enforced in Celsius regardless of display unit.
   function clampHeatBelowCool(){
-    var hc=(tempUnit==='F')?fToCTable(parseFloat(heatSlider.value)):parseFloat(heatSlider.value);
-    var cc=(tempUnit==='F')?fToCTable(parseFloat(coolSlider.value)):parseFloat(coolSlider.value);
-    if(hc>cc-MIN_GAP_C){hc=cc-MIN_GAP_C;heatSlider.value=(tempUnit==='F')?cToFTable(hc):hc;}
+    var hc=parseFloat(heatSlider.value);
+    var cc=parseFloat(coolSlider.value);
+    if(hc>cc-MIN_GAP_C){hc=cc-MIN_GAP_C;setSliderC(heatSlider,hc);}
   }
   function clampCoolAboveHeat(){
-    var hc=(tempUnit==='F')?fToCTable(parseFloat(heatSlider.value)):parseFloat(heatSlider.value);
-    var cc=(tempUnit==='F')?fToCTable(parseFloat(coolSlider.value)):parseFloat(coolSlider.value);
-    if(cc<hc+MIN_GAP_C){cc=hc+MIN_GAP_C;coolSlider.value=(tempUnit==='F')?cToFTable(cc):cc;}
+    var hc=parseFloat(heatSlider.value);
+    var cc=parseFloat(coolSlider.value);
+    if(cc<hc+MIN_GAP_C){cc=hc+MIN_GAP_C;setSliderC(coolSlider,cc);}
   }
   // Headline while the user is setting the band: show the range being chosen (from the sliders).
   function autoHeadlineRange(){
@@ -1761,8 +1800,8 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       sliderRow.style.display='none';
       $('targetWrap').style.display='none';
       if(!dualLocked&&s.heatThresh!=null&&s.coolThresh!=null){
-        heatSlider.value=(tempUnit==='F')?cToFTable(s.heatThresh):s.heatThresh;
-        coolSlider.value=(tempUnit==='F')?cToFTable(s.coolThresh):s.coolThresh;
+        setSliderC(heatSlider,s.heatThresh);
+        setSliderC(coolSlider,s.coolThresh);
       }
       renderBand();
       $('autoOwnerNote').classList.toggle('hidden',!s.autoUnit);
@@ -2185,7 +2224,11 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   // This does NOT cover a truncated FIRST frame — there is nothing to merge
   // with — so the read-modify-writes still check for the field themselves.
   function mergeState(prev,s){
-    if(!prev||!s||!s.trunc) return s;
+    if(!prev||!s) return s;
+    if(!s.trunc){
+      if(!s.setpointRanges&&prev.setpointRanges) return Object.assign({},s,{setpointRanges:prev.setpointRanges});
+      return s;
+    }
     var out={};
     for(var k in prev) out[k]=prev[k];
     for(var j in s) out[j]=s[j];
@@ -2195,6 +2238,8 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   function onState(s){
     s=mergeState(lastState,s);
     lastState=s;   // retained for diagnostics copy + event timestamps
+    renderRangeSettings(s);
+    renderRangeStatus(s);
     var locked = lastCmdTime > 0 && (Date.now() - lastCmdTime) < 2000;
 
     if(!locked){
@@ -2209,15 +2254,10 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       }
 
       targetTemp.textContent=fmtTemp(s.target);
+      configureSliders();
       if(!sliderDragging && s.target!=null){
-        if(tempUnit==='F'){
-          var tf=cToFTable(s.target);
-          tempSlider.value=tf;
-          sliderVal.textContent=tf.toString();
-        } else {
-          tempSlider.value=s.target;
-          sliderVal.textContent=s.target.toFixed(1);
-        }
+        setSliderC(tempSlider,s.target);
+        sliderVal.textContent=fmtTemp(s.target);
       }
       paintTempSlider();
 
@@ -3033,6 +3073,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     }else{
       state.power=true;
       state.mode=v;
+      configureSliders();
       setActive('modeGrp',v);
       setModeTheme(v);
       renderDual(state);
@@ -3068,25 +3109,22 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   };
 
   // ── slider-units:start
-  // Extracted with the temp-unit block and tested by test/web_state/: the
-  // min==61 checks below are a release-blocker fix, so they get a test.
+  // Slider positions always use canonical Celsius. Units affect labels only.
+  function setSliderC(el,c){el.selectedC=c;el.value=c;}
   function setSliderAttrs(el,min,max,step,val){
-    el.min=min;el.max=max;el.step=step;el.value=val;
+    el.min=min;el.max=max;el.step=step;setSliderC(el,val);
   }
-  // Both branches convert only when the slider is not already in the target
-  // unit (min==61 means it currently shows F), so re-running this for the unit
-  // the sliders already carry keeps the value instead of pushing it through the
-  // table a second time.
   function configureSliders(){
-    if(tempUnit==='F'){
-      setSliderAttrs(tempSlider,61,88,1,tempSlider.min==61?parseFloat(tempSlider.value):cToFTable(parseFloat(tempSlider.value)));
-      setSliderAttrs(heatSlider,61,88,1,heatSlider.min==61?parseFloat(heatSlider.value):cToFTable(parseFloat(heatSlider.value)));
-      setSliderAttrs(coolSlider,61,88,1,coolSlider.min==61?parseFloat(coolSlider.value):cToFTable(parseFloat(coolSlider.value)));
-    } else {
-      setSliderAttrs(tempSlider,16,30.5,0.5,tempSlider.min==61?fToCTable(parseFloat(tempSlider.value)):parseFloat(tempSlider.value));
-      setSliderAttrs(heatSlider,16,30.5,0.5,heatSlider.min==61?fToCTable(parseFloat(heatSlider.value)):parseFloat(heatSlider.value));
-      setSliderAttrs(coolSlider,16,30.5,0.5,coolSlider.min==61?fToCTable(parseFloat(coolSlider.value)):parseFloat(coolSlider.value));
+    var ranges=state&&state.setpointRanges;
+    var key=state&&state.mode==='auto'?'auto':state&&(state.mode==='cool'||state.mode==='dry')?'cool':'heat';
+    function configure(el,r){
+      var c=parseFloat(el.value);
+      if(r) setSliderAttrs(el,r.min,r.max,r.step,c);
+      else el.selectedC=c;
     }
+    configure(tempSlider,ranges&&ranges[key]);
+    configure(heatSlider,ranges&&ranges.auto);
+    configure(coolSlider,ranges&&ranges.auto);
     paintTempSlider();
   }
   // ── slider-units:end
@@ -3105,7 +3143,8 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   window.onSliderInput=function(){
     sliderDragging=true;
     var raw=parseFloat(tempSlider.value);
-    var display=(tempUnit==='F')?raw.toString():raw.toFixed(1);
+    var display=fmtTemp(raw);
+    tempSlider.selectedC=raw;
     sliderVal.textContent=display;
     targetTemp.textContent=display;
     paintTempSlider();
@@ -3121,8 +3160,9 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     }
     lastCmdTime=Date.now();
     var raw=parseFloat(tempSlider.value);
-    var celsius=(tempUnit==='F')?fToCTable(raw):raw;
-    var display=(tempUnit==='F')?raw.toString():raw.toFixed(1);
+    var celsius=raw;
+    var display=fmtTemp(raw);
+    tempSlider.selectedC=raw;
     sliderVal.textContent=display;
     targetTemp.textContent=display;
     paintTempSlider();
@@ -3132,14 +3172,8 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   // Re-sync the setpoint slider + readout from the last confirmed state.
   function syncTempFromState(){
     if(state.target==null) return;
-    if(tempUnit==='F'){
-      var tf=cToFTable(state.target);
-      tempSlider.value=tf;
-      sliderVal.textContent=tf.toString();
-    } else {
-      tempSlider.value=state.target;
-      sliderVal.textContent=state.target.toFixed(1);
-    }
+    setSliderC(tempSlider,state.target);
+    sliderVal.textContent=fmtTemp(state.target);
     targetTemp.textContent=fmtTemp(state.target);
   }
 
@@ -3153,7 +3187,8 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     clampHeatBelowCool();
     dualLocked=true;
     var raw=parseFloat(heatSlider.value);
-    send({cmd:'set',heatThresh:(tempUnit==='F')?fToCTable(raw):raw});
+    heatSlider.selectedC=raw;
+    send({cmd:'set',heatThresh:raw});
     setTimeout(function(){dualLocked=false},2000);
   };
   coolSlider.oninput=function(){
@@ -3166,15 +3201,16 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     clampCoolAboveHeat();
     dualLocked=true;
     var raw=parseFloat(coolSlider.value);
-    send({cmd:'set',coolThresh:(tempUnit==='F')?fToCTable(raw):raw});
+    coolSlider.selectedC=raw;
+    send({cmd:'set',coolThresh:raw});
     setTimeout(function(){dualLocked=false},2000);
   };
 
   // Re-sync the heat/cool threshold sliders from the last confirmed state.
   function syncDualFromState(){
     if(state.heatThresh==null||state.coolThresh==null) return;
-    heatSlider.value=(tempUnit==='F')?cToFTable(state.heatThresh):state.heatThresh;
-    coolSlider.value=(tempUnit==='F')?cToFTable(state.coolThresh):state.coolThresh;
+    setSliderC(heatSlider,state.heatThresh);
+    setSliderC(coolSlider,state.coolThresh);
     renderBand();
   }
 
@@ -3281,6 +3317,8 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     lastCmdTime=Date.now();
     setActive('unitGrp',u);
     configureSliders();
+    if(typeof sliderVal!=='undefined') sliderVal.textContent=fmtTemp(parseFloat(tempSlider.value));
+    if(typeof targetTemp!=='undefined') targetTemp.textContent=fmtTemp(parseFloat(tempSlider.value));
     renderDual(state);
     send({cmd:'config',tempUnit:u});
   };
@@ -3315,7 +3353,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       return;
     }
     updateCapDeps();
-    settingsDirty=true;
+    markSettingsEdited();
     lastCapMask=null;  // user edited: next push must reapply even if the mask value is unchanged
   };
   var lastModeVis=null;
@@ -3336,7 +3374,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
 
   // A tap on a Save-Settings segmented control (Vane Type, CN105 Baud Rate):
   // select it and hold off state pushes until the user saves.
-  window.pickSetting=function(b){setActive(b.parentNode.id,b.getAttribute('data-v'));settingsDirty=true;};
+  window.pickSetting=function(b){setActive(b.parentNode.id,b.getAttribute('data-v'));markSettingsEdited();};
   // Log level lives in the Logs card, away from the Device card's Save button,
   // so it applies on tap. The firmware's config handler takes each field
   // independently, so a logLevel-only frame is a valid partial config.
@@ -3349,21 +3387,120 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       showToast('Not connected — log level unchanged',true);
     }
   };
+  // ── range-settings:start
+  var rangeDraft={},rangeRequestId=0,rangePending=null,rangeEditVersion=0;
+  var RANGE_NAMES=['Heat','Cool','Auto'];
+  function markSettingsEdited(){settingsDirty=true;rangeEditVersion++;}
+  function rangeStatus(text,error){
+    $('rangeSaveStatus').textContent=text;
+    $('rangeSaveStatus').style.color=error?'var(--red)':'var(--text3)';
+  }
+  function validRangeSettings(st){
+    RANGE_NAMES.forEach(function(name){
+      var source=st['range'+name+'Source'],min=st['range'+name+'Min'],max=st['range'+name+'Max'];
+      var hasSource=Object.prototype.hasOwnProperty.call(st,'range'+name+'Source');
+      var hasMin=Object.prototype.hasOwnProperty.call(st,'range'+name+'Min');
+      var hasMax=Object.prototype.hasOwnProperty.call(st,'range'+name+'Max');
+      if(hasSource&&['compatibility','automatic','manual'].indexOf(source)<0) throw new Error('Invalid '+name+' range choice');
+      if(hasMin!==hasMax||(source==='manual'&&(!hasMin||!hasMax))) throw new Error('Enter both '+name+' bounds');
+      if(hasMin&&(!Number.isFinite(min)||!Number.isFinite(max)||min*2!==Math.round(min*2)||max*2!==Math.round(max*2)||min>=max||min<10||max>31||(name==='Auto'&&max-min<2))) throw new Error('Check '+name+' bounds');
+    });
+    ['heatThresh','coolThresh'].forEach(function(key){
+      if(Object.prototype.hasOwnProperty.call(st,key)&&(!Number.isFinite(st[key])||st[key]<10||st[key]>31||st[key]*2!==Math.round(st[key]*2))) throw new Error('Invalid Auto temperature');
+    });
+  }
+  function copyRangeSettings(from,to){
+    RANGE_NAMES.forEach(function(name){
+      ['Source','Min','Max'].forEach(function(suffix){var key='range'+name+suffix;if(Object.prototype.hasOwnProperty.call(from,key))to[key]=from[key];});
+    });
+    ['heatThresh','coolThresh'].forEach(function(key){if(Object.prototype.hasOwnProperty.call(from,key))to[key]=from[key];});
+  }
+  function submitCheckedConfig(cfg,success){
+    validRangeSettings(cfg);
+    cfg.requestId=++rangeRequestId;
+    if(!send(cfg)){rangeStatus('Not connected — not saved',true);return false;}
+    rangePending={id:cfg.requestId,version:rangeEditVersion,success:success};
+    var id=cfg.requestId;
+    setTimeout(function(){if(rangePending&&rangePending.id===id){rangePending=null;rangeStatus('Save not confirmed. Reconnect and try again.',true);}},10000);
+    rangeStatus('Saving…',false);
+    return true;
+  }
+  function onRangeResult(msg){
+    if(!rangePending||msg.requestId!==rangePending.id){
+      if(msg.requestId==null&&!msg.ok) showToast(msg.msg||'Change rejected',true);
+      return;
+    }
+    var pending=rangePending;rangePending=null;
+    if(!msg.ok){rangeStatus(msg.msg||'Could not save settings',true);showToast(msg.msg||'Could not save settings',true);return;}
+    if(pending.version!==rangeEditVersion){rangeStatus('Earlier changes saved. Save your latest edits.',false);return;}
+    settingsDirty=false;
+    RANGE_NAMES.forEach(function(name){if(rangeDraft[name])rangeDraft[name].dirty=false;});
+    rangeStatus(pending.success||'Settings saved',false);
+    showToast(pending.success||'Settings saved');
+  }
+  function renderRangeSettings(st){
+    var ranges=st.setpointRanges;
+    if(!ranges) return;
+    RANGE_NAMES.forEach(function(name){
+      var r=ranges[name.toLowerCase()],draft=rangeDraft[name];
+      if(!r) return;
+      if(!draft||!draft.dirty){
+        draft=rangeDraft[name]={source:r.selection,min:r.manualMin>=10?r.manualMin:r.min,max:r.manualMax>=10?r.manualMax:r.max,dirty:false};
+        var select=$('range'+name+'Source');
+        var compatibility=select.querySelector('option[value="compatibility"]');
+        if(r.selection==='compatibility'&&!compatibility){
+          var opt=document.createElement('option');opt.value='compatibility';opt.textContent='Existing limits';select.appendChild(opt);
+        }else if(r.selection!=='compatibility'&&compatibility){select.removeChild(compatibility);}
+        select.value=draft.source;
+        $('range'+name+'Min').value=draft.min;$('range'+name+'Max').value=draft.max;
+      }
+      $('range'+name+'Bounds').hidden=draft.source!=='manual';
+      var ref=r.reference;
+      $('range'+name+'Reference').textContent=ref?(ref.source==='fresh'?'Detected: ':'Last known: ')+ref.min+'–'+ref.max+' °C':'No detected limits';
+    });
+  }
+  window.editRange=function(name){
+    rangeDraft[name]={source:$('range'+name+'Source').value,min:$('range'+name+'Min').value,max:$('range'+name+'Max').value,dirty:true};
+    $('range'+name+'Bounds').hidden=rangeDraft[name].source!=='manual';
+    markSettingsEdited();
+  };
+  function addRangeEdits(cfg){
+    RANGE_NAMES.forEach(function(name){
+      var draft=rangeDraft[name];if(!draft||!draft.dirty)return;
+      cfg['range'+name+'Source']=draft.source;
+      if(draft.source==='manual'){
+        cfg['range'+name+'Min']=draft.min===''?NaN:Number(draft.min);
+        cfg['range'+name+'Max']=draft.max===''?NaN:Number(draft.max);
+      }
+    });
+    return cfg;
+  }
+  function exportRangeSettings(st,out){
+    if(!st.setpointRanges) return;
+    RANGE_NAMES.forEach(function(name){
+      var r=st.setpointRanges[name.toLowerCase()];if(!r)return;
+      out['range'+name+'Source']=r.selection;
+      if(r.selection==='manual'){out['range'+name+'Min']=r.manualMin;out['range'+name+'Max']=r.manualMax;}
+    });
+  }
+  function renderRangeStatus(st){
+    var failed=st.rangeCondition&&st.rangeCondition!=='satisfied'||st.targetReadable===false;
+    var el=$('rangeNotApplied');
+    el.classList.toggle('hidden',!failed);
+    if(failed) el.textContent='Range not applied · Reported '+fmtTemp(st.actualTarget)+'° · Requested '+fmtTemp(st.desiredTarget)+'°';
+  }
+  // ── range-settings:end
   window.saveConfig=function(){
     var name=$('cfgDeviceName').value.replace(/["\\\n\r]/g,'').trim();
     var baud=parseInt(getSegVal('baudGrp'));
-    var ok=send({
-      cmd:'config',
-      deviceName:name,
-      pollInterval:parseInt($('cfgPoll').value),
-      cn105Baud:baud,
-      vaneConfig:parseInt(getSegVal('vaneTypeGrp')),
-      modeMask:getCapMask(),
+    var cfg={
+      cmd:'config',deviceName:name,pollInterval:parseInt($('cfgPoll').value),
+      cn105Baud:baud,vaneConfig:parseInt(getSegVal('vaneTypeGrp')),modeMask:getCapMask(),
       trustedHost:$('cfgTrustedHost').value.trim().toLowerCase()
-    });
-    if(ok) settingsDirty=false;
-    var baudChanged=ok&&lastState&&lastState.cn105Baud!=null&&lastState.cn105Baud!==baud;
-    showToast(!ok?'Not connected — not saved':baudChanged?'Settings saved — reconnecting at '+baud+' baud':'Settings saved',!ok);
+    };
+    try{submitCheckedConfig(addRangeEdits(cfg),'Settings saved');}
+    catch(e){rangeStatus(e.message,true);showToast(e.message,true);}
+
   };
 
   window.saveWifi=function(){
@@ -3792,16 +3929,16 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   };
 
   // ── Settings backup — 100% client-side ─────────────────────────────────────
-  // Every field already rides the state push, and import just replays the
-  // existing 'config' + 'set' commands, so the firmware needs no export/import
-  // protocol at all. Wi-Fi credentials and the HomeKit setup code are
+  // Export saved choices from state. Import sends one checked config and
+  // waits for its acknowledgment. Wi-Fi credentials and the HomeKit setup code are
   // deliberately NOT exported (secrets / per-device identity).
   window.exportSettings=function(){
     var s=lastState;
     if(!s){showToast('Not connected — nothing to export',true);return}
     var out={app:'cn105-homekit-settings',v:1,fw:RUNNING_FW_VER,exported:new Date().toISOString(),
       settings:{deviceName:s.deviceName,tempUnit:s.tempUnit,pollInterval:s.pollInterval,cn105Baud:s.cn105Baud,logLevel:s.logLevel,
-        vaneConfig:s.vaneConfig,modeMask:s.modeMask,heatThresh:s.heatThresh,coolThresh:s.coolThresh}};
+        vaneConfig:s.vaneConfig,modeMask:s.modeMask,heatThresh:s.savedHeatThresh!=null?s.savedHeatThresh:s.heatThresh,coolThresh:s.savedCoolThresh!=null?s.savedCoolThresh:s.coolThresh}};
+    exportRangeSettings(s,out.settings);
     // roomSource is not BLE-specific (Internal/Link don't need BLE at all), so
     // it rides at the top level rather than inside the ble sub-object.
     if(s.roomSource!=null) out.settings.roomSource=s.roomSource;
@@ -3847,14 +3984,11 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
         if(typeof st.ble.addr==='string'&&st.ble.addr) cfg.bleAddr=st.ble.addr;
         if(typeof st.ble.timeout==='number') cfg.bleTimeout=st.ble.timeout;
       }
-      send(cfg);
-      if(typeof st.heatThresh==='number'||typeof st.coolThresh==='number'){
-        var t={cmd:'set'};
-        if(typeof st.heatThresh==='number') t.heatThresh=st.heatThresh;
-        if(typeof st.coolThresh==='number') t.coolThresh=st.coolThresh;
-        send(t);
-      }
-      showToast('Settings imported — device values applied');
+      // Validate the whole profile and band before sending anything.
+      copyRangeSettings(st,cfg);
+      validRangeSettings(cfg);
+      rangeEditVersion++;
+      submitCheckedConfig(cfg,'Settings imported');
     }).catch(function(e){showToast('Import failed: '+(e.message||e),true)});
   };
 
@@ -3967,9 +4101,9 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   }
   $('cfgSSID').addEventListener('input',checkWifiFields);
   $('cfgPass').addEventListener('input',checkWifiFields);
-  $('cfgDeviceName').addEventListener('input',function(){settingsDirty=true;});
-  $('cfgPoll').addEventListener('input',function(){settingsDirty=true;});
-  $('cfgTrustedHost').addEventListener('input',function(){settingsDirty=true;});
+  $('cfgDeviceName').addEventListener('input',function(){markSettingsEdited();});
+  $('cfgPoll').addEventListener('input',function(){markSettingsEdited();});
+  $('cfgTrustedHost').addEventListener('input',function(){markSettingsEdited();});
 
   // ── Init ───────────────────────────────────────────────────────────────────
   initCollapsibleSections();

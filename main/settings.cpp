@@ -6,18 +6,232 @@
 #include <atomic>
 #include <cmath>
 #include <cstring>
+#include <mutex>
+#include <vector>
 
 static const char *TAG = "settings";
 
 SettingsStore settings;
 static std::atomic<bool> s_factoryResetting{false};
+// NVS writes and reset completion share one lock; no driver lock spans flash IO.
+static std::mutex s_settingsWriteMutex;
 
 void SettingsStore::beginFactoryReset() {
     s_factoryResetting.store(true);
+    // Wait for an in-flight checked write to observe the latch and finish.
+    std::lock_guard<std::mutex> lock(s_settingsWriteMutex);
 }
 
 bool SettingsStore::isFactoryResetting() {
     return s_factoryResetting.load();
+}
+
+namespace {
+constexpr size_t RANGE_CFG_SIZE = 22, RANGE_CACHE_SIZE = 14;
+constexpr uint8_t RANGE_RECORD_VERSION = 1;
+void put16(uint8_t* b, int16_t v) {
+    b[0] = static_cast<uint16_t>(v) & 0xff;
+    b[1] = static_cast<uint16_t>(v) >> 8;
+}
+int16_t get16(const uint8_t* b) {
+    return static_cast<int16_t>(static_cast<uint16_t>(b[0]) |
+                                (static_cast<uint16_t>(b[1]) << 8));
+}
+bool validSetpoint(const SetpointSettings& s) {
+    using namespace SetpointRange;
+    if (s.lastEncoding > Encoding::Enhanced || s.band.heat2 < 20 ||
+        s.band.cool2 > 62 || s.band.cool2 - s.band.heat2 < 4) return false;
+    for (int i = 0; i < 3; ++i) {
+        const auto& p = s.preferences.mode[i];
+        if (p.selection > Selection::Manual) return false;
+        // Stored manual intent survives an incompatible subsequent encoding.
+        // Deliberate edits are validated against current equipment by the coordinator.
+        if (p.selection == Selection::Manual &&
+            validateManual(static_cast<Mode>(i), p.manual, Encoding::Unknown) != Result::Ok)
+            return false;
+    }
+    return true;
+}
+void encodeSetpoint(const SetpointSettings& s, uint8_t* b) {
+    using namespace SetpointRange;
+    b[0] = RANGE_RECORD_VERSION;
+    for (int i = 0; i < 3; ++i) {
+        const auto& p = s.preferences.mode[i];
+        b[1 + i*5] = static_cast<uint8_t>(p.selection);
+        put16(b + 2 + i*5, p.selection == Selection::Manual ? p.manual.min2 : 0);
+        put16(b + 4 + i*5, p.selection == Selection::Manual ? p.manual.max2 : 0);
+    }
+    put16(b + 16, s.band.heat2); put16(b + 18, s.band.cool2);
+    b[20] = s.autoOwnerUnit ? 1 : 0;
+    b[21] = static_cast<uint8_t>(s.lastEncoding);
+}
+bool decodeSetpoint(const uint8_t* b, SetpointSettings& out) {
+    if (b[0] != RANGE_RECORD_VERSION || b[20] > 1) return false;
+    SetpointSettings s;
+    for (int i = 0; i < 3; ++i) {
+        s.preferences.mode[i] = {static_cast<SetpointRange::Selection>(b[1+i*5]),
+                                {get16(b+2+i*5), get16(b+4+i*5)}};
+    }
+    s.band = {get16(b+16), get16(b+18)};
+    s.autoOwnerUnit = b[20] != 0;
+    s.lastEncoding = static_cast<SetpointRange::Encoding>(b[21]);
+    if (!validSetpoint(s)) return false;
+    out = s;
+    return true;
+}
+bool encodeCache(const SetpointRange::Detection& d, uint8_t* b) {
+    if (d.validMask & ~7u || d.freshMask & ~d.validMask) return false;
+    b[0] = RANGE_RECORD_VERSION; b[1] = d.validMask;
+    SetpointRange::Preferences automatic{};
+    for (auto& p : automatic.mode) p.selection = SetpointRange::Selection::Automatic;
+    auto cached = d; cached.freshMask = 0;
+    // Keep raw C9 pairs wider than our envelope. As in discovery, require
+    // a usable intersection; an encoding change must not rewrite history.
+    auto resolved = SetpointRange::resolve(automatic, cached, SetpointRange::Encoding::Enhanced,
+                                         SetpointRange::Encoding::Enhanced, 0);
+    for (int i = 0; i < 3; ++i) {
+        auto r = d.mode[i];
+        if (d.validMask & (1u << i)) {
+            if (r.min2 <= 0 || r.max2 >= 127 ||
+                resolved.mode[i].source != SetpointRange::Source::Cached) return false;
+        } else r = {0, 0};
+        put16(b+2+i*4, r.min2); put16(b+4+i*4, r.max2);
+    }
+    return true;
+}
+// Preserve the exact record, including versions this firmware cannot decode.
+// ESP-IDF currently writes on nvs_set_blob; nvs_close is not rollback.
+bool readRecord(nvs_handle_t handle, const char* key, std::vector<uint8_t>& bytes, bool& present) {
+    size_t len = 0;
+    esp_err_t err = nvs_get_blob(handle, key, nullptr, &len);
+    present = err != ESP_ERR_NVS_NOT_FOUND;
+    if (!present) return true;
+    if (err != ESP_OK) return false;
+    bytes.resize(len);
+    return nvs_get_blob(handle, key, bytes.data(), &len) == ESP_OK && len == bytes.size();
+}
+bool restoreRecord(nvs_handle_t handle, const char* key, const std::vector<uint8_t>& bytes, bool present) {
+    esp_err_t err = present ? nvs_set_blob(handle, key, bytes.data(), bytes.size()) : nvs_erase_key(handle, key);
+    return err == ESP_OK || (!present && err == ESP_ERR_NVS_NOT_FOUND);
+}
+// Also discard pending writes on implementations that stage until commit.
+void discardPending(nvs_handle_t& handle) {
+    nvs_close(handle); handle = 0;
+    if (!SettingsStore::isFactoryResetting())
+        nvs_open("ac-settings", NVS_READWRITE, &handle);
+}
+} // namespace
+
+SetpointSettings SettingsStore::setpointSettings() const {
+    std::lock_guard<std::mutex> lock(s_settingsWriteMutex);
+    return _setpoint;
+}
+bool SettingsStore::setpointSettingsAvailable() const {
+    std::lock_guard<std::mutex> lock(s_settingsWriteMutex);
+    return _setpointAvailable;
+}
+SetpointRange::Detection SettingsStore::detectedRanges() const {
+    std::lock_guard<std::mutex> lock(s_settingsWriteMutex);
+    return _detected;
+}
+void SettingsStore::syncSetpointViews() {
+    _settings.heatingThreshold = _setpoint.band.heat2 / 2.0f;
+    _settings.coolingThreshold = _setpoint.band.cool2 / 2.0f;
+    _settings.autoOwnerUnit = _setpoint.autoOwnerUnit;
+}
+bool SettingsStore::saveSetpointSettings(const SetpointSettings& next) {
+    std::lock_guard<std::mutex> lock(s_settingsWriteMutex);
+    return saveSetpointSettingsLocked(next);
+}
+bool SettingsStore::saveSetpointSettingsLocked(const SetpointSettings& next) {
+    if (isFactoryResetting() || !_handle || !validSetpoint(next)) return false;
+    uint8_t encoded[RANGE_CFG_SIZE], current[RANGE_CFG_SIZE];
+    encodeSetpoint(next, encoded); encodeSetpoint(_setpoint, current);
+    if (_setpointAvailable && _setpointStored && !memcmp(encoded, current, sizeof(encoded))) {
+        syncSetpointViews();
+        return true;
+    }
+    std::vector<uint8_t> previous;
+    bool hadRecord = false;
+    if (!readRecord(_handle, "rangeCfg", previous, hadRecord)) return false;
+    nvs_type_t mirrorType;
+    bool hadHeat = nvs_find_key(_handle, "heatThresh", &mirrorType) == ESP_OK;
+    bool hadCool = nvs_find_key(_handle, "coolThresh", &mirrorType) == ESP_OK;
+    bool hadOwner = nvs_find_key(_handle, "autoOwner", &mirrorType) == ESP_OK;
+    float heat = next.band.heat2 / 2.0f, cool = next.band.cool2 / 2.0f;
+    // Mirrors precede the one authoritative write. A mirror failure cannot
+    // publish a new profile; new firmware never loads mirrors over rangeCfg.
+    bool recordAttempted = false;
+    bool ok = nvs_set_blob(_handle, "heatThresh", &heat, sizeof(heat)) == ESP_OK &&
+        nvs_set_blob(_handle, "coolThresh", &cool, sizeof(cool)) == ESP_OK &&
+        nvs_set_u8(_handle, "autoOwner", next.autoOwnerUnit ? 1 : 0) == ESP_OK &&
+        !isFactoryResetting();
+    if (ok) {
+        // NVS may publish the replacement before deleting the old blob fails.
+        // An error result therefore still requires restoration of the old record.
+        recordAttempted = true;
+        ok = nvs_set_blob(_handle, "rangeCfg", encoded, sizeof(encoded)) == ESP_OK &&
+            !isFactoryResetting() && nvs_commit(_handle) == ESP_OK && !isFactoryResetting();
+    }
+    if (!ok) {
+        LOG_ERROR("[Settings] setpoint policy persistence failed; active policy retained");
+        if (!isFactoryResetting()) {
+            bool recordRestored = !recordAttempted || restoreRecord(_handle, "rangeCfg", previous, hadRecord);
+            float oldHeat = _setpoint.band.heat2 / 2.0f, oldCool = _setpoint.band.cool2 / 2.0f;
+            // Do not leave initialization's new mirror keys behind on failure:
+            // a restart must still recognize a fresh namespace as fresh.
+            bool mirrorsRestored = hadHeat ?
+                nvs_set_blob(_handle, "heatThresh", &oldHeat, sizeof(oldHeat)) == ESP_OK :
+                restoreRecord(_handle, "heatThresh", previous, false);
+            mirrorsRestored &= hadCool ?
+                nvs_set_blob(_handle, "coolThresh", &oldCool, sizeof(oldCool)) == ESP_OK :
+                restoreRecord(_handle, "coolThresh", previous, false);
+            mirrorsRestored &= hadOwner ?
+                nvs_set_u8(_handle, "autoOwner", _setpoint.autoOwnerUnit ? 1 : 0) == ESP_OK :
+                restoreRecord(_handle, "autoOwner", previous, false);
+            bool restoredCommit = nvs_commit(_handle) == ESP_OK;
+            if (recordAttempted && (!recordRestored || !restoredCommit)) {
+                _setpointAvailable = false;
+                LOG_ERROR("[Settings] rangeCfg restoration unconfirmed; range policy unavailable");
+            }
+            if (!mirrorsRestored || !restoredCommit)
+                LOG_WARN("[Settings] downgrade mirror restoration incomplete");
+        }
+        discardPending(_handle);
+        syncSetpointViews();
+        return false;
+    }
+    _setpoint = next; _setpointAvailable = true; _setpointStored = true;
+    syncSetpointViews();
+    ++_generation;
+    return true;
+}
+bool SettingsStore::saveDetectedRanges(const SetpointRange::Detection& next) {
+    std::lock_guard<std::mutex> lock(s_settingsWriteMutex);
+    uint8_t encoded[RANGE_CACHE_SIZE], current[RANGE_CACHE_SIZE];
+    if (isFactoryResetting() || !_handle || !encodeCache(next, encoded)) return false;
+    encodeCache(_detected, current);
+    if (!memcmp(encoded, current, sizeof(encoded))) return true;
+    // Cache keys must not turn an uninitialized fresh namespace into an upgrade.
+    // Retry its initial policy first; unavailable policy needs deliberate repair.
+    if (!_setpointStored && (!_setpointAvailable || !saveSetpointSettingsLocked(_setpoint)))
+        return false;
+    std::vector<uint8_t> previous;
+    bool hadRecord = false;
+    if (!readRecord(_handle, "rangeCache", previous, hadRecord)) return false;
+    bool written = nvs_set_blob(_handle, "rangeCache", encoded, sizeof(encoded)) == ESP_OK;
+    if (!written || isFactoryResetting() || nvs_commit(_handle) != ESP_OK || isFactoryResetting()) {
+        LOG_WARN("[Settings] detected range cache persistence failed");
+        // Like rangeCfg, a failed write may already have changed the record.
+        if (!isFactoryResetting() &&
+            (!restoreRecord(_handle, "rangeCache", previous, hadRecord) || nvs_commit(_handle) != ESP_OK))
+            LOG_WARN("[Settings] detected range cache restoration unconfirmed");
+        discardPending(_handle);
+        return false;
+    }
+    _detected = next;
+    _detected.freshMask = 0; // This store holds history; the driver owns freshness.
+    return true;
 }
 
 // Key renames (RevK `.old=` pattern): on boot, if newKey is absent and oldKey
@@ -148,6 +362,31 @@ void SettingsStore::begin() {
         return;
     }
 
+    // Count before any migration writes keys (including schema-less installs).
+    size_t oldEntries = 0;
+    bool hadSettings = nvs_get_used_entry_count(_handle, &oldEntries) != ESP_OK || oldEntries != 0;
+    uint8_t cfg[RANGE_CFG_SIZE]; size_t cfgLen = sizeof(cfg);
+    esp_err_t cfgResult = nvs_get_blob(_handle, "rangeCfg", cfg, &cfgLen);
+    bool havePolicy = cfgResult == ESP_OK && cfgLen == sizeof(cfg) && decodeSetpoint(cfg, _setpoint);
+    bool missingPolicy = cfgResult == ESP_ERR_NVS_NOT_FOUND;
+    _setpointAvailable = havePolicy || missingPolicy;
+    _setpointStored = havePolicy;
+    if (!havePolicy && !missingPolicy)
+        LOG_ERROR("[Settings] rangeCfg invalid/unknown version; range policy unavailable until explicit repair");
+    if (missingPolicy) {
+        for (auto& p : _setpoint.preferences.mode)
+            p = {hadSettings ? SetpointRange::Selection::Compatibility : SetpointRange::Selection::Automatic, {0, 0}};
+    }
+    uint8_t cache[RANGE_CACHE_SIZE]; size_t cacheLen = sizeof(cache);
+    if (nvs_get_blob(_handle, "rangeCache", cache, &cacheLen) == ESP_OK &&
+        cacheLen == sizeof(cache) && cache[0] == RANGE_RECORD_VERSION) {
+        SetpointRange::Detection d{}; d.validMask = cache[1];
+        for (int i = 0; i < 3; ++i) d.mode[i] = {get16(cache+2+i*4), get16(cache+4+i*4)};
+        uint8_t validated[RANGE_CACHE_SIZE];
+        if (encodeCache(d, validated)) _detected = d;
+        else LOG_WARN("[Settings] invalid detected range cache ignored");
+    }
+
     // Key renames move stored values to their new names before any field load
     runKeyMigrations();
 
@@ -205,26 +444,28 @@ void SettingsStore::begin() {
             _settings.trustedHost[0] = '\0';
     }
 
-    // heatingThreshold — float stored as blob
-    {
-        float val = 20.0f;
-        size_t len = sizeof(val);
-        if (nvs_get_blob(_handle, "heatThresh", &val, &len) == ESP_OK && len == sizeof(float) &&
-            std::isfinite(val)) {
-            // Clamp: firmware <= 0.2.4 allowed 31.0, above today's HAP char max
-            // (30.5) — an out-of-range value makes hap_char_update_val reject
-            // every threshold sync.
-            _settings.heatingThreshold = std::clamp(val, CN105_TEMP_MIN, CN105_TEMP_MAX);
+    if (!havePolicy) {
+        // heatingThreshold — float stored as blob
+        {
+            float val = 20.0f;
+            size_t len = sizeof(val);
+            if (nvs_get_blob(_handle, "heatThresh", &val, &len) == ESP_OK && len == sizeof(float) &&
+                std::isfinite(val)) {
+                // Clamp: firmware <= 0.2.4 allowed 31.0, above today's HAP char max
+                // (30.5) — an out-of-range value makes hap_char_update_val reject
+                // every threshold sync.
+                _settings.heatingThreshold = std::clamp(val, CN105_TEMP_MIN, CN105_TEMP_MAX);
+            }
         }
-    }
 
-    // coolingThreshold — float stored as blob
-    {
-        float val = 25.0f;
-        size_t len = sizeof(val);
-        if (nvs_get_blob(_handle, "coolThresh", &val, &len) == ESP_OK && len == sizeof(float) &&
-            std::isfinite(val)) {
-            _settings.coolingThreshold = std::clamp(val, CN105_TEMP_MIN, CN105_TEMP_MAX);
+        // coolingThreshold — float stored as blob
+        {
+            float val = 25.0f;
+            size_t len = sizeof(val);
+            if (nvs_get_blob(_handle, "coolThresh", &val, &len) == ESP_OK && len == sizeof(float) &&
+                std::isfinite(val)) {
+                _settings.coolingThreshold = std::clamp(val, CN105_TEMP_MIN, CN105_TEMP_MAX);
+            }
         }
     }
 
@@ -467,13 +708,27 @@ void SettingsStore::begin() {
         }
     }
 
-    // autoOwner — who last set the Auto operating point. Absent (older
-    // firmware, factory reset): this device, the pre-0.2.9 behaviour.
-    {
-        uint8_t val = 0;
-        if (nvs_get_u8(_handle, "autoOwner", &val) == ESP_OK)
-            _settings.autoOwnerUnit = (val != 0);
+    if (!havePolicy) {
+        // autoOwner — who last set the Auto operating point. Absent (older
+        // firmware, factory reset): this device, the pre-0.2.9 behaviour.
+        {
+            uint8_t val = 0;
+            if (nvs_get_u8(_handle, "autoOwner", &val) == ESP_OK)
+                _settings.autoOwnerUnit = (val != 0);
+        }
     }
+    if (missingPolicy) {
+        _setpoint.band = {static_cast<int16_t>(std::lround(_settings.heatingThreshold * 2)),
+                          static_cast<int16_t>(std::lround(_settings.coolingThreshold * 2))};
+        _setpoint.autoOwnerUnit = _settings.autoOwnerUnit;
+        // Old versions could retain an invalid gap; normalize migration only.
+        if (_setpoint.band.cool2 - _setpoint.band.heat2 < 4) {
+            _setpoint.band.heat2 = std::min<int16_t>(_setpoint.band.heat2, 57);
+            _setpoint.band.cool2 = _setpoint.band.heat2 + 4;
+        }
+        saveSetpointSettings(_setpoint);
+    }
+    if (havePolicy || missingPolicy) syncSetpointViews();
 
     LOG_INFO("[Settings] Loaded: logLevel=%d poll=%lums baud=%lu name=%s unit=%s room mode=%u single=%u members=0x%02X",
              _settings.logLevel, (unsigned long)_settings.pollMs,
@@ -562,15 +817,26 @@ uint8_t room_source_derived(const DeviceSettings &s) {
 }
 
 void SettingsStore::save() {
-    if (isFactoryResetting()) return;
+    std::lock_guard<std::mutex> lock(s_settingsWriteMutex);
+    if (isFactoryResetting() || !_handle) return;
+    uint32_t before = _generation;
+    if (_setpointAvailable) {
+        SetpointSettings next = _setpoint;
+        float heat = _settings.heatingThreshold, cool = _settings.coolingThreshold;
+        if (!std::isfinite(heat) || !std::isfinite(cool) || heat < 10 || cool > 31 ||
+            heat * 2 != std::round(heat * 2) || cool * 2 != std::round(cool * 2)) {
+            syncSetpointViews(); return;
+        }
+        next.band = {static_cast<int16_t>(heat * 2), static_cast<int16_t>(cool * 2)};
+        next.autoOwnerUnit = _settings.autoOwnerUnit;
+        if (!saveSetpointSettingsLocked(next)) {syncSetpointViews(); return;}
+    }
     nvs_set_u8(_handle, "schemaVer", SETTINGS_SCHEMA_VERSION);
     nvs_set_u8(_handle, "logLevel", _settings.logLevel);
     nvs_set_u32(_handle, "pollMs", _settings.pollMs);
     nvs_set_u32(_handle, "cn105Baud", _settings.cn105Baud);
     nvs_set_str(_handle, "deviceName", _settings.deviceName);
     nvs_set_str(_handle, "trustHost", _settings.trustedHost);
-    nvs_set_blob(_handle, "heatThresh", &_settings.heatingThreshold, sizeof(float));
-    nvs_set_blob(_handle, "coolThresh", &_settings.coolingThreshold, sizeof(float));
     nvs_set_blob(_handle, "nightLat", &_settings.latitude, sizeof(float));
     nvs_set_blob(_handle, "nightLon", &_settings.longitude, sizeof(float));
     nvs_set_u8(_handle, "nightCeil", _settings.nightCeilPct);
@@ -581,7 +847,6 @@ void SettingsStore::save() {
     nvs_set_str(_handle, "setupCode", _settings.setupCode);
     nvs_set_u8(_handle, "hkPaired", _settings.homekitPaired ? 1 : 0);
     nvs_set_u8(_handle, "remoteFed", _settings.remoteEverFed ? 1 : 0);
-    nvs_set_u8(_handle, "autoOwner", _settings.autoOwnerUnit ? 1 : 0);
     nvs_set_u8(_handle, "wifiChgPend", _settings.wifiChangePending ? 1 : 0);
     nvs_set_u8(_handle, "vaneConfig", _settings.vaneConfig);
     nvs_set_u8(_handle, "modeMask", _settings.modeMask);
@@ -608,8 +873,10 @@ void SettingsStore::save() {
     nvs_set_str(_handle, "bleAddr", _settings.bleSensorAddr);
     nvs_set_blob(_handle, "bleList", _settings.bleSensors, sizeof(_settings.bleSensors));
 #endif
-    nvs_commit(_handle);
-    _generation++;
+    if (isFactoryResetting() || nvs_commit(_handle) != ESP_OK || isFactoryResetting()) {
+        discardPending(_handle); return;
+    }
+    _generation = before + 1;
 
     LOG_INFO("[Settings] Saved: logLevel=%d poll=%lums baud=%lu name=%s unit=%s",
              _settings.logLevel, (unsigned long)_settings.pollMs,

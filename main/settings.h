@@ -9,6 +9,7 @@
 #include "ble_config.h"
 #include "mode_caps.h"
 #include "cn105_baud.h"
+#include "setpoint_range.h"
 
 // Bump when a stored key's meaning or encoding changes, and add a
 // `if (storedVer < N) { ...migrate... }` branch in SettingsStore::begin().
@@ -139,10 +140,26 @@ inline float room_apply_offset(const DeviceSettings &s, int bit, float t) {
     return t + room_offset_dc(s, bit) / 10.0f;
 }
 
+struct SetpointSettings {
+    SetpointRange::Preferences preferences{};
+    SetpointRange::Band band{40, 50};
+    bool autoOwnerUnit = false;
+    SetpointRange::Encoding lastEncoding = SetpointRange::Encoding::Unknown;
+};
+
 class SettingsStore {
 public:
     void begin();
     void save();
+    SetpointSettings setpointSettings() const;
+    // False for malformed/unknown storage or an unconfirmed failed restoration.
+    // Only an explicit checked save repairs unavailable policy.
+    bool setpointSettingsAvailable() const;
+    // Structural persistence validation retains manual intent across encoding changes.
+    // The coordinator validates deliberate edits against the current encoding.
+    bool saveSetpointSettings(const SetpointSettings& next);
+    SetpointRange::Detection detectedRanges() const;
+    bool saveDetectedRanges(const SetpointRange::Detection& next);
     // Boot-latched before factory erase; all normal NVS writers must stop.
     static void beginFactoryReset();
     static bool isFactoryResetting();
@@ -153,6 +170,12 @@ public:
     uint32_t generation() const { return _generation; }
 private:
     void runKeyMigrations();
+    void syncSetpointViews();
+    bool saveSetpointSettingsLocked(const SetpointSettings& next);
+    SetpointSettings _setpoint;
+    SetpointRange::Detection _detected{};
+    bool _setpointAvailable = false;
+    bool _setpointStored = false;
     nvs_handle_t _handle = 0;
     DeviceSettings _settings;
     uint32_t _generation = 0;

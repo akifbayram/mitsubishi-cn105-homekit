@@ -27,6 +27,11 @@
 #include "link_sensor.h"
 #include "room_avg.h"
 #include "auto_band.h"
+#include "setpoint_control.h"
+#include "cJSON.h"
+#include <memory>
+#include <cctype>
+#include <climits>
 #include "sl2_proto.h"
 
 static const char *TAG = "web_ws";
@@ -154,104 +159,242 @@ static bool pinSoleLinkOrReject(const char *what) {
     return true;
 }
 
+// ── range-config:start
+using WebJson = std::unique_ptr<cJSON, decltype(&cJSON_Delete)>;
+
+// cJSON preserves duplicate members; reject them before any configuration side effect.
+static bool webUniqueFields(const cJSON* value) {
+    for (const cJSON* item = value->child; item; item = item->next) {
+        if (cJSON_IsNumber(item) && !std::isfinite(item->valuedouble)) return false;
+        if (cJSON_IsObject(value)) {
+            for (const cJSON* other = item->next; other; other = other->next)
+                if (!strcmp(item->string, other->string)) return false;
+        }
+        if (!webUniqueFields(item)) return false;
+    }
+    return true;
+}
+// cJSON's number reader accepts leading zeroes and missing fractional digits.
+// Check JSON number grammar as well, without interpreting numbers inside strings.
+static bool webNumberTokens(const char* text) {
+    const char* p = text;
+    while (*p) {
+        if (*p == '"') {
+            ++p;
+            while (*p && *p != '"') { if (*p == '\\' && p[1]) ++p; ++p; }
+            if (*p) ++p;
+        } else if (*p == '-' || (*p >= '0' && *p <= '9')) {
+            if (*p == '-') ++p;
+            if (*p == '0') ++p;
+            else {
+                if (*p < '1' || *p > '9') return false;
+                while (*p >= '0' && *p <= '9') ++p;
+            }
+            if (*p == '.') {
+                ++p;
+                if (*p < '0' || *p > '9') return false;
+                while (*p >= '0' && *p <= '9') ++p;
+            }
+            if (*p == 'e' || *p == 'E') {
+                ++p;
+                if (*p == '+' || *p == '-') ++p;
+                if (*p < '0' || *p > '9') return false;
+                while (*p >= '0' && *p <= '9') ++p;
+            }
+            if (*p && *p != ',' && *p != '}' && *p != ']' && !std::isspace(static_cast<unsigned char>(*p))) return false;
+        } else ++p;
+    }
+    return true;
+}
+static WebJson webParseObject(const char* text) {
+    WebJson root(cJSON_ParseWithOpts(text, nullptr, true), cJSON_Delete);
+    if (!cJSON_IsObject(root.get()) || !webUniqueFields(root.get()) || !webNumberTokens(text)) root.reset();
+    return root;
+}
+static bool webGetInt(const cJSON* root, const char* key, int* out) {
+    const auto* value = cJSON_GetObjectItemCaseSensitive(root, key);
+    if (!cJSON_IsNumber(value) || value->valuedouble < INT_MIN || value->valuedouble > INT_MAX ||
+        std::floor(value->valuedouble) != value->valuedouble) return false;
+    *out = static_cast<int>(value->valuedouble);
+    return true;
+}
+static bool webGetFloat(const cJSON* root, const char* key, float* out) {
+    const auto* value = cJSON_GetObjectItemCaseSensitive(root, key);
+    if (!cJSON_IsNumber(value) || !std::isfinite(value->valuedouble) ||
+        !std::isfinite(static_cast<float>(value->valuedouble))) return false;
+    *out = static_cast<float>(value->valuedouble);
+    return true;
+}
+static bool webGetBool(const cJSON* root, const char* key, bool* out) {
+    const auto* value = cJSON_GetObjectItemCaseSensitive(root, key);
+    if (!cJSON_IsBool(value)) return false;
+    *out = cJSON_IsTrue(value);
+    return true;
+}
+static bool webGetString(const cJSON* root, const char* key, char* out, size_t cap) {
+    const auto* value = cJSON_GetObjectItemCaseSensitive(root, key);
+    if (!cJSON_IsString(value)) return false;
+    snprintf(out, cap, "%s", value->valuestring);
+    return true;
+}
+static bool webConfigTypes(const cJSON* root) {
+    int integer;
+    for (const char* key : {"logLevel", "pollInterval", "cn105Baud", "vaneConfig", "modeMask", "bleTimeout",
+                           "roomSource", "roomMode", "roomSingle", "roomMembers", "roomOffIdx", "roomOffVal",
+                           "bleDelIdx", "bleRenIdx"})
+        if (cJSON_HasObjectItem(root, key) && !webGetInt(root, key, &integer)) return false;
+    for (const char* key : {"deviceName", "trustedHost", "tempUnit", "bleAddr", "bleAddMac", "bleAddName", "bleRenName"})
+        if (cJSON_HasObjectItem(root, key) && !cJSON_IsString(cJSON_GetObjectItemCaseSensitive(root, key))) return false;
+    for (const char* key : {"betaChannel", "bleEnabled"})
+        if (cJSON_HasObjectItem(root, key) && !cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(root, key))) return false;
+    return true;
+}
+static bool webHalfDegrees(const cJSON* value, int16_t* out) {
+    if (!cJSON_IsNumber(value) || !std::isfinite(value->valuedouble)) return false;
+    const double halves = value->valuedouble * 2;
+    if (halves < INT16_MIN || halves > INT16_MAX || std::round(halves) != halves) return false;
+    *out = static_cast<int16_t>(halves);
+    return true;
+}
+static const char* webRangeCode(SetpointRange::Result result) {
+    using SetpointRange::Result;
+    switch (result) {
+        case Result::Ok: return "ok";
+        case Result::OutsideRange: return "outside_range";
+        case Result::AwaitingBaseline: return "awaiting_baseline";
+        case Result::Incompatible: return "incompatible";
+        case Result::Unavailable: return "unavailable";
+        case Result::StorageFailure: return "storage_failed";
+        default: return "invalid";
+    }
+}
+static const char* webRangeMessage(SetpointRange::Result result) {
+    using SetpointRange::Result;
+    switch (result) {
+        case Result::OutsideRange: return "Temperature is outside the selected range";
+        case Result::AwaitingBaseline: return "Waiting for the heat pump settings";
+        case Result::Incompatible: return "Range is incompatible with the heat pump";
+        case Result::Unavailable: return "Settings are unavailable";
+        case Result::StorageFailure: return "Could not save settings";
+        default: return "Check the range and temperature values";
+    }
+}
+static void webRangeReply(const cJSON* root, SetpointRange::Result result, char* reply, size_t cap) {
+    const cJSON* id = cJSON_GetObjectItemCaseSensitive(root, "requestId");
+    char request[64] = "";
+    if (cJSON_IsNumber(id) && std::isfinite(id->valuedouble) && id->valuedouble >= 0 &&
+        id->valuedouble <= 9007199254740991.0 && std::floor(id->valuedouble) == id->valuedouble)
+        snprintf(request, sizeof(request), ",\"requestId\":%.0f", id->valuedouble);
+    if (result == SetpointRange::Result::Ok)
+        snprintf(reply, cap, "{\"type\":\"rangeResult\"%s,\"ok\":true}", request);
+    else
+        snprintf(reply, cap, "{\"type\":\"rangeResult\"%s,\"ok\":false,\"code\":\"%s\",\"msg\":\"%s\"}",
+                 request, webRangeCode(result), webRangeMessage(result));
+}
+static SetpointRange::Result webApplyRangeConfig(const char* text, char* reply, size_t cap) {
+    using namespace SetpointRange;
+    auto root = webParseObject(text);
+    auto result = Result::Invalid;
+    const auto view = SetpointControl::settingsView();
+    auto next = view.saved;
+    if (cJSON_HasObjectItem(root.get(), "heatThresh") || cJSON_HasObjectItem(root.get(), "coolThresh"))
+        next.band = view.effectiveBand;
+    bool edited = false;
+    bool valid = root != nullptr && webConfigTypes(root.get());
+    const cJSON* id = cJSON_GetObjectItemCaseSensitive(root.get(), "requestId");
+    if (id && (!cJSON_IsNumber(id) || id->valuedouble < 0 || id->valuedouble > 9007199254740991.0 ||
+               std::floor(id->valuedouble) != id->valuedouble)) valid = false;
+    const char* modes[] = {"Heat", "Cool", "Auto"};
+    for (int i = 0; valid && i < 3; ++i) {
+        char key[32];
+        snprintf(key, sizeof(key), "range%sSource", modes[i]);
+        const auto* source = cJSON_GetObjectItemCaseSensitive(root.get(), key);
+        snprintf(key, sizeof(key), "range%sMin", modes[i]);
+        const auto* min = cJSON_GetObjectItemCaseSensitive(root.get(), key);
+        snprintf(key, sizeof(key), "range%sMax", modes[i]);
+        const auto* max = cJSON_GetObjectItemCaseSensitive(root.get(), key);
+        if (!source && !min && !max) continue;
+        edited = true;
+        auto& preference = next.preferences.mode[i];
+        if (source) {
+            if (!cJSON_IsString(source)) { valid = false; break; }
+            if (!strcmp(source->valuestring, "compatibility")) preference.selection = Selection::Compatibility;
+            else if (!strcmp(source->valuestring, "automatic")) preference.selection = Selection::Automatic;
+            else if (!strcmp(source->valuestring, "manual")) preference.selection = Selection::Manual;
+            else { valid = false; break; }
+        }
+        if ((min == nullptr) != (max == nullptr)) { valid = false; break; }
+        if (min && (!webHalfDegrees(min, &preference.manual.min2) ||
+                    !webHalfDegrees(max, &preference.manual.max2) || preference.manual.min2 > preference.manual.max2)) {
+            valid = false; break;
+        }
+        // Bounds imply a custom range, never a silent edit of an automatic profile.
+        if (!source && min) preference.selection = Selection::Manual;
+        if (preference.selection == Selection::Manual && (!min || !max)) { valid = false; break; }
+    }
+    for (const char* field : {"heatThresh", "coolThresh"}) {
+        const auto* value = cJSON_GetObjectItemCaseSensitive(root.get(), field);
+        if (!value) continue;
+        edited = true;
+        int16_t halves;
+        if (!webHalfDegrees(value, &halves) || halves < 20 || halves > 62) { valid = false; break; }
+        if (!strcmp(field, "heatThresh")) next.band.heat2 = halves;
+        else next.band.cool2 = halves;
+        next.autoOwnerUnit = false;
+    }
+    if (valid) result = edited ? SetpointControl::applySettings(next) : Result::Ok;
+    webRangeReply(root.get(), result, reply, cap);
+    return result;
+}
+// ── range-config:end
+
 void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
-    char cmd[16] = {0};
-    if (!jsonGetString(msg, "cmd", cmd, sizeof(cmd))) {
-        LOG_WARN("WS message missing 'cmd' field");
+    auto parsed = webParseObject(msg);
+    const cJSON* command = cJSON_GetObjectItemCaseSensitive(parsed.get(), "cmd");
+    if (!parsed || !cJSON_IsString(command)) {
+        char reply[256];
+        webRangeReply(parsed.get(), SetpointRange::Result::Invalid, reply, sizeof(reply));
+        sendWsText(httpd_req_to_sockfd(req), reply);
         return;
     }
+    const char* cmd = command->valuestring;
 
     if (strcmp(cmd, "set") == 0) {
-        // ── Control commands ─────────────────────────────────────────────
-        bool hasControlChange = false;
-
-        bool boolVal;
-        if (jsonGetBool(msg, "power", &boolVal)) {
-            LOG_INFO("Set power=%s", boolVal ? "ON" : "OFF");
-            _ctrl->setPower(boolVal);
-            hasControlChange = true;
-        }
-
-        char strVal[16];
-        if (jsonGetString(msg, "mode", strVal, sizeof(strVal))) {
-            uint8_t mode = strToMode(strVal);
-            if (!mode_mask_allows(settings.get().modeMask, mode)) {
-                // Stale/foreign client — the UI hides disabled modes.
-                LOG_WARN("Set mode=%s rejected — disabled by capability mask", strVal);
-            } else {
-                LOG_INFO("Set mode=%s (0x%02X)", strVal, mode);
-                _ctrl->setMode(mode);
-                // Choosing Auto here means "steer my range" even if the
-                // wall controller had the setpoint last.
-                if (mode == CN105_MODE_AUTO) AutoBand::claimDevice();
-                hasControlChange = true;
-            }
-        }
-
+        // Decode the complete climate request before applying any part of it.
+        SetpointControl::Command batch;
+        bool invalid = false, boolVal;
         float floatVal;
-        if (jsonGetFloat(msg, "target", &floatVal) && std::isfinite(floatVal)) {
-            LOG_INFO("Set target=%.1f", floatVal);
-            _ctrl->setTargetTemp(floatVal);
-            hasControlChange = true;
+        char strVal[16];
+        if (cJSON_HasObjectItem(parsed.get(), "power")) {
+            if (webGetBool(parsed.get(), "power", &boolVal)) batch.unit.power = boolVal;
+            else invalid = true;
         }
-
-        if (jsonGetString(msg, "fan", strVal, sizeof(strVal))) {
-            uint8_t fan = strToFan(strVal);
-            LOG_INFO("Set fan=%s (0x%02X)", strVal, fan);
-            _ctrl->setFanSpeed(fan);
-            hasControlChange = true;
+        for (const char* key : {"target", "heatThresh", "coolThresh"}) {
+            if (!cJSON_HasObjectItem(parsed.get(), key)) continue;
+            const auto* value = cJSON_GetObjectItemCaseSensitive(parsed.get(), key);
+            if (!cJSON_IsNumber(value) || !std::isfinite(value->valuedouble)) { invalid = true; continue; }
+            floatVal = static_cast<float>(value->valuedouble);
+            if (!strcmp(key, "target")) batch.unit.targetTemp = floatVal;
+            else if (!strcmp(key, "heatThresh")) batch.heatingThreshold = floatVal;
+            else batch.coolingThreshold = floatVal;
         }
-
-        if (jsonGetString(msg, "vane", strVal, sizeof(strVal))) {
-            uint8_t vane = strToVane(strVal);
-            LOG_INFO("Set vane=%s (0x%02X)", strVal, vane);
-            _ctrl->setVane(vane);
-            hasControlChange = true;
+        for (const char* key : {"mode", "fan", "vane", "wideVane"}) {
+            if (!cJSON_HasObjectItem(parsed.get(), key)) continue;
+            if (!webGetString(parsed.get(), key, strVal, sizeof(strVal))) { invalid = true; continue; }
+            if (!strcmp(key, "mode")) {
+                if (strcmp(strVal, "heat") && strcmp(strVal, "cool") && strcmp(strVal, "dry") &&
+                    strcmp(strVal, "fan") && strcmp(strVal, "auto")) invalid = true;
+                else batch.unit.mode = strToMode(strVal);
+            } else if (!strcmp(key, "fan")) batch.unit.fanSpeed = strToFan(strVal);
+            else if (!strcmp(key, "vane")) batch.unit.vane = strToVane(strVal);
+            else batch.unit.wideVane = strToWideVane(strVal);
         }
-
-        if (jsonGetString(msg, "wideVane", strVal, sizeof(strVal))) {
-            uint8_t wv = strToWideVane(strVal);
-            LOG_INFO("Set wideVane=%s (0x%02X)", strVal, wv);
-            _ctrl->setWideVane(wv);
-            hasControlChange = true;
-        }
-
-        if (hasControlChange) {
-            _ctrl->sendPendingChanges();
-        }
-
-        float heatT, coolT;
-        bool heatSet = false, coolSet = false;
-        if (jsonGetFloat(msg, "heatThresh", &heatT) && std::isfinite(heatT)) {
-            heatT = std::clamp(heatT, CN105_TEMP_MIN, CN105_TEMP_MAX);
-            settings.get().heatingThreshold = heatT;
-            heatSet = true;
-            LOG_INFO("Set heatingThreshold=%.1f", heatT);
-        }
-        if (jsonGetFloat(msg, "coolThresh", &coolT) && std::isfinite(coolT)) {
-            coolT = std::clamp(coolT, CN105_TEMP_MIN, CN105_TEMP_MAX);
-            settings.get().coolingThreshold = coolT;
-            coolSet = true;
-            LOG_INFO("Set coolingThreshold=%.1f", coolT);
-        }
-        if (heatSet || coolSet) {
-            // Enforce minimum 2 deg C gap (bidirectional)
-            float h = settings.get().heatingThreshold;
-            float c = settings.get().coolingThreshold;
-            if (c - h < 2.0f) {
-                if (coolSet) {
-                    h = c - 2.0f;
-                    if (h < CN105_TEMP_MIN) { h = CN105_TEMP_MIN; c = h + 2.0f; }
-                } else {
-                    // Heat was set, adjust cool upward
-                    c = h + 2.0f;
-                    if (c > CN105_TEMP_MAX) { c = CN105_TEMP_MAX; h = c - 2.0f; }
-                }
-                settings.get().heatingThreshold = h;
-                settings.get().coolingThreshold = c;
-            }
-            AutoBand::claimDevice();
-            settings.save();
+        const auto result = invalid ? SetpointRange::Result::Invalid : SetpointControl::submit(batch);
+        if (result != SetpointRange::Result::Ok || cJSON_HasObjectItem(parsed.get(), "requestId")) {
+            char reply[256];
+            webRangeReply(parsed.get(), result, reply, sizeof(reply));
+            sendWsText(httpd_req_to_sockfd(req), reply);
+            if (result != SetpointRange::Result::Ok) return;
         }
 
         // Night gate: gather every field first, save once — the batching
@@ -266,12 +409,12 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
         // -Werror=maybe-uninitialized (riscv/c6 doesn't).
         float lat = 0, lon = 0;
         int duskOff = 0, dawnOff = 0, ceilPct = 0, nightLocClearVal = 0;
-        bool latSet   = jsonGetFloat(msg, "nightLat", &lat);
-        bool lonSet   = jsonGetFloat(msg, "nightLon", &lon);
-        bool duskSet  = jsonGetInt(msg, "nightDuskOff", &duskOff);
-        bool dawnSet  = jsonGetInt(msg, "nightDawnOff", &dawnOff);
-        bool ceilSet  = jsonGetInt(msg, "nightCeil", &ceilPct);
-        bool clearSet = jsonGetInt(msg, "nightLocClear", &nightLocClearVal);
+        bool latSet   = webGetFloat(parsed.get(), "nightLat", &lat);
+        bool lonSet   = webGetFloat(parsed.get(), "nightLon", &lon);
+        bool duskSet  = webGetInt(parsed.get(), "nightDuskOff", &duskOff);
+        bool dawnSet  = webGetInt(parsed.get(), "nightDawnOff", &dawnOff);
+        bool ceilSet  = webGetInt(parsed.get(), "nightCeil", &ceilPct);
+        bool clearSet = webGetInt(parsed.get(), "nightLocClear", &nightLocClearVal);
         if (latSet || lonSet || duskSet || dawnSet || ceilSet || clearSet) {
             if (latSet)  settings.get().latitude  = std::clamp(lat, -90.0f, 90.0f);
             if (lonSet)  settings.get().longitude = std::clamp(lon, -180.0f, 180.0f);
@@ -295,11 +438,18 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
         pushState();
 
     } else if (strcmp(cmd, "config") == 0) {
+        // Checked configuration: validate and persist the entire range/band first.
+        char reply[256];
+        const auto result = webApplyRangeConfig(msg, reply, sizeof(reply));
+        if (result != SetpointRange::Result::Ok) {
+            sendWsText(httpd_req_to_sockfd(req), reply);
+            return;
+        }
         // ── Configuration commands ───────────────────────────────────────
         bool changed = false;
         int intVal;
 
-        if (jsonGetInt(msg, "logLevel", &intVal)) {
+        if (webGetInt(parsed.get(), "logLevel", &intVal)) {
             if (intVal >= LOG_LEVEL_ERROR && intVal <= LOG_LEVEL_DEBUG) {
                 settings.get().logLevel = (LogLevel)intVal;
                 currentLogLevel = (LogLevel)intVal;
@@ -309,7 +459,7 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
             }
         }
 
-        if (jsonGetInt(msg, "pollInterval", &intVal)) {
+        if (webGetInt(parsed.get(), "pollInterval", &intVal)) {
             if (intVal >= 500 && intVal <= 30000) {
                 settings.get().pollMs = (uint32_t)intVal;
                 _ctrl->setUpdateInterval((uint32_t)intVal);
@@ -323,9 +473,9 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
         // The controller ignores the rate it already runs at, so the same
         // value from every Save Settings leaves a working link alone — and
         // re-saving retries a switch the UART refused.
-        if (jsonHasKey(msg, "cn105Baud")) {
+        if (cJSON_HasObjectItem(parsed.get(), "cn105Baud")) {
             const uint32_t oldBaud = settings.get().cn105Baud;
-            if (!jsonGetInt(msg, "cn105Baud", &intVal)) {
+            if (!webGetInt(parsed.get(), "cn105Baud", &intVal)) {
                 LOG_WARN("Config cn105Baud rejected (not a number), keeping %lu",
                          (unsigned long)oldBaud);
             } else if (!cn105_baud_valid(intVal)) {
@@ -340,7 +490,7 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
             }
         }
 
-        if (jsonGetInt(msg, "vaneConfig", &intVal)) {
+        if (webGetInt(parsed.get(), "vaneConfig", &intVal)) {
             if (intVal >= 0 && intVal <= 2) {
                 settings.get().vaneConfig = (uint8_t)intVal;
                 LOG_INFO("Config vaneConfig=%d", intVal);
@@ -348,7 +498,7 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
             }
         }
 
-        if (jsonGetInt(msg, "modeMask", &intVal)) {
+        if (webGetInt(parsed.get(), "modeMask", &intVal)) {
             uint8_t m = mode_mask_sanitize((uint8_t)intVal);
             settings.get().modeMask = m;
             LOG_INFO("Config modeMask=0x%02X", m);
@@ -356,7 +506,7 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
         }
 
         char unitVal[4];
-        if (jsonGetString(msg, "tempUnit", unitVal, sizeof(unitVal))) {
+        if (webGetString(parsed.get(), "tempUnit", unitVal, sizeof(unitVal))) {
             bool useF = (strcmp(unitVal, "F") == 0);
             settings.get().useFahrenheit = useF;
             LOG_INFO("Config tempUnit=%s", useF ? "F" : "C");
@@ -365,7 +515,7 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
 
         // Board-independent, so deliberately outside any BLE_ENABLE block.
         bool betaVal;
-        if (jsonGetBool(msg, "betaChannel", &betaVal)) {
+        if (webGetBool(parsed.get(), "betaChannel", &betaVal)) {
             settings.get().betaChannel = betaVal;
             LOG_INFO("Config betaChannel=%s", betaVal ? "ON" : "OFF");
             changed = true;
@@ -374,7 +524,7 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
         // Rejected outright rather than trimmed: a name that isn't exactly the
         // one in the address bar would just lock the browser out anyway.
         char hostVal[sizeof(settings.get().trustedHost) + 1];
-        if (jsonGetString(msg, "trustedHost", hostVal, sizeof(hostVal))) {
+        if (webGetString(parsed.get(), "trustedHost", hostVal, sizeof(hostVal))) {
             if (!webTrustedHostValid(hostVal, sizeof(settings.get().trustedHost))) {
                 LOG_WARN("Config trustedHost=%.64s rejected (not a bare hostname)", hostVal);
             } else {
@@ -385,7 +535,7 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
         }
 
         char nameVal[32];
-        if (jsonGetString(msg, "deviceName", nameVal, sizeof(nameVal))) {
+        if (webGetString(parsed.get(), "deviceName", nameVal, sizeof(nameVal))) {
             // Trim leading whitespace
             char *start = nameVal;
             while (*start == ' ') start++;
@@ -404,14 +554,14 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
 
 #ifdef BLE_ENABLE
         bool bleEnabledVal;
-        if (jsonGetBool(msg, "bleEnabled", &bleEnabledVal)) {
+        if (webGetBool(parsed.get(), "bleEnabled", &bleEnabledVal)) {
             BleSensor::setBleEnabled(bleEnabledVal);
             LOG_INFO("Config bleEnabled=%s", bleEnabledVal ? "ON" : "OFF");
             pushState();
         }
 
         char bleAddrVal[18];
-        if (jsonGetString(msg, "bleAddr", bleAddrVal, sizeof(bleAddrVal))) {
+        if (webGetString(parsed.get(), "bleAddr", bleAddrVal, sizeof(bleAddrVal))) {
             BleSensor::setAddr(bleAddrVal);
             LOG_INFO("Config bleAddr=%s", bleAddrVal);
             pushState();  // setAddr() already persists; just confirm to the UI at once
@@ -421,7 +571,7 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
         // roomStaleTimeoutS governs BOTH remote feeds (BLE + Link), so like
         // roomSource it's handled outside the BLE ifdef. Key name is legacy.
         int bleTimeoutVal;
-        if (jsonGetInt(msg, "bleTimeout", &bleTimeoutVal)) {
+        if (webGetInt(parsed.get(), "bleTimeout", &bleTimeoutVal)) {
             if (bleTimeoutVal >= 30 && bleTimeoutVal <= 3600) {
                 settings.get().roomStaleTimeoutS = (uint16_t)bleTimeoutVal;
                 LOG_INFO("Config bleTimeout=%ds", bleTimeoutVal);
@@ -438,7 +588,7 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
         // configured slot; any of those would silently leave the pump on its
         // internal sensor while the UI claimed otherwise.
         int roomSourceVal;
-        if (jsonGetInt(msg, "roomSource", &roomSourceVal)) {
+        if (webGetInt(parsed.get(), "roomSource", &roomSourceVal)) {
             if (roomSourceVal >= 0 && roomSourceVal <= UINT8_MAX &&
                 RoomAvg::legacySrcSelectable((uint8_t)roomSourceVal)) {
                 const uint8_t single = room_single_from_legacy((uint8_t)roomSourceVal);
@@ -463,11 +613,9 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
         //    roomSource: the UI paints optimistically and self-corrects.
         //    Saves coalesce the same way — one NVS commit per message. ──
         bool roomSave = false;   // an accepted room-model write needs a save
-        bool roomPush = false;   // any room/BLE key was seen (ack even rejects)
 
         int roomModeVal;
-        if (jsonGetInt(msg, "roomMode", &roomModeVal)) {
-            roomPush = true;
+        if (webGetInt(parsed.get(), "roomMode", &roomModeVal)) {
             if (roomModeVal == 0 || roomModeVal == 1) {
                 settings.get().roomMode = (uint8_t)roomModeVal;
                 roomSave = true;
@@ -476,8 +624,7 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
         }
 
         int roomSingleVal;
-        if (jsonGetInt(msg, "roomSingle", &roomSingleVal)) {
-            roomPush = true;
+        if (webGetInt(parsed.get(), "roomSingle", &roomSingleVal)) {
             if (roomSingleVal >= 0 && roomSingleVal < ROOM_MEMBER_COUNT &&
                 roomMemberAvailable(roomSingleVal) &&
                 (roomSingleVal != ROOM_MEMBER_LINK || pinSoleLinkOrReject("roomSingle"))) {
@@ -488,8 +635,7 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
         }
 
         int roomMembersVal;
-        if (jsonGetInt(msg, "roomMembers", &roomMembersVal)) {
-            roomPush = true;
+        if (webGetInt(parsed.get(), "roomMembers", &roomMembersVal)) {
             uint8_t m = (uint8_t)roomMembersVal & (uint8_t)((1u << ROOM_MEMBER_COUNT) - 1);
             // Strip bits with nothing behind them so a stray client can't
             // check a ghost member. Internal is stripped too: it is never a
@@ -504,10 +650,9 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
         }
 
         int roomOffIdx;
-        if (jsonGetInt(msg, "roomOffIdx", &roomOffIdx)) {
-            roomPush = true;
+        if (webGetInt(parsed.get(), "roomOffIdx", &roomOffIdx)) {
             int v = 0;
-            if (jsonGetInt(msg, "roomOffVal", &v) &&
+            if (webGetInt(parsed.get(), "roomOffVal", &v) &&
                 roomOffIdx >= 0 && roomOffIdx < ROOM_MEMBER_COUNT) {
                 v = std::clamp(v, (int)-ROOM_OFFSET_MAX_TENTHS, (int)ROOM_OFFSET_MAX_TENTHS);
                 settings.get().roomOffsets[roomOffIdx] = (int8_t)v;
@@ -520,8 +665,7 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
         // The sensor-list commands save inside BleSensor (setSensor owns the
         // readings/scan side effects) — they only need the ack push here.
         char addMac[18];
-        if (jsonGetString(msg, "bleAddMac", addMac, sizeof(addMac))) {
-            roomPush = true;
+        if (webGetString(parsed.get(), "bleAddMac", addMac, sizeof(addMac))) {
             // Re-adding a known MAC updates that sensor; otherwise take the
             // first free slot. Full list -> tell the client, nothing changes.
             int slot = -1;
@@ -534,7 +678,7 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
                            "{\"type\":\"error\",\"msg\":\"Sensor list is full\"}");
             } else {
                 char addName[24] = "";
-                jsonGetString(msg, "bleAddName", addName, sizeof(addName));
+                webGetString(parsed.get(), "bleAddName", addName, sizeof(addName));
                 char defName[24];
                 snprintf(defName, sizeof(defName), "Sensor %d", slot + 1);
                 bool keepStored = settings.get().bleSensors[slot].name[0] != '\0';
@@ -545,29 +689,23 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
         }
 
         int delIdx;
-        if (jsonGetInt(msg, "bleDelIdx", &delIdx)) {
-            roomPush = true;
+        if (webGetInt(parsed.get(), "bleDelIdx", &delIdx)) {
             BleSensor::setSensor(delIdx, "", nullptr);
             LOG_INFO("Config bleDel slot=%d", delIdx);
         }
 
         int renIdx;
-        if (jsonGetInt(msg, "bleRenIdx", &renIdx)) {
-            roomPush = true;
+        if (webGetInt(parsed.get(), "bleRenIdx", &renIdx)) {
             char renName[24];
-            if (jsonGetString(msg, "bleRenName", renName, sizeof(renName)) && renName[0])
+            if (webGetString(parsed.get(), "bleRenName", renName, sizeof(renName)) && renName[0])
                 BleSensor::renameSensor(renIdx, renName);
         }
 #endif
 
         if (roomSave) settings.save();
-        if (changed) {
-            settings.save();
-            // Push updated state to reflect new config values
-            pushState();
-        } else if (roomPush) {
-            pushState();
-        }
+        if (changed) settings.save();
+        pushState();
+        sendWsText(httpd_req_to_sockfd(req), reply);
 
     } else if (strcmp(cmd, "bleScan") == 0) {
 #ifdef BLE_ENABLE
@@ -760,6 +898,55 @@ static void stateAppend(char *buf, size_t cap, int *pos, int *want,
     *want += w;
 }
 
+// ── range-state:start
+static void webAppendRangeState(char* buf, size_t cap, int* n, int* want) {
+    using namespace SetpointRange;
+    const auto view = SetpointControl::settingsView();
+    const auto& snapshot = view.ranges;
+    const auto& saved = view.saved;
+    const auto& status = view.status;
+    const auto& detected = view.reference;
+    const char* modes[] = {"heat", "cool", "auto"};
+    const char* selections[] = {"compatibility", "automatic", "manual"};
+    const char* sources[] = {"compatibility", "fresh", "cached", "fallback", "manual"};
+    const char* availability[] = {"ready", "awaiting_baseline", "incompatible"};
+    const char* conditions[] = {"satisfied", "pending", "refused", "incompatible"};
+    stateAppend(buf, cap, n, want, ",\"setpointRanges\":{\"generation\":%lu,\"ftabId\":%u,\"step\":%.1f",
+                (unsigned long)snapshot.generation, snapshot.ftabId, snapshot.advertisedStep2 / 2.f);
+    for (int i = 0; i < 3; ++i) {
+        const auto& mode = snapshot.mode[i];
+        const auto& preference = saved.preferences.mode[i];
+        stateAppend(buf, cap, n, want,
+                    ",\"%s\":{\"min\":%.1f,\"max\":%.1f,\"step\":%.1f,\"source\":\"%s\",\"availability\":\"%s\","
+                    "\"selection\":\"%s\",\"manualMin\":%.1f,\"manualMax\":%.1f,\"reference\":",
+                    modes[i], mode.range.min2 / 2.f, mode.range.max2 / 2.f, mode.step2 / 2.f,
+                    sources[static_cast<int>(mode.source)], availability[static_cast<int>(mode.availability)],
+                    selections[static_cast<int>(preference.selection)], preference.manual.min2 / 2.f, preference.manual.max2 / 2.f);
+        const bool live = detected.freshMask & (1 << i);
+        if (live || (detected.validMask & (1 << i)))
+            stateAppend(buf, cap, n, want, "{\"min\":%.1f,\"max\":%.1f,\"source\":\"%s\"}",
+                        detected.mode[i].min2 / 2.f, detected.mode[i].max2 / 2.f, live ? "fresh" : "cached");
+        else stateAppend(buf, cap, n, want, "null");
+        stateAppend(buf, cap, n, want, "}");
+    }
+    stateAppend(buf, cap, n, want, "},\"rangeCondition\":\"%s\",\"targetReadable\":%s",
+                conditions[static_cast<int>(status.condition)], status.targetReadable ? "true" : "false");
+    // Live thresholds and saved export intent share the same policy observation.
+    // Keep them in this rollback section so export never combines generations.
+    stateAppend(buf, cap, n, want, ",\"heatThresh\":%.1f,\"coolThresh\":%.1f,\"autoUnit\":%s",
+                view.effectiveBand.heat2 / 2.f, view.effectiveBand.cool2 / 2.f,
+                saved.autoOwnerUnit ? "true" : "false");
+    stateAppend(buf, cap, n, want, ",\"savedHeatThresh\":%.1f,\"savedCoolThresh\":%.1f",
+                saved.band.heat2 / 2.f, saved.band.cool2 / 2.f);
+    for (int i = 0; i < 2; ++i) {
+        const float value = i ? status.desiredC : status.actualC;
+        const char* field = i ? "desiredTarget" : "actualTarget";
+        if (std::isfinite(value)) stateAppend(buf, cap, n, want, ",\"%s\":%.1f", field, value);
+        else stateAppend(buf, cap, n, want, ",\"%s\":null", field);
+    }
+}
+// ── range-state:end
+
 void WebUI::pushState() {
     if (!_ws.hasClients()) return; // main never reads httpd session storage
 
@@ -785,14 +972,16 @@ void WebUI::pushState() {
     // every escaped string at the length jsonEscape can actually emit
     // (dstLen - 2): header 475 (31-char deviceName + 32-char SSID, both fully
     // escaped, plus roomMembers) + 58 outsideTemp/errorCode/runtime
-    // + 183 heap/health + 44 thresholds + 108 night gate + 387 remote/dial
+    // + 183 heap/health + 108 night gate + 387 remote/dial
     // (escaped model + fw) + 304 remoteDials (four bonded dials) + 470
     // config + HomeKit (setup code + URI) + 195 room/Link + 215 blend +
     // roomOffs + 278 legacy BLE + 928 for four bleSensors[] entries with
-    // 48-char escaped names + 1 closing brace = 3646 B. 4096 keeps ~11% for
-    // fields added later; overflow past that degrades (see the sections
-    // below).
-    constexpr size_t bufSz = 4096;
+    // 48-char escaped names + 1 closing brace = 3602 B. The complete ranges,
+    // saved preferences/band/owner, three detection references and target status
+    // add at most 1144 B (bounded enum strings and half-degree endpoints).
+    // 3602 + 1144 = 4746 B; 5120 leaves 374 B of headroom. Whole sections
+    // still roll back atomically if future fields exceed that budget.
+    constexpr size_t bufSz = 5120;
     // Tail the sections can never eat, so the closing brace (and the
     // truncation marker) always fit however full the body ran.
     constexpr size_t allocSz = bufSz + 16;
@@ -866,6 +1055,10 @@ void WebUI::pushState() {
         dropped++;
     };
 
+    // Keep the complete profile and its truthful status in one rollback section.
+    webAppendRangeState(buf, bufSz, &n, &want);
+    section();
+
     if (st.outsideTempValid) {
         stateAppend(buf, bufSz, &n, &want, ",\"outsideTemp\":%.1f", st.outsideTemp);
     } else {
@@ -911,18 +1104,6 @@ void WebUI::pushState() {
         (unsigned long)WifiManager::getDisconnectCount(),
         (unsigned long)eventlog_session_count(EV_CN105_LOST),
         (unsigned long)time_sync_epoch()
-    );
-    section();
-
-    // Dual setpoint thresholds. autoUnit: the heat pump's own controller set
-    // the Auto setpoint last, so the band engine is silent (auto_band.h).
-    stateAppend(buf, bufSz, &n, &want,
-        ",\"heatThresh\":%.1f"
-        ",\"coolThresh\":%.1f"
-        ",\"autoUnit\":%s",
-        cfg.heatingThreshold,
-        cfg.coolingThreshold,
-        cfg.autoOwnerUnit ? "true" : "false"
     );
     section();
 

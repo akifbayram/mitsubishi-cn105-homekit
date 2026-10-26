@@ -1,5 +1,6 @@
 #include "homekit_services.h"
 #include "settings.h"
+#include "setpoint_control.h"
 #include "logging.h"
 #include "esp_utils.h"
 
@@ -19,20 +20,6 @@ static const char *TAG = "hk_switch";
 // ── External controller reference ───────────────────────────────────────────
 extern CN105Controller *g_homekitCtrl;
 
-// Shared ON-write guard for both mode switches: reject when the mode is
-// disabled by the capability mask (covers controllers that ignore the boot
-// gating, and the window between a mask change and the applying restart).
-// Returns true when the write was rejected; caller continues to the next one.
-static bool reject_masked_on(hap_write_data_t *w, int *ret,
-                             uint8_t capBit, const char *tag, const char *mode)
-{
-    if (settings.get().modeMask & capBit) return false;
-    LOG_WARN("[HK:%s] ON rejected — %s disabled by capability mask", tag, mode);
-    *(w->status) = HAP_STATUS_VAL_INVALID;
-    *ret = HAP_FAIL;
-    return true;
-}
-
 // ═══════════════════════════════════════════════════════════════════════════
 // Fan Mode Switch
 // ═══════════════════════════════════════════════════════════════════════════
@@ -46,48 +33,26 @@ static bool     s_fanModeWasDisconnected = true;
 static int fan_mode_write_cb(hap_write_data_t write_data[], int count,
                               void *serv_priv, void *write_priv)
 {
-    bool healthy = g_homekitCtrl && g_homekitCtrl->isHealthy();
-    int ret = HAP_SUCCESS;
-
-    for (int i = 0; i < count; i++) {
-        hap_write_data_t *w = &write_data[i];
-        const char *uuid = hap_char_get_type_uuid(w->hc);
-
-        // ConfiguredName (Home app rename) doesn't touch the heat pump —
-        // accept it even when CN105 is down.
-        if (!strcmp(uuid, HAP_CHAR_UUID_CONFIGURED_NAME)) {
-            hap_char_update_val(w->hc, &w->val);
-            *(w->status) = HAP_STATUS_SUCCESS;
-            continue;
-        }
-
-        if (!healthy) {
-            LOG_WARN("[HK:FanMode] write REJECTED — CN105 not healthy");
-            *(w->status) = HAP_STATUS_RES_BUSY;
-            ret = HAP_FAIL;
-            continue;
-        }
-
-        if (!strcmp(uuid, HAP_CHAR_UUID_ON)) {
-            bool on = w->val.b;
-            if (on && reject_masked_on(w, &ret, MODE_CAP_FAN, "FanMode", "FAN")) continue;
-            if (on) {
-                LOG_INFO("[HK:FanMode] HomeKit -> ON");
-                g_homekitCtrl->setPower(true);
-                g_homekitCtrl->setMode(CN105_MODE_FAN);
-            } else {
-                LOG_INFO("[HK:FanMode] HomeKit -> OFF (powering off)");
-                g_homekitCtrl->setPower(false);
-            }
-            hap_char_update_val(w->hc, &w->val);
-            *(w->status) = HAP_STATUS_SUCCESS;
-        } else {
-            *(w->status) = HAP_STATUS_RES_ABSENT;
+    const bool healthy = g_homekitCtrl && g_homekitCtrl->isHealthy();
+    SetpointControl::Command batch;
+    for (int i = 0; i < count; ++i) {
+        const auto& w = write_data[i];
+        if (!strcmp(hap_char_get_type_uuid(w.hc), HAP_CHAR_UUID_ON)) {
+            batch.unit.power = w.val.b;
+            if (w.val.b) batch.unit.mode = CN105_MODE_FAN;
         }
     }
-
-    if (healthy) {
-        g_homekitCtrl->sendPendingChanges();
+    const auto result = healthy ? SetpointControl::submit(batch) : SetpointRange::Result::Unavailable;
+    int ret = HAP_SUCCESS;
+    for (int i = 0; i < count; ++i) {
+        auto& w = write_data[i];
+        const char* uuid = hap_char_get_type_uuid(w.hc);
+        if (!strcmp(uuid, HAP_CHAR_UUID_CONFIGURED_NAME)) {
+            hap_char_update_val(w.hc, &w.val); *w.status = HAP_STATUS_SUCCESS;
+        } else if (strcmp(uuid, HAP_CHAR_UUID_ON)) *w.status = HAP_STATUS_RES_ABSENT;
+        else if (result != SetpointRange::Result::Ok) {
+            *w.status = healthy ? HAP_STATUS_VAL_INVALID : HAP_STATUS_RES_BUSY; ret = HAP_FAIL;
+        } else { hap_char_update_val(w.hc, &w.val); *w.status = HAP_STATUS_SUCCESS; }
     }
     return ret;
 }
@@ -180,48 +145,26 @@ static bool     s_dryModeWasDisconnected = true;
 static int dry_mode_write_cb(hap_write_data_t write_data[], int count,
                               void *serv_priv, void *write_priv)
 {
-    bool healthy = g_homekitCtrl && g_homekitCtrl->isHealthy();
-    int ret = HAP_SUCCESS;
-
-    for (int i = 0; i < count; i++) {
-        hap_write_data_t *w = &write_data[i];
-        const char *uuid = hap_char_get_type_uuid(w->hc);
-
-        // ConfiguredName (Home app rename) doesn't touch the heat pump —
-        // accept it even when CN105 is down.
-        if (!strcmp(uuid, HAP_CHAR_UUID_CONFIGURED_NAME)) {
-            hap_char_update_val(w->hc, &w->val);
-            *(w->status) = HAP_STATUS_SUCCESS;
-            continue;
-        }
-
-        if (!healthy) {
-            LOG_WARN("[HK:DryMode] write REJECTED — CN105 not healthy");
-            *(w->status) = HAP_STATUS_RES_BUSY;
-            ret = HAP_FAIL;
-            continue;
-        }
-
-        if (!strcmp(uuid, HAP_CHAR_UUID_ON)) {
-            bool on = w->val.b;
-            if (on && reject_masked_on(w, &ret, MODE_CAP_DRY, "DryMode", "DRY")) continue;
-            if (on) {
-                LOG_INFO("[HK:DryMode] HomeKit -> ON");
-                g_homekitCtrl->setPower(true);
-                g_homekitCtrl->setMode(CN105_MODE_DRY);
-            } else {
-                LOG_INFO("[HK:DryMode] HomeKit -> OFF (powering off)");
-                g_homekitCtrl->setPower(false);
-            }
-            hap_char_update_val(w->hc, &w->val);
-            *(w->status) = HAP_STATUS_SUCCESS;
-        } else {
-            *(w->status) = HAP_STATUS_RES_ABSENT;
+    const bool healthy = g_homekitCtrl && g_homekitCtrl->isHealthy();
+    SetpointControl::Command batch;
+    for (int i = 0; i < count; ++i) {
+        const auto& w = write_data[i];
+        if (!strcmp(hap_char_get_type_uuid(w.hc), HAP_CHAR_UUID_ON)) {
+            batch.unit.power = w.val.b;
+            if (w.val.b) batch.unit.mode = CN105_MODE_DRY;
         }
     }
-
-    if (healthy) {
-        g_homekitCtrl->sendPendingChanges();
+    const auto result = healthy ? SetpointControl::submit(batch) : SetpointRange::Result::Unavailable;
+    int ret = HAP_SUCCESS;
+    for (int i = 0; i < count; ++i) {
+        auto& w = write_data[i];
+        const char* uuid = hap_char_get_type_uuid(w.hc);
+        if (!strcmp(uuid, HAP_CHAR_UUID_CONFIGURED_NAME)) {
+            hap_char_update_val(w.hc, &w.val); *w.status = HAP_STATUS_SUCCESS;
+        } else if (strcmp(uuid, HAP_CHAR_UUID_ON)) *w.status = HAP_STATUS_RES_ABSENT;
+        else if (result != SetpointRange::Result::Ok) {
+            *w.status = healthy ? HAP_STATUS_VAL_INVALID : HAP_STATUS_RES_BUSY; ret = HAP_FAIL;
+        } else { hap_char_update_val(w.hc, &w.val); *w.status = HAP_STATUS_SUCCESS; }
     }
     return ret;
 }

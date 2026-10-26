@@ -50,11 +50,9 @@ const DEFAULTS = {
   cool: sliderAttrs('coolSlider')
 };
 
-// A range input keeps min/max/step/value as STRINGS, and configureSliders()
-// leans on that with a loose `min==61`. Coerce on set so a tightening to `===`
-// fails here instead of in a browser. Clamping and step snapping are not
-// modelled: setSliderAttrs() always writes min/max/step before value, and every
-// value it writes sits inside the range it just set.
+// A range input keeps min/max/step/value as strings. Units affect labels only;
+// positions and selectedC stay in Celsius. Browser clamping is outside this
+// fixture; the range and reachable endpoint cases use valid canonical values.
 function makeInput(a) {
   const el = {};
   ['min', 'max', 'step', 'value'].forEach(function (p) {
@@ -88,7 +86,8 @@ const factory = vm.runInThisContext(
   '    cmdArmed:function(){return lastCmdTime!==0},\n' +
   '    sent:sent,\n' +
   '    configureSliders:configureSliders,\n' +
-  '    cToFTable:cToFTable,fToCTable:fToCTable,\n' +
+  '    cToFTable:cToFTable,fToCTable:fToCTable,label:setpointF,\n' +
+  '    setState:function(s){state=s;configureSliders()},\n' +
   '    tap:function(u){window.setTempUnit({getAttribute:function(){return u}})}};\n' +
   '};})',
   { filename: 'web/index.html#temp-unit' }
@@ -139,6 +138,29 @@ const roomRenderFactory = vm.runInThisContext(
   { filename: 'web/index.html#room-model' }
 )();
 
+// Real settings/import code with DOM, transport and toast boundaries only.
+const rangeFactory = vm.runInThisContext(
+  '(function(){return function(){\n' +
+  'var els={},sent=[],toasts=[],settingsDirty=true,lastState=null,window={},exported=null,RUNNING_FW_VER="test";\n' +
+  'function $(id){if(!els[id])els[id]={value:"",textContent:"",hidden:false,style:{},classList:{toggle:function(){}},querySelector:function(){return null},appendChild:function(){}};return els[id]}\n' +
+  'var document={body:{appendChild:function(){}},createElement:function(){return {click:function(){},remove:function(){}}}};\n' +
+  'function Blob(parts){this.parts=parts}\n' +
+  'var URL={createObjectURL:function(blob){exported=JSON.parse(blob.parts[0]);return "blob:test"},revokeObjectURL:function(){}};\n' +
+  'function setTimeout(){}\n' +
+  'function showToast(t){toasts.push(t)}\n' +
+  'function send(m){sent.push(m);return true}\n' +
+  'function ensureConnected(){return true}\n' +
+  'function fmtTemp(c){return c==null?"--":String(c)}\n' +
+  block('range-settings') + '\n' +
+  src.slice(src.indexOf('  window.exportSettings=function'),src.indexOf('  window.importSettings=function')) + '\n' +
+  src.slice(src.indexOf('  window.importSettings=function'),src.indexOf('  // Destructive commands need')) + '\n' +
+  'return {sent:sent,toasts:toasts,els:els,submit:submitCheckedConfig,ack:onRangeResult,render:renderRangeSettings,\n' +
+  'edit:window.editRange,addEdits:addRangeEdits,export:exportRangeSettings,import:window.importSettings,\n' +
+  'dirty:function(){return settingsDirty},pending:function(){return rangePending},\n' +
+  'editAgain:markSettingsEdited,exportFile:function(st){lastState=st;window.exportSettings();return exported}};\n' +
+  '};})', { filename:'web/index.html#range-settings' }
+)();
+
 const probe = factory('C');
 for (const name of ['configureSliders', 'cToFTable', 'fToCTable', 'tap']) {
   if (typeof probe[name] !== 'function')
@@ -158,4 +180,4 @@ for (const name of ['roomSensors', 'roomRowHtml', 'renderRoomHero', 'renderRoomB
     throw new Error(`room-model block does not define ${name}()`);
 }
 
-module.exports = { newUi: factory, newRoom: roomFactory, newRoomRender: roomRenderFactory, mergeState, DEFAULTS };
+module.exports = { newUi: factory, newRanges: rangeFactory, newRoom: roomFactory, newRoomRender: roomRenderFactory, mergeState, DEFAULTS };

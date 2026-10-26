@@ -1,17 +1,22 @@
 #include "homekit_services.h"
+#include "homekit_setup.h"
 #include "cn105_strings.h"
 #include "auto_band.h"
+#include "setpoint_control.h"
 #include "room_avg.h"
 #include "settings.h"
 #include "logging.h"
 #include "esp_utils.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstring>
 
 extern "C" {
 #include <hap.h>
+#include <hap_platform_httpd.h>
+#include <esp_http_server.h>
 #include <hap_apple_servs.h>
 #include <hap_apple_chars.h>
 }
@@ -96,8 +101,8 @@ static uint8_t deriveCurrentState(const CN105State &s) {
                 // half of the AUTO band the room sits in — near the heating
                 // threshold the unit was almost certainly heating, and vice versa.
                 {
-                    float bandMid = (settings.get().heatingThreshold +
-                                     settings.get().coolingThreshold) * 0.5f;
+                    const auto band = SetpointControl::settingsView().effectiveBand;
+                    float bandMid = (band.heat2 + band.cool2) * 0.25f;
                     return (s.roomTemp <= bandMid) ? 1 : 2;
                 }
             default: return 0;
@@ -107,35 +112,75 @@ static uint8_t deriveCurrentState(const CN105State &s) {
     return 0;
 }
 
-// Map the two HomeKit thresholds onto the unit's single AUTO setpoint using a
-// room-vs-band deadband (the approach used by echavet's HEAT_COOL handling):
-//   - room below the heating threshold -> drive heat to the heating threshold
-//   - room above the cooling threshold -> drive cool to the cooling threshold
-//   - room inside the band             -> feed the unit its own room temp so it idles
-// The unit's reported autoSubMode is intentionally NOT used to pick the side: it
-// lags and can latch to a stale side (e.g. left on HEAT after the room warmed past
-// `cool`), which made AUTO send the heating threshold while the room was already hot.
-//
-// resendDeadband is how far the unit's reported setpoint may drift from the
-// resolved target before the sync loop corrects it. The comparison runs on
-// cn105.quantizeSetpoint(setpoint) — the value the unit will actually report
-// back — so quantization can never look like drift and the band edges use a
-// tight sub-grid 0.25 C. Inside the band the setpoint merely shadows the
-// room to keep the unit idle, so a coarse 1.0 C deadband avoids re-sending
-// a SET for every 0.5 C step of the room sensor.
-struct AutoTarget {
-    float setpoint;
-    float resendDeadband;
-};
+// HAP has no public characteristic lock. Every live thermostat cache/constraint
+// update runs in its HTTP task, alongside reads and writes. Initialization runs
+// directly before the accessory is exposed.
+static void publish_thermostat(CN105Controller& cn105);
+static bool s_targetReadable = true;
+static std::atomic<bool> s_publicationQueued{false};
 
-static AutoTarget resolveAutoTarget(const CN105State &s) {
-    float heat = settings.get().heatingThreshold;
-    float cool = settings.get().coolingThreshold;
-    float room = s.roomTemp;
+static bool representable(float value, int16_t low2, int16_t high2)
+{
+    return std::isfinite(value) && value * 2 >= low2 && value * 2 <= high2;
+}
 
-    if (room < heat) return {heat, 0.25f};  // below band -> heat toward heating threshold
-    if (room > cool) return {cool, 0.25f};  // above band -> cool toward cooling threshold
-    return {room, 1.0f};                    // inside band -> setpoint == room -> unit idles
+static void install_temperature(hap_char_t* hc, int16_t low2, int16_t high2,
+                                uint8_t step2, float value)
+{
+    // No HTTP reader can interleave the constraints/cache pair. The SDK setter
+    // changes constraints only; its update API enforces the newly installed bounds.
+    hap_char_float_set_constraints(hc, low2 / 2.f, high2 / 2.f, step2 / 2.f);
+    hap_val_t v{.f = value};
+    hap_char_update_val(hc, &v);
+}
+
+static void install_temperature_metadata(CN105Controller* cn105)
+{
+    if (!s_targetTemp || !s_heatThresh || !s_coolThresh) return;
+    const auto view = SetpointControl::settingsView();
+    const auto& ranges = view.ranges;
+    const auto& automatic = ranges.mode[2];
+    const HomekitTemperatureMetadata metadata{
+        {ranges.advertised.min2, automatic.range.min2, automatic.range.min2},
+        {ranges.advertised.max2, automatic.range.max2, automatic.range.max2},
+        {ranges.advertisedStep2, automatic.step2, automatic.step2}};
+    const auto& status = view.status;
+    const bool failed = status.condition == SetpointControl::Condition::Refused ||
+                        status.condition == SetpointControl::Condition::Incompatible;
+    float target = cn105 ? cn105->getEffectiveState().targetTemp : NAN;
+    if (failed) target = status.actualC;
+    else if (status.condition == SetpointControl::Condition::Pending &&
+             !representable(target, metadata.min2[0], metadata.max2[0])) target = status.desiredC;
+    s_targetReadable = representable(target, metadata.min2[0], metadata.max2[0]);
+    if (!s_targetReadable) {
+        // /accessories ignores read errors and serializes this cache. Keep a
+        // valid numeric value, but /characteristics reports unavailable below.
+        target = hap_char_get_val(s_targetTemp)->f;
+        if (!std::isfinite(target)) target = metadata.min2[0] / 2.f;
+        target = std::clamp(target, metadata.min2[0] / 2.f, metadata.max2[0] / 2.f);
+    }
+    const auto band = view.effectiveBand;
+    install_temperature(s_targetTemp, metadata.min2[0], metadata.max2[0], metadata.step2[0], target);
+    install_temperature(s_heatThresh, metadata.min2[1], metadata.max2[1], metadata.step2[1], band.heat2 / 2.f);
+    install_temperature(s_coolThresh, metadata.min2[2], metadata.max2[2], metadata.step2[2], band.cool2 / 2.f);
+    if (s_statusFault) {
+        const bool equipment = cn105 && cn105->getState().hasError;
+        hap_val_t fault{.u = static_cast<uint32_t>(!cn105 || !cn105->isHealthy() || equipment || failed || !s_targetReadable)};
+        hap_char_update_val(s_statusFault, &fault);
+    }
+    homekit_record_temperature_metadata(metadata);
+}
+
+static int thermostat_read_cb(hap_char_t *hc, hap_status_t *status_code,
+                              void *serv_priv, void *read_priv)
+{
+    if (g_homekitCtrl) publish_thermostat(*g_homekitCtrl);
+    if (hc == s_targetTemp && !s_targetReadable) {
+        *status_code = HAP_STATUS_COMM_ERR;
+        return HAP_FAIL;
+    }
+    *status_code = HAP_STATUS_SUCCESS;
+    return HAP_SUCCESS;
 }
 
 // ── Write callback ──────────────────────────────────────────────────────────
@@ -143,129 +188,55 @@ static AutoTarget resolveAutoTarget(const CN105State &s) {
 static int thermostat_write_cb(hap_write_data_t write_data[], int count,
                                 void *serv_priv, void *write_priv)
 {
-    bool healthy = g_homekitCtrl && g_homekitCtrl->isHealthy();
-
-    int ret = HAP_SUCCESS;
-    for (int i = 0; i < count; i++) {
-        hap_write_data_t *w = &write_data[i];
-        const char *uuid = hap_char_get_type_uuid(w->hc);
-
-        // ConfiguredName (Home app rename) doesn't touch the heat pump —
-        // accept it even when CN105 is down.
-        if (!strcmp(uuid, HAP_CHAR_UUID_CONFIGURED_NAME)) {
-            hap_char_update_val(w->hc, &w->val);
-            *(w->status) = HAP_STATUS_SUCCESS;
-            continue;
-        }
-
-        // Display units don't touch the heat pump either. Persisted to the
-        // same setting the web UI's C/F toggle uses, so both stay in step
-        // (the sync loop pushes web-side changes back to this char).
-        if (!strcmp(uuid, HAP_CHAR_UUID_TEMPERATURE_DISPLAY_UNITS)) {
-            bool useF = (w->val.u == 1);
-            if (settings.get().useFahrenheit != useF) {
-                settings.get().useFahrenheit = useF;
-                settings.save();
-                LOG_INFO("[HK:Thermo] HomeKit -> display units: %s", useF ? "F" : "C");
-            }
-            hap_char_update_val(w->hc, &w->val);
-            *(w->status) = HAP_STATUS_SUCCESS;
-            continue;
-        }
-
-        if (!healthy) {
-            LOG_WARN("[HK:Thermo] write REJECTED — CN105 not healthy");
-            *(w->status) = HAP_STATUS_RES_BUSY;
-            ret = HAP_FAIL;
-            continue;
-        }
-
+    const bool healthy = g_homekitCtrl && g_homekitCtrl->isHealthy();
+    SetpointControl::Command batch;
+    bool invalid = false;
+    for (int i = 0; i < count; ++i) {
+        const auto& w = write_data[i];
+        const char* uuid = hap_char_get_type_uuid(w.hc);
         if (!strcmp(uuid, HAP_CHAR_UUID_TARGET_HEATING_COOLING_STATE)) {
-            uint8_t hkState = w->val.u;
-            // Off (0) is never gated; 1..3 reuse the existing HK->CN105 table
-            // so the gating check can't drift from what setMode() will do.
-            uint8_t capBit = (hkState == 0)
-                ? 0 : modeToCapBit(hkTargetStateToCN105Mode(hkState));
-            if (capBit && !(settings.get().modeMask & capBit)) {
-                // Valid-values is advisory to controllers; also covers the
-                // window where the mask changed but the device hasn't rebooted.
-                LOG_WARN("[HK:Thermo] target state %d rejected — disabled by capability mask", hkState);
-                *(w->status) = HAP_STATUS_VAL_INVALID;
-                ret = HAP_FAIL;
-                continue;
-            }
-            LOG_INFO("[HK:Thermo] HomeKit -> target state: %s (%d)",
-                     hkTargetStateStr(hkState), hkState);
-            if (hkState == 0) {
-                g_homekitCtrl->setPower(false);
-            } else {
-                g_homekitCtrl->setPower(true);
-                g_homekitCtrl->setMode(hkTargetStateToCN105Mode(hkState));
-                // Choosing Auto in the Home app means "steer my range" even
-                // if the wall controller had the setpoint last.
-                if (hkState == 3) AutoBand::claimDevice();
-            }
-            hap_char_update_val(w->hc, &w->val);
-            *(w->status) = HAP_STATUS_SUCCESS;
-
-        } else if (!strcmp(uuid, HAP_CHAR_UUID_TARGET_TEMPERATURE)) {
-            float temp = w->val.f;
-            LOG_INFO("[HK:Thermo] HomeKit -> target temp: %.1f C", temp);
-            g_homekitCtrl->setTargetTemp(temp);
-            hap_char_update_val(w->hc, &w->val);
-            *(w->status) = HAP_STATUS_SUCCESS;
-
-        } else if (!strcmp(uuid, HAP_CHAR_UUID_HEATING_THRESHOLD_TEMPERATURE)) {
-            float heat = w->val.f;
-            float cool = settings.get().coolingThreshold;
-            // Enforce minimum 2 deg C gap
-            if (cool - heat < 2.0f) {
-                cool = heat + 2.0f;
-                if (cool > CN105_TEMP_MAX) {
-                    cool = CN105_TEMP_MAX;
-                    heat = cool - 2.0f;
-                }
-                hap_val_t cv = { .f = cool };
-                hap_char_update_val(s_coolThresh, &cv);
-            }
-            hap_val_t hv = { .f = heat };
-            hap_char_update_val(w->hc, &hv);
-            settings.get().heatingThreshold = heat;
-            settings.get().coolingThreshold = cool;
-            AutoBand::claimDevice();
-            settings.save();
-            LOG_INFO("[HK:Thermo] HomeKit -> heating threshold: %.1f C (cooling: %.1f C)", heat, cool);
-            *(w->status) = HAP_STATUS_SUCCESS;
-
-        } else if (!strcmp(uuid, HAP_CHAR_UUID_COOLING_THRESHOLD_TEMPERATURE)) {
-            float cool = w->val.f;
-            float heat = settings.get().heatingThreshold;
-            // Enforce minimum 2 deg C gap
-            if (cool - heat < 2.0f) {
-                heat = cool - 2.0f;
-                if (heat < CN105_TEMP_MIN) {
-                    heat = CN105_TEMP_MIN;
-                    cool = heat + 2.0f;
-                }
-                hap_val_t hv = { .f = heat };
-                hap_char_update_val(s_heatThresh, &hv);
-            }
-            hap_val_t cv = { .f = cool };
-            hap_char_update_val(w->hc, &cv);
-            settings.get().heatingThreshold = heat;
-            settings.get().coolingThreshold = cool;
-            AutoBand::claimDevice();
-            settings.save();
-            LOG_INFO("[HK:Thermo] HomeKit -> cooling threshold: %.1f C (heating: %.1f C)", cool, heat);
-            *(w->status) = HAP_STATUS_SUCCESS;
-
-        } else {
-            *(w->status) = HAP_STATUS_RES_ABSENT;
-        }
+            if (w.val.u > 3) { invalid = true; continue; }
+            batch.unit.power = w.val.u != 0;
+            if (w.val.u) batch.unit.mode = hkTargetStateToCN105Mode(w.val.u);
+        } else if (!strcmp(uuid, HAP_CHAR_UUID_TARGET_TEMPERATURE)) batch.unit.targetTemp = w.val.f;
+        else if (!strcmp(uuid, HAP_CHAR_UUID_HEATING_THRESHOLD_TEMPERATURE)) batch.heatingThreshold = w.val.f;
+        else if (!strcmp(uuid, HAP_CHAR_UUID_COOLING_THRESHOLD_TEMPERATURE)) batch.coolingThreshold = w.val.f;
     }
-
-    if (healthy) {
-        g_homekitCtrl->sendPendingChanges();
+    const auto result = !healthy ? SetpointRange::Result::Unavailable : invalid ?
+        SetpointRange::Result::Invalid : SetpointControl::submit(batch);
+    if (result == SetpointRange::Result::Ok) install_temperature_metadata(g_homekitCtrl);
+    int ret = HAP_SUCCESS;
+    const auto acceptedBand = SetpointControl::settingsView().effectiveBand;
+    if (result == SetpointRange::Result::Ok && (batch.heatingThreshold || batch.coolingThreshold)) {
+        hap_val_t heat = {.f = acceptedBand.heat2 / 2.f};
+        hap_val_t cool = {.f = acceptedBand.cool2 / 2.f};
+        if (s_heatThresh) hap_char_update_val(s_heatThresh, &heat);
+        if (s_coolThresh) hap_char_update_val(s_coolThresh, &cool);
+    }
+    for (int i = 0; i < count; ++i) {
+        auto& w = write_data[i];
+        const char* uuid = hap_char_get_type_uuid(w.hc);
+        if (!strcmp(uuid, HAP_CHAR_UUID_CONFIGURED_NAME)) {
+            hap_char_update_val(w.hc, &w.val); *w.status = HAP_STATUS_SUCCESS; continue;
+        }
+        if (!strcmp(uuid, HAP_CHAR_UUID_TEMPERATURE_DISPLAY_UNITS)) {
+            const bool useF = w.val.u == 1;
+            if (settings.get().useFahrenheit != useF) { settings.get().useFahrenheit = useF; settings.save(); }
+            hap_char_update_val(w.hc, &w.val); *w.status = HAP_STATUS_SUCCESS; continue;
+        }
+        const bool climate = !strcmp(uuid, HAP_CHAR_UUID_TARGET_HEATING_COOLING_STATE) ||
+            !strcmp(uuid, HAP_CHAR_UUID_TARGET_TEMPERATURE) ||
+            !strcmp(uuid, HAP_CHAR_UUID_HEATING_THRESHOLD_TEMPERATURE) ||
+            !strcmp(uuid, HAP_CHAR_UUID_COOLING_THRESHOLD_TEMPERATURE);
+        if (!climate) { *w.status = HAP_STATUS_RES_ABSENT; continue; }
+        if (result != SetpointRange::Result::Ok) {
+            *w.status = healthy ? HAP_STATUS_VAL_INVALID : HAP_STATUS_RES_BUSY; ret = HAP_FAIL; continue;
+        }
+        hap_val_t value = w.val;
+        if (!strcmp(uuid, HAP_CHAR_UUID_TARGET_TEMPERATURE)) value.f = g_homekitCtrl->getEffectiveState().targetTemp;
+        if (!strcmp(uuid, HAP_CHAR_UUID_HEATING_THRESHOLD_TEMPERATURE)) value.f = acceptedBand.heat2 / 2.f;
+        if (!strcmp(uuid, HAP_CHAR_UUID_COOLING_THRESHOLD_TEMPERATURE)) value.f = acceptedBand.cool2 / 2.f;
+        hap_char_update_val(w.hc, &value); *w.status = HAP_STATUS_SUCCESS;
     }
     return ret;
 }
@@ -335,22 +306,20 @@ void homekit_create_thermostat(hap_acc_t *acc)
 
     // Register write callback
     hap_serv_set_write_cb(serv, thermostat_write_cb);
+    hap_serv_set_read_cb(serv, thermostat_read_cb);
+    install_temperature_metadata(g_homekitCtrl);
 
     // Add to accessory
     hap_acc_add_serv(acc, serv);
 
-    LOG_INFO("[HK:Thermo] Service created (mask=0x%02X, %.0f-%.0f C)",
-             mask, CN105_TEMP_MIN, CN105_TEMP_MAX);
+    LOG_INFO("[HK:Thermo] Service created (mask=0x%02X)", mask);
 }
 
 // ── Sync function (called from main loop) ───────────────────────────────────
 
-void homekit_sync_thermostat(CN105Controller &cn105)
+static void publish_thermostat(CN105Controller& cn105)
 {
-    uint32_t now = uptime_ms();
-    if (now - s_lastSync < 2000) return;
-    s_lastSync = now;
-
+    install_temperature_metadata(&cn105);
     if (!cn105.isHealthy()) {
         if (!s_wasDisconnected) {
             LOG_WARN("[HK:Thermo] CN105 unhealthy — setting StatusFault");
@@ -390,16 +359,6 @@ void homekit_sync_thermostat(CN105Controller &cn105)
         }
     }
 
-    // StatusFault
-    if (s_statusFault) {
-        uint32_t fault = s.hasError ? 1 : 0;
-        const hap_val_t *cur = hap_char_get_val(s_statusFault);
-        if (forceSync || !cur || cur->u != fault) {
-            hap_val_t v = { .u = fault };
-            hap_char_update_val(s_statusFault, &v);
-        }
-    }
-
     // Current temperature — when the averaging blend is feeding the pump,
     // report its effective (offset-applied) value so Apple Home matches what
     // the pump is actually controlling on; otherwise the pump's own reported
@@ -413,21 +372,6 @@ void homekit_sync_thermostat(CN105Controller &cn105)
             LOG_DEBUG("[HK:Thermo] sync currentTemp: %.1f C", room);
             hap_val_t v = { .f = room };
             hap_char_update_val(s_currentTemp, &v);
-        }
-    }
-
-    // Target temperature
-    if (s_targetTemp) {
-        // The heat pump can report a setpoint outside the char constraints
-        // (e.g. 31.0 set from the IR remote; char max is 30.5), and
-        // hap_char_update_val rejects out-of-range values outright, freezing
-        // the Home-app display — clamp before syncing.
-        float target = std::clamp(s.targetTemp, CN105_TEMP_MIN, CN105_TEMP_MAX);
-        const hap_val_t *cur = hap_char_get_val(s_targetTemp);
-        if (forceSync || !cur || fabsf(cur->f - target) > 0.1f) {
-            LOG_DEBUG("[HK:Thermo] sync targetTemp: %.1f C", target);
-            hap_val_t v = { .f = target };
-            hap_char_update_val(s_targetTemp, &v);
         }
     }
 
@@ -455,49 +399,6 @@ void homekit_sync_thermostat(CN105Controller &cn105)
         }
     }
 
-    // Dual-setpoint AUTO: drive the unit's single setpoint from the two
-    // HomeKit thresholds. The resolved target is compared against the
-    // *effective* setpoint (wanted value during the grace window, heat-pump-
-    // confirmed after), so a setpoint left over from another mode self-
-    // corrects on a later pass. A value the unit declined is not re-sent
-    // while the unit keeps its answer (refusedSetpoint) — a lost SET gets
-    // one retry, a clamped one none — so an out-of-range band cannot turn
-    // into a SET every grace window. A setpoint written at the unit's own
-    // controller is NOT corrected: that hands the range to the unit
-    // (auto_band.h) and the engine stays silent until this device writes
-    // the band again.
-    if (s.power && s.mode == CN105_MODE_AUTO && AutoBand::deviceOwns()) {
-        AutoTarget want = resolveAutoTarget(s);
-        // Quantize both sides: on a legacy-encoding unit the wanted value
-        // (stored raw) would otherwise never match the whole degree it reports.
-        if (fabsf(cn105.quantizeSetpoint(want.setpoint) - cn105.quantizeSetpoint(s.targetTemp)) > want.resendDeadband &&
-            !cn105.refusedSetpoint(want.setpoint)) {
-            LOG_INFO("[HK:Thermo] AUTO target %.1fC (unit at %.1f, room %.1f, heat %.1f, cool %.1f)",
-                     want.setpoint, s.targetTemp, s.roomTemp,
-                     settings.get().heatingThreshold, settings.get().coolingThreshold);
-            cn105.setTargetTemp(want.setpoint);
-            cn105.sendPendingChanges();
-        }
-    }
-
-    // Sync threshold values from NVS (may be changed by WebUI)
-    float heat = settings.get().heatingThreshold;
-    float cool = settings.get().coolingThreshold;
-    if (s_heatThresh) {
-        const hap_val_t *cur = hap_char_get_val(s_heatThresh);
-        if (forceSync || !cur || fabsf(cur->f - heat) > 0.1f) {
-            hap_val_t v = { .f = heat };
-            hap_char_update_val(s_heatThresh, &v);
-        }
-    }
-    if (s_coolThresh) {
-        const hap_val_t *cur = hap_char_get_val(s_coolThresh);
-        if (forceSync || !cur || fabsf(cur->f - cool) > 0.1f) {
-            hap_val_t v = { .f = cool };
-            hap_char_update_val(s_coolThresh, &v);
-        }
-    }
-
     // Display units follow the web UI's C/F setting (writes from the Home app
     // update the same setting — see thermostat_write_cb)
     if (s_tempUnits) {
@@ -508,4 +409,32 @@ void homekit_sync_thermostat(CN105Controller &cn105)
             hap_char_update_val(s_tempUnits, &v);
         }
     }
+}
+
+static void publish_queued(void* arg)
+{
+    if (!settings.isFactoryResetting()) publish_thermostat(*static_cast<CN105Controller*>(arg));
+    s_publicationQueued.store(false);
+}
+
+void homekit_reconcile_temperature_metadata(CN105Controller& cn105)
+{
+    if (!homekit_is_started() || !s_targetTemp || settings.isFactoryResetting()) return;
+    bool expected = false;
+    if (!s_publicationQueued.compare_exchange_strong(expected, true)) return;
+    httpd_handle_t* handle = hap_platform_httpd_get_handle();
+    if (!handle || !*handle || httpd_queue_work(*handle, publish_queued, &cn105) != ESP_OK)
+        s_publicationQueued.store(false); // Next sync retries the full publication.
+}
+
+void homekit_sync_thermostat(CN105Controller &cn105)
+{
+    uint32_t now = uptime_ms();
+    if (now - s_lastSync < 2000) return;
+    s_lastSync = now;
+    // Keep steering on the main task, including before HAP starts. The caller
+    // retains the existing safe-mode guard.
+    // It recomputes current ownership and policy under the coordinator lock.
+    if (cn105.isHealthy()) SetpointControl::steerAuto();
+    homekit_reconcile_temperature_metadata(cn105);
 }

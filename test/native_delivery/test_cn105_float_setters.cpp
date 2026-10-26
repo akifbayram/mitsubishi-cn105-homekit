@@ -135,4 +135,14 @@ int main(int,char** argv) {
    CHECK(pump.sent.back()[8]==encoded[i]);
   }
  }
+ CASE("legacy_target_keeps_compatibility_clamp_round_truncation") {
+  const float inputs[]={-1,22.25f,30.5f,100};const int expected[]={16,22,30,30};
+  for(int i=0;i<4;++i) {
+   RecordingPump pump;CN105Controller c;pump.legacy=true;connect(c,pump);
+   CHECK(c.getState().encoding==SetpointRange::Encoding::Legacy);
+   CHECK(c.quantizeSetpoint(inputs[i])==expected[i]);
+   c.setTargetTemp(inputs[i]);c.sendPendingChanges();ticks(c,20);
+   CHECK(pump.legacyC==expected[i]);CHECK(pump.sent.back()[10]==31-expected[i]);CHECK(pump.sent.back()[19]==0);
+  }
+ }
 }

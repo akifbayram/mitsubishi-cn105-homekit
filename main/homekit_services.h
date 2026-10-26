@@ -20,6 +20,9 @@ void homekit_services_create_all(hap_acc_t *acc);
 /// Push CN105 thermostat state to HomeKit characteristics.
 void homekit_sync_thermostat(CN105Controller &cn105);
 
+/// Queue coherent thermostat metadata/value publication in the HAP HTTP context.
+void homekit_reconcile_temperature_metadata(CN105Controller& cn105);
+
 /// Push CN105 fan state to HomeKit characteristics.
 void homekit_sync_fan(CN105Controller &cn105);
 

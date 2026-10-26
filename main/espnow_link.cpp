@@ -39,6 +39,7 @@
 #include "cn105_protocol.h"
 #include "cn105_strings.h"
 #include "auto_band.h"
+#include "setpoint_control.h"
 #include "room_avg.h"
 #include "wifi_manager.h"
 #include "wifi_recovery.h"
@@ -70,9 +71,10 @@ static sl2_hvac_iface_t s_hvac;
 static CN105Controller *s_ctrl = nullptr;
 static bool             s_started = false;
 // caps-change watch: dial re-pulls CAPS when the built CAPS content changes.
-// Gated on the settings generation counter so the rebuild only runs after an
-// actual save(), not every loop tick.
+// Watch both settings saves and discovery-driven range changes; fingerprinting
+// below keeps provenance-only changes from writing a new persistent sequence.
 static uint32_t         s_capsGen = 0;
+static uint32_t         s_capsRangeGen = 0;
 
 /* Serin root Ed25519 pubkey for device-cert verification. File-static because
  * sl2_link_t holds the pointer, not a copy (sl2_link.h: "adopter keeps the
@@ -472,8 +474,9 @@ static bool h_get_state(void *, sl2_hvac_state_t *out) {
     out->room_dc = sl2_c_to_dc(st.roomTemp);
     out->set_dc  = sl2_c_to_dc(st.targetTemp);
     const bool autoBand = st.power && st.mode == CN105_MODE_AUTO;
-    out->set_low_dc  = autoBand ? sl2_c_to_dc(cfg.heatingThreshold) : SL2_DC_NA;
-    out->set_high_dc = autoBand ? sl2_c_to_dc(cfg.coolingThreshold) : SL2_DC_NA;
+    const auto band = SetpointControl::settingsView().effectiveBand;
+    out->set_low_dc  = autoBand ? band.heat2 * 5 : SL2_DC_NA;
+    out->set_high_dc = autoBand ? band.cool2 * 5 : SL2_DC_NA;
     out->room_hum_pct = SL2_HUM_NA;
     out->hum_set_pct  = SL2_HUM_NA;
     /* Sun gate: pure function of the SNTP clock + configured location, but
@@ -580,52 +583,23 @@ static bool h_apply(void *, uint16_t mask, const struct sl2_cmd_pkt *cmd) {
     if ((mask & SL2_CM_TEMP) && effectiveMode == CN105_MODE_AUTO && !bandEdit)
         return false;
 
+    SetpointControl::Command batch;
     if (mask & SL2_CM_MODE) {
-        if (cmd->mode == SL2_MODE_OFF) {
-            s_ctrl->setPower(false);
-        } else {
-            uint8_t cnMode = mode_from_sl2(cmd->mode);
-            if (!mode_mask_allows(settings.get().modeMask, cnMode)) {
-                // Dial with a stale CAPS cache (re-pull is in flight).
-                LOG_WARN("Link CMD mode %u rejected — disabled by capability mask", cmd->mode);
-            } else {
-                s_ctrl->setPower(true);
-                s_ctrl->setMode(cnMode);
-                // Choosing Auto here means "steer my range", even if the
-                // wall controller had the setpoint last.
-                if (cnMode == CN105_MODE_AUTO) AutoBand::claimDevice();
-            }
-        }
+        batch.unit.power = cmd->mode != SL2_MODE_OFF;
+        if (cmd->mode != SL2_MODE_OFF) batch.unit.mode = mode_from_sl2(cmd->mode);
     }
     if (bandEdit) {
-        AutoBand::claimDevice();
-        float heat = std::clamp(roundf(sl2_dc_to_c(cmd->set_low_dc) * 2.0f) / 2.0f,
-                                CN105_TEMP_MIN, CN105_TEMP_MAX);
-        float cool = std::clamp(roundf(sl2_dc_to_c(cmd->set_high_dc) * 2.0f) / 2.0f,
-                                CN105_TEMP_MIN, CN105_TEMP_MAX);
-        // Both limits were supplied: as in the web UI, the cooling limit
-        // wins a too-narrow band, unless the heating limit hits the floor.
-        if (cool - heat < AUTO_BAND_MIN_GAP_C) {
-            heat = std::max(CN105_TEMP_MIN, cool - AUTO_BAND_MIN_GAP_C);
-            cool = heat + AUTO_BAND_MIN_GAP_C;
-        }
-        if (settings.get().heatingThreshold != heat || settings.get().coolingThreshold != cool) {
-            settings.get().heatingThreshold = heat;
-            settings.get().coolingThreshold = cool;
-            settings.save();
-        }
-    } else if (mask & SL2_CM_TEMP) {
-        s_ctrl->setTargetTemp(sl2_dc_to_c(cmd->set_dc));
+        batch.heatingThreshold = sl2_dc_to_c(cmd->set_low_dc);
+        batch.coolingThreshold = sl2_dc_to_c(cmd->set_high_dc);
     }
-    if (mask & SL2_CM_FAN)   s_ctrl->setFanSpeed(fan_from_pct(cmd->fan));
-    if (mask & SL2_CM_VANEV) s_ctrl->setVane(vanev_from_sl2(cmd->vane_v));
-    if (mask & SL2_CM_VANEH) s_ctrl->setWideVane(vaneh_from_sl2(cmd->vane_h));
-    /* setX() only stages fields into the cross-task mailbox — nothing
-     * reaches the heat pump until the batch is committed (threading
-     * contract in cn105_protocol.h). Safe no-op when the mode above was
-     * rejected and nothing got staged. */
-    if (mask & (SL2_CM_MODE | SL2_CM_TEMP | SL2_CM_FAN | SL2_CM_VANEV | SL2_CM_VANEH))
-        s_ctrl->sendPendingChanges();
+    if (mask & SL2_CM_TEMP) {
+        if (cmd->set_dc == SL2_DC_NA) return false;
+        batch.unit.targetTemp = sl2_dc_to_c(cmd->set_dc);
+    }
+    if (mask & SL2_CM_FAN) batch.unit.fanSpeed = fan_from_pct(cmd->fan);
+    if (mask & SL2_CM_VANEV) batch.unit.vane = vanev_from_sl2(cmd->vane_v);
+    if (mask & SL2_CM_VANEH) batch.unit.wideVane = vaneh_from_sl2(cmd->vane_h);
+    if (SetpointControl::submit(batch) != SetpointRange::Result::Ok) return false;
     if (mask & SL2_CM_UNITS) {
         settings.get().useFahrenheit = (cmd->use_f != 0);
         settings.save();
@@ -672,6 +646,7 @@ static void h_room_sensor(void *, const uint8_t src_mac[6],
 
 static bool h_get_caps(void *, struct sl2_caps_pkt *out) {
     const DeviceSettings &cfg = settings.get();
+    const auto ranges = SetpointControl::snapshot();
     out->caps_flags = 0;
     uint8_t mm = cfg.modeMask;
     uint16_t modes = (uint16_t)(1u << SL2_MODE_OFF);   // Off is always available
@@ -693,10 +668,10 @@ static bool h_get_caps(void *, struct sl2_caps_pkt *out) {
      * declaring it changes nothing today and removes the guess tomorrow. */
     out->vane_h = (vc >= 2) ? (uint8_t)(SL2_VANECAP(SL2_WVANE_POS_SPLIT, false, true) |
                                         SL2_VANECAP_SPLIT_TOP) : 0;
-    out->set_min_dc = sl2_c_to_dc(CN105_TEMP_MIN);
-    out->set_max_dc = sl2_c_to_dc(CN105_TEMP_MAX);
-    out->set_step_dc = 5;                   // 0.5 °C, the CN105 enhanced-mode step
-    out->ftab_id = 1;                       // Mitsubishi 61-88F table
+    out->set_min_dc = ranges.advertised.min2 * 5;
+    out->set_max_dc = ranges.advertised.max2 * 5;
+    out->set_step_dc = ranges.advertisedStep2 * 5;
+    out->ftab_id = ranges.ftabId;
     out->band_min_gap_dc = sl2_c_to_dc(AUTO_BAND_MIN_GAP_C);
     out->hum_step_pct = 0;
     uint16_t feat = SL2_FEAT_WIFI_INFO | SL2_FEAT_HOMEKIT | SL2_FEAT_OUTSIDE_T |
@@ -1211,6 +1186,7 @@ void EspnowLink::begin(CN105Controller *ctrl) {
     s_started = true;
 
     s_capsGen = settings.generation();
+    s_capsRangeGen = SetpointControl::snapshot().generation;
     caps_announce_if_changed();
     snapshot_status();
 
@@ -1286,10 +1262,14 @@ void EspnowLink::loop() {
 
     sl2_link_loop(&s_link);
 
-    /* Settings edits (web UI) that alter CAPS content bump caps_seq so dials
-     * re-pull. The rebuild only runs after a settings save, not every tick. */
-    if (s_capsGen != settings.generation()) {
-        s_capsGen = settings.generation();
+    /* Settings edits and newly discovered bounds can both change CAPS.
+     * The packet fingerprint suppresses writes for changes to provenance,
+     * availability or per-mode details that leave advertised CAPS unchanged. */
+    const uint32_t settingsGen = settings.generation();
+    const uint32_t rangeGen = SetpointControl::snapshot().generation;
+    if (s_capsGen != settingsGen || s_capsRangeGen != rangeGen) {
+        s_capsGen = settingsGen;
+        s_capsRangeGen = rangeGen;
         caps_announce_if_changed();
     }
 

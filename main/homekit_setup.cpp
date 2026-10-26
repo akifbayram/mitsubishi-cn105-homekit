@@ -7,6 +7,8 @@
 #include "esp_utils.h"
 #include "status_led.h"
 #include <cstring>
+#include <mutex>
+#include <atomic>
 #include <cstdio>
 
 #include <esp_event.h>
@@ -128,7 +130,7 @@ static void homekit_set_setup_id(const char* setupId)
 // bit 7 = Remote Sensor accessory present.
 static constexpr uint8_t SHAPE_SENSOR_PRESENT = 0x80;
 
-static bool s_started = false;   // hap_start() has succeeded
+static std::atomic<bool> s_started{false};   // hap_start() has succeeded
 
 static uint8_t s_bootModeMask = MODE_CAP_ALL;
 
@@ -141,66 +143,75 @@ static uint8_t current_service_shape(void)
     return shape;
 }
 
-// bumpOnChange=false covers runtime mutations where the SDK call itself
-// already bumped c# (hap_add_bridged_accessory): only the NVS-tracked shape
-// needs to catch up, so the next boot's reconcile doesn't see a phantom
-// change and bump a second time.
+// Hash explicit bytes rather than struct padding. Include all three min/max/step
+// triples, but not source, availability, ordinary target motion or active mode.
+static uint32_t temperature_fingerprint(const HomekitTemperatureMetadata& m)
+{
+    uint8_t bytes[15];
+    for (int i = 0; i < 3; ++i) {
+        bytes[i * 5] = m.min2[i] & 0xff;
+        bytes[i * 5 + 1] = (m.min2[i] >> 8) & 0xff;
+        bytes[i * 5 + 2] = m.max2[i] & 0xff;
+        bytes[i * 5 + 3] = (m.max2[i] >> 8) & 0xff;
+        bytes[i * 5 + 4] = m.step2[i];
+    }
+    return fnv1a32(bytes, sizeof(bytes));
+}
+static const HomekitTemperatureMetadata formerTemperatureMetadata{{32,32,32},{61,61,61},{1,1,1}};
+static HomekitTemperatureMetadata s_temperatureMetadata = formerTemperatureMetadata;
+static std::mutex s_metadataMutex;
+
+// A runtime service mutation requests c# without returning enqueue status. Its
+// record-only path stores shape alone; temperature acknowledgement requires an
+// enqueue success observed by this reconciliation path.
 static void store_service_shape(bool bumpOnChange)
 {
-    if (settings.isFactoryResetting()) return;
-    if (!s_started) return;   // DB shape is meaningless before hap_start()
-
+    if (settings.isFactoryResetting() || !s_started) return;
     nvs_handle_t h;
-    esp_err_t err = nvs_open("hk-meta", NVS_READWRITE, &h);
-    if (err != ESP_OK) {
-        LOG_ERROR("[HK] hk-meta nvs_open failed: %s", esp_err_to_name(err));
+    if (nvs_open("hk-meta", NVS_READWRITE, &h) != ESP_OK) return;
+    const uint8_t shape = current_service_shape();
+    const uint32_t temperature = temperature_fingerprint(s_temperatureMetadata);
+    uint8_t storedShape = shape;
+    uint32_t storedTemperature = temperature_fingerprint(formerTemperatureMetadata);
+    const auto shapeResult = nvs_get_u8(h, "svcShape", &storedShape);
+    const auto tempResult = bumpOnChange ? nvs_get_u32(h, "tempMeta", &storedTemperature) : ESP_OK;
+    if ((shapeResult != ESP_OK && shapeResult != ESP_ERR_NVS_NOT_FOUND) ||
+        (tempResult != ESP_OK && tempResult != ESP_ERR_NVS_NOT_FOUND)) {
+        nvs_close(h);
         return;
     }
-    uint8_t shape = current_service_shape();
-    uint8_t storedShape = 0;
-    err = nvs_get_u8(h, "svcShape", &storedShape);
-    // ESP_ERR_NVS_NOT_FOUND = first boot with this feature (or first-ever
-    // boot): the live database is by definition what a paired controller
-    // last saw (or nobody is paired yet), so there's nothing to reconcile —
-    // just start tracking from here, without bumping.
-    bool store = (err == ESP_ERR_NVS_NOT_FOUND);
-    if (err == ESP_OK && storedShape != shape) {
-        if (!bumpOnChange) {
-            LOG_INFO("[HK] Service shape changed (0x%02X -> 0x%02X) — recorded, c# already bumped",
-                     storedShape, shape);
-            store = true;
-        } else {
-            LOG_INFO("[HK] Service shape changed (0x%02X -> 0x%02X) — bumping config number",
-                     storedShape, shape);
-            if (hap_update_config_number() == HAP_SUCCESS) {
-                store = true;   // only record the new shape once the bump is queued
-            } else {
-                LOG_ERROR("[HK] hap_update_config_number failed — will retry next boot");
-            }
-        }
-    } else if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
-        LOG_ERROR("[HK] hk-meta nvs_get_u8 failed: %s", esp_err_to_name(err));
+    const bool changed = storedShape != shape || (bumpOnChange && storedTemperature != temperature);
+    if (changed && bumpOnChange && hap_update_config_number() != HAP_SUCCESS) {
+        LOG_WARN("[HK] Metadata configuration enqueue failed; retry pending");
+        nvs_close(h);
+        return;
     }
-    if (store) {
-        // One-time migration: the key was renamed svcMask -> svcShape when
-        // the sensor-present bit was added; drop the old key alongside the
-        // first svcShape write so the two encodings can't be confused. (The
-        // rename re-baselines without a bump, same as a first-ever boot.)
+    if (changed || shapeResult == ESP_ERR_NVS_NOT_FOUND || tempResult == ESP_ERR_NVS_NOT_FOUND) {
         nvs_erase_key(h, "svcMask");
-        nvs_set_u8(h, "svcShape", shape);
-        nvs_commit(h);
+        if (nvs_set_u8(h, "svcShape", shape) != ESP_OK ||
+            (bumpOnChange && nvs_set_u32(h, "tempMeta", temperature) != ESP_OK) || nvs_commit(h) != ESP_OK) {
+            LOG_WARN("[HK] Metadata acknowledgement storage failed; retry pending");
+        }
     }
-
     nvs_close(h);
+}
+
+void homekit_record_temperature_metadata(const HomekitTemperatureMetadata& metadata)
+{
+    std::lock_guard<std::mutex> lock(s_metadataMutex);
+    s_temperatureMetadata = metadata;
+    store_service_shape(true);
 }
 
 void homekit_reconcile_service_shape(void)
 {
+    std::lock_guard<std::mutex> lock(s_metadataMutex);
     store_service_shape(true);
 }
 
 void homekit_record_service_shape(void)
 {
+    std::lock_guard<std::mutex> lock(s_metadataMutex);
     store_service_shape(false);
 }
 

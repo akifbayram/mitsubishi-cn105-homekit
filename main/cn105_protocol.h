@@ -1,6 +1,8 @@
 #pragma once
 
 #include <cmath>
+#include <optional>
+#include <mutex>
 #include <cstdint>
 #include <cstddef>
 #include <cstring>
@@ -11,6 +13,7 @@
 #include "logging.h"
 #include "uart_interface.h"
 #include "cn105_baud.h"
+#include "setpoint_range.h"
 #ifndef UNIT_TEST
 #include "hardware_uart.h"
 #endif
@@ -146,6 +149,23 @@ struct CN105State {
     bool     runtimeValid = false;
     bool     connected   = false;
     uint32_t lastUpdate  = 0;
+    uint32_t settingsRevision = 0;
+    uint32_t connectionRevision = 0;
+    SetpointRange::Encoding encoding = SetpointRange::Encoding::Unknown;
+};
+
+enum class SetpointDelivery : uint8_t { None, Pending, Refused };
+struct CN105RangeCapabilities {
+    SetpointRange::Detection detected{};
+    uint32_t revision = 0;
+};
+
+// Complete, validated transport intent. Range validation belongs to SetpointControl.
+struct CN105Command {
+    std::optional<bool> power;
+    std::optional<uint8_t> mode;
+    std::optional<float> targetTemp;
+    std::optional<uint8_t> fanSpeed, vane, wideVane;
 };
 
 // ── Wanted settings (echavet anti-flicker pattern) ────────────────────────
@@ -221,6 +241,23 @@ public:
     /// Safe to call from any task.
     CN105State getEffectiveState() const;
 
+    /// Optional discovery retains validated pairs; only this connection is fresh.
+    CN105RangeCapabilities rangeCapabilities() const;
+    /// Distinguishes staged/in-flight intent from an equipment refusal.
+    SetpointDelivery setpointDelivery(float targetC) const;
+    void clearSetpointRefusal();
+
+    // Conditional internal steering: a newer unit observation invalidates the
+    // decision without changing the mailbox or claiming user ownership.
+    bool queueAutoTarget(float targetC, const CN105State& observed, uint32_t externalRevision);
+    // Pause drains a transmission already in progress, then holds the existing
+    // mailbox. It never holds the spinlock over persistence or UART IO.
+    void holdCommands();
+    CN105Command heldCommand() const;
+    bool commandsHeld() const;
+    // Replace held intent after validation. A changed connection stays held.
+    void resumeCommands(const CN105Command&, const CN105State& validatedState);
+
     /// ── Commands (safe to call from any task) ───────────────────────────────
     /// Each setX() stages one field of a batch; sendPendingChanges() commits
     /// the batch for transmission by the CN105 task. Nothing is sent until
@@ -257,8 +294,8 @@ public:
     /// Public for the same reason as quantizeRemoteTemp(): callers that
     /// compare a desired setpoint against the reported one (the HomeKit AUTO
     /// logic) use this instead of hard-coding encoding knowledge. Depends on
-    /// the detected tempMode (0.5°C grid vs legacy whole degrees); the latch
-    /// is a single bool, safe to read from any task.
+    /// the connection encoding (0.5°C grid vs legacy whole degrees). Unknown
+    /// retains the former conservative legacy quantization.
     float quantizeSetpoint(float tempC) const;
 
     static uint8_t calcChecksum(const uint8_t *pkt, uint8_t len);
@@ -304,21 +341,14 @@ public:
     }
 
     /// True when sending this setpoint again would change nothing: a SET of
-    /// the same value is out and still awaiting the unit's answer, or the
+    /// the same value is queued/sent and awaiting the unit's answer, or the
     /// unit answered it with another value (it will not hold it — e.g. an
     /// Auto floor its wall controller enforces) and still reports that value
     /// in the same mode. A unit that did not move at all gets one retry first,
     /// since the SET may have been lost. Forgotten on every connect. The Auto
     /// engine checks this so it never re-sends a value the unit declined.
     bool refusedSetpoint(float tempC) const {
-        const float q = quantizeSetpoint(tempC);
-        taskENTER_CRITICAL(&_mux);
-        const bool awaiting = _wanted.hasTemp && (_wanted.sentFlags & CN105_FLAG_TEMP) &&
-                              quantizeSetpoint(_wanted.targetTemp) == q;
-        const bool refused  = q == _refusedTemp && _state.targetTemp == _refusedAnswer &&
-                              _state.mode == _refusedMode;
-        taskEXIT_CRITICAL(&_mux);
-        return awaiting || refused;
+        return setpointDelivery(tempC) != SetpointDelivery::None;
     }
 
     /// Communication-loss timeout: 6 × the runtime poll interval, floored at
@@ -386,11 +416,19 @@ private:
 
     // ── Wanted settings (anti-flicker) ───────────────────────────────────────
     WantedSettings _wanted;
+    std::mutex _transmitMutex;
+    bool _commandsHeld = false;
+    bool _rangeAwareCommand = false;
+    uint32_t _commandConnection = 0;
+    SetpointRange::Encoding _commandEncoding = SetpointRange::Encoding::Unknown;
+    void queueCommandLocked(const CN105Command&);
+    void cancelWantedLocked(uint8_t flags1, uint8_t flags2);
 
     // One rule for all cross-task protocol state: _staged/_sendRequested,
-    // _wanted, _pendingRemoteTemp*, _pendingBaud, _state, and
-    // _lastSuccessfulResponse are only touched under this lock — writers (the
-    // CN105 task) and readers alike. Held only for short copies/flag flips —
+    // _wanted, _pendingRemoteTemp*, _pendingBaud, _state,
+    // _lastSuccessfulResponse, and _rangeCapabilities are only touched under
+    // this lock — writers (the CN105 task) and readers alike.
+    // Held only for short copies/flag flips —
     // never across UART I/O or logging.
     mutable portMUX_TYPE _mux = portMUX_INITIALIZER_UNLOCKED;
 
@@ -404,8 +442,11 @@ private:
     uint32_t _baudRate    = CN105_BAUD_DEFAULT;
     uint32_t _pendingBaud = 0;
 
-    // ── Temperature encoding mode ────────────────────────────────────────
-    bool _tempMode = false;  // true = unit supports enhanced temp byte (data[11])
+    // Optional identify exchange is independent of normal polling (task only).
+    enum class Discovery : uint8_t { Idle, Waiting, Done };
+    Discovery _discovery = Discovery::Idle;
+    uint32_t _discoverySentMs = 0;
+    CN105RangeCapabilities _rangeCapabilities;  // read/write under _mux
 
     // ── Error code polling (0x04) soft timeout ───────────────────────────
     uint8_t  _errorPollFailures = 0;   // consecutive failures
@@ -440,6 +481,8 @@ private:
     float    _refusedAnswer   = NAN;
     uint8_t  _refusedMode     = 0;
     float    _unconfirmedTemp = NAN;
+    float    _supersededTemp = NAN;
+    uint32_t _supersededAt = 0;
 
     // ── RX buffer ───────────────────────────────────────────────────────────
     uint8_t  _rxBuf[32];
@@ -448,6 +491,7 @@ private:
 
     // ── Internal methods ────────────────────────────────────────────────────
     void sendConnectPacket();
+    void handleIdentifyResponse(const uint8_t *data, uint8_t dataLen);
     void sendInfoRequest(uint8_t infoType);
     void sendSetPacket(const PendingCommand &cmd);
     void processPacket(const uint8_t *pkt, uint8_t len);

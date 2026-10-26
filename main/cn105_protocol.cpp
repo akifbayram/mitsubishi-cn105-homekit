@@ -105,6 +105,35 @@ CN105State CN105Controller::getEffectiveState() const {
     return eff;
 }
 
+// Transport quantization only; policy validation and compatibility rounding occur upstream.
+static float quantizeSetpointFor(float tempC, SetpointRange::Encoding encoding) {
+    const float rounded = roundf(tempC * 2.0f) / 2.0f;
+    return encoding == SetpointRange::Encoding::Enhanced ? rounded : (float)(int)rounded;
+}
+
+CN105RangeCapabilities CN105Controller::rangeCapabilities() const {
+    taskENTER_CRITICAL(&_mux);
+    const auto caps = _rangeCapabilities;
+    taskEXIT_CRITICAL(&_mux);
+    return caps;
+}
+
+SetpointDelivery CN105Controller::setpointDelivery(float targetC) const {
+    if (!std::isfinite(targetC)) return SetpointDelivery::None;
+    taskENTER_CRITICAL(&_mux);
+    const float q = quantizeSetpointFor(targetC, _state.encoding);
+    const bool pending = _wanted.hasTemp && quantizeSetpointFor(_wanted.targetTemp, _state.encoding) == q;
+    const bool refused = q == _refusedTemp && _state.targetTemp == _refusedAnswer && _state.mode == _refusedMode;
+    taskEXIT_CRITICAL(&_mux);
+    return pending ? SetpointDelivery::Pending : refused ? SetpointDelivery::Refused : SetpointDelivery::None;
+}
+
+void CN105Controller::clearSetpointRefusal() {
+    taskENTER_CRITICAL(&_mux);
+    _refusedTemp = _refusedAnswer = _unconfirmedTemp = NAN;
+    taskEXIT_CRITICAL(&_mux);
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 // Main Loop
 // ════════════════════════════════════════════════════════════════════════════
@@ -144,25 +173,41 @@ void CN105Controller::loop() {
         return;
     }
 
+    // Discovery yields immediately to control traffic; its late reply is ignored.
+    if (_discovery == Discovery::Waiting &&
+        ((uint32_t)(now - _discoverySentMs) >= CN105_RESPONSE_TIMEOUT ||
+         _sendRequested || _pendingRemoteTemp)) {
+        _discovery = Discovery::Done;
+    }
+
     // ── Send committed changes (priority over polling, only outside a cycle) ──
     // Snapshot-and-clear under the lock, then transmit from the snapshot so a
     // producer staging a new batch mid-TX can neither tear this packet nor
     // lose its own (its flags accumulate in the freshly cleared _staged).
-    if (_sendRequested && !_cycleRunning) {
-        taskENTER_CRITICAL(&_mux);
-        const PendingCommand cmd = _staged;
+    std::unique_lock<std::mutex> transmitLock(_transmitMutex);
+    taskENTER_CRITICAL(&_mux);
+    if (_rangeAwareCommand && (_staged.flags1 & CN105_FLAG_TEMP) &&
+        (_commandConnection != _state.connectionRevision || _commandEncoding != _state.encoding))
+        _commandsHeld = true;
+    const bool sendNow = _sendRequested && !_cycleRunning && !_commandsHeld;
+    const PendingCommand cmd = _staged;
+    if (sendNow) {
         _staged = PendingCommand{};
         _sendRequested = false;
         _wanted.hasBeenSent = true;
         _wanted.sentFlags |= cmd.flags1;
         if (cmd.flags1 & CN105_FLAG_TEMP) _wanted.tempAtSend = _state.targetTemp;
-        taskEXIT_CRITICAL(&_mux);
+    }
+    taskEXIT_CRITICAL(&_mux);
+    if (sendNow) {
         LOG_INFO("Sending pending set command (flags=0x%02X flags2=0x%02X)", cmd.flags1, cmd.flags2);
         sendSetPacket(cmd);
         _lastWriteMs = uptime_ms();
         _writeDeferred = true;
         return;
     }
+
+    transmitLock.unlock();
 
     // ── First connect since boot: one clear unless a source has fed ──────
     // A room source fed before this controller restarted may still be held
@@ -246,7 +291,14 @@ void CN105Controller::loop() {
         if (_writeDeferred && (uint32_t)(now - _lastWriteMs) >= CN105_DEFER_DELAY) {
             _writeDeferred = false;
         }
-        if (!_writeDeferred && (uint32_t)(now - _lastCycleEnd) >= _updateInterval) {
+        if (!_writeDeferred && _settingsBaselined && _discovery == Discovery::Idle) {
+            static const uint8_t request[] = {0xFC, 0x5B, 0x01, 0x30, 0x01, 0xC9, 0xAA};
+            _discovery = Discovery::Waiting;
+            _discoverySentMs = now;
+            _uart->write(request, sizeof(request));
+        }
+        if (!_writeDeferred && _discovery != Discovery::Waiting &&
+            (uint32_t)(now - _lastCycleEnd) >= _updateInterval) {
             LOG_DEBUG("Starting new poll cycle");
             if (_bootClear == BOOT_CLEAR_ARMED) _bootClear = BOOT_CLEAR_POLLING;
             _cycleRunning = true;
@@ -278,9 +330,29 @@ void CN105Controller::loop() {
 // answer to a lost link and to a new line rate.
 void CN105Controller::restartHandshake() {
     taskENTER_CRITICAL(&_mux);
+    if (_rangeAwareCommand) {
+        // Keep the same mailbox, but never transmit intent validated for the
+        // previous connection until the coordinator has seen the new baseline.
+        if (_wanted.hasTemp) { _staged.flags1 |= CN105_FLAG_TEMP; _staged.temp = _wanted.targetTemp; }
+        if (_wanted.hasPower) { _staged.flags1 |= CN105_FLAG_POWER; _staged.power = _wanted.power; }
+        if (_wanted.hasMode) { _staged.flags1 |= CN105_FLAG_MODE; _staged.mode = _wanted.mode; }
+        _commandsHeld = true;
+        _sendRequested = _staged.flags1 || _staged.flags2;
+        _wanted = WantedSettings{};
+    }
+    _supersededTemp = NAN;
+    ++_state.connectionRevision;
     _state.connected = false;
+    _state.encoding = SetpointRange::Encoding::Unknown;
+    _settingsBaselined = false;
+    _refusedTemp = _refusedAnswer = _unconfirmedTemp = NAN;
+    if (_rangeCapabilities.detected.freshMask) {
+        _rangeCapabilities.detected.freshMask = 0;
+        ++_rangeCapabilities.revision;
+    }
     _lastSuccessfulResponse = 0;
     taskEXIT_CRITICAL(&_mux);
+    _discovery = Discovery::Idle;
     _connectRetries = 0;
     _cycleRunning = false;
     _awaitingResponse = false;
@@ -297,8 +369,7 @@ void CN105Controller::setBaudRate(uint32_t baud) {
 }
 
 // CN105 task only. Bytes buffered at the old rate are discarded and the link
-// restarts as after a comms loss; what was learned about the unit itself
-// (tempMode, error-poll support) is kept.
+// restarts as after a comms loss; encoding and discovery freshness reset.
 void CN105Controller::applyBaudRate(uint32_t baud) {
     if (baud == _baudRate) return;
     const uint32_t oldBaud = _baudRate;
@@ -318,6 +389,116 @@ void CN105Controller::applyBaudRate(uint32_t baud) {
 // ════════════════════════════════════════════════════════════════════════════
 // Commands
 // ════════════════════════════════════════════════════════════════════════════
+
+void CN105Controller::queueCommandLocked(const CN105Command& cmd) {
+    uint8_t flags = 0;
+    if (cmd.power) { flags |= CN105_FLAG_POWER; _staged.power = *cmd.power; _wanted.power = *cmd.power; _wanted.hasPower = true; }
+    if (cmd.mode) { flags |= CN105_FLAG_MODE; _staged.mode = *cmd.mode; _wanted.mode = *cmd.mode; _wanted.hasMode = true; }
+    if (cmd.targetTemp && _wanted.hasTemp && (_wanted.sentFlags & CN105_FLAG_TEMP) &&
+        *cmd.targetTemp != _wanted.targetTemp) {
+        _supersededTemp = _wanted.targetTemp;
+        _supersededAt = _wanted.lastChange;
+    }
+    if (cmd.targetTemp) { flags |= CN105_FLAG_TEMP; _staged.temp = *cmd.targetTemp; _wanted.targetTemp = *cmd.targetTemp; _wanted.hasTemp = true; }
+    if (cmd.fanSpeed) { flags |= CN105_FLAG_FAN; _staged.fan = *cmd.fanSpeed; _wanted.fanSpeed = *cmd.fanSpeed; _wanted.hasFan = true; }
+    if (cmd.vane) { flags |= CN105_FLAG_VANE; _staged.vane = *cmd.vane; _wanted.vane = *cmd.vane; _wanted.hasVane = true; }
+    if (cmd.wideVane) { _staged.flags2 |= CN105_FLAG2_WVANE; _staged.wideVane = *cmd.wideVane; _wanted.wideVane = *cmd.wideVane; _wanted.hasWideVane = true; }
+    _staged.flags1 |= flags;
+    if (flags || cmd.wideVane) {
+        _wanted.hasBeenSent = false;
+        _wanted.sentFlags &= ~flags;
+        _wanted.lastChange = uptime_ms();
+        _sendRequested = true;
+        _rangeAwareCommand = true;
+        _commandConnection = _state.connectionRevision;
+        _commandEncoding = _state.encoding;
+    }
+}
+
+void CN105Controller::cancelWantedLocked(uint8_t flags1, uint8_t flags2) {
+    if (flags1 & CN105_FLAG_TEMP) {
+        // A transmitted old SET can still be echoed after cancellation. Keep
+        // only attribution; canceled intent must not be retried on reconnect.
+        if (_wanted.hasTemp && (_wanted.sentFlags & CN105_FLAG_TEMP)) {
+            _supersededTemp = _wanted.targetTemp;
+            _supersededAt = _wanted.lastChange;
+        }
+        _wanted.hasTemp = false;
+    }
+    if (flags1 & CN105_FLAG_POWER) _wanted.hasPower = false;
+    if (flags1 & CN105_FLAG_MODE) _wanted.hasMode = false;
+    if (flags1 & CN105_FLAG_FAN) _wanted.hasFan = false;
+    if (flags1 & CN105_FLAG_VANE) _wanted.hasVane = false;
+    if (flags2 & CN105_FLAG2_WVANE) _wanted.hasWideVane = false;
+    _wanted.sentFlags &= ~flags1;
+}
+
+bool CN105Controller::queueAutoTarget(float targetC, const CN105State& observed,
+                                      uint32_t externalRevision) {
+    taskENTER_CRITICAL(&_mux);
+    const bool current = !_commandsHeld && _state.connected &&
+        _state.encoding != SetpointRange::Encoding::Unknown &&
+        _state.connectionRevision == observed.connectionRevision &&
+        _state.settingsRevision == observed.settingsRevision && _state.encoding == observed.encoding &&
+        _externalAutoChanges == externalRevision;
+    if (current) {
+        CN105Command cmd;
+        cmd.targetTemp = targetC;
+        queueCommandLocked(cmd);
+    }
+    taskEXIT_CRITICAL(&_mux);
+    return current;
+}
+
+void CN105Controller::holdCommands() {
+    std::lock_guard<std::mutex> transmitLock(_transmitMutex);
+    taskENTER_CRITICAL(&_mux);
+    _commandsHeld = true;
+    taskEXIT_CRITICAL(&_mux);
+}
+
+bool CN105Controller::commandsHeld() const {
+    taskENTER_CRITICAL(&_mux);
+    const bool held = _commandsHeld;
+    taskEXIT_CRITICAL(&_mux);
+    return held;
+}
+
+CN105Command CN105Controller::heldCommand() const {
+    taskENTER_CRITICAL(&_mux);
+    CN105Command cmd;
+    if (_staged.flags1 & CN105_FLAG_POWER) cmd.power = _staged.power;
+    if (_staged.flags1 & CN105_FLAG_MODE) cmd.mode = _staged.mode;
+    if (_staged.flags1 & CN105_FLAG_TEMP) cmd.targetTemp = _staged.temp;
+    if (_staged.flags1 & CN105_FLAG_FAN) cmd.fanSpeed = _staged.fan;
+    if (_staged.flags1 & CN105_FLAG_VANE) cmd.vane = _staged.vane;
+    if (_staged.flags2 & CN105_FLAG2_WVANE) cmd.wideVane = _staged.wideVane;
+    taskEXIT_CRITICAL(&_mux);
+    return cmd;
+}
+
+void CN105Controller::resumeCommands(const CN105Command& cmd, const CN105State& validated) {
+    taskENTER_CRITICAL(&_mux);
+    // Replacing the held batch also retires wanted fields removed from it.
+    // In-flight fields not canceled by this command keep their confirmation state.
+    uint8_t canceled = 0;
+    if (!cmd.power) canceled |= _staged.flags1 & CN105_FLAG_POWER;
+    if (!cmd.mode) canceled |= _staged.flags1 & CN105_FLAG_MODE;
+    if (!cmd.targetTemp) canceled |= _staged.flags1 & CN105_FLAG_TEMP;
+    if (!cmd.fanSpeed) canceled |= _staged.flags1 & CN105_FLAG_FAN;
+    if (!cmd.vane) canceled |= _staged.flags1 & CN105_FLAG_VANE;
+    if (cmd.power && !*cmd.power) canceled |= CN105_FLAG_POWER | CN105_FLAG_MODE | CN105_FLAG_TEMP;
+    if (cmd.mode && *cmd.mode == CN105_MODE_FAN && !cmd.targetTemp) canceled |= CN105_FLAG_TEMP;
+    cancelWantedLocked(canceled, cmd.wideVane ? 0 : _staged.flags2);
+    _staged = PendingCommand{};
+    _sendRequested = false;
+    queueCommandLocked(cmd);
+    _commandConnection = validated.connectionRevision;
+    _commandEncoding = validated.encoding;
+    _commandsHeld = cmd.targetTemp && (_state.connectionRevision != validated.connectionRevision ||
+        _state.encoding != validated.encoding || validated.encoding == SetpointRange::Encoding::Unknown);
+    taskEXIT_CRITICAL(&_mux);
+}
 
 void CN105Controller::setPower(bool on) {
     LOG_INFO("CMD: setPower(%s)", on ? "ON" : "OFF");
@@ -449,10 +630,10 @@ float CN105Controller::quantizeRemoteTemp(float tempC) {
 }
 
 float CN105Controller::quantizeSetpoint(float tempC) const {
-    float clamped = std::clamp(tempC, CN105_TEMP_MIN, CN105_TEMP_MAX);
-    float rounded = roundf(clamped * 2.0f) / 2.0f;
-    // Legacy integer encoding drops the half degree (see sendSetPacket)
-    return _tempMode ? rounded : (float)(int)rounded;
+    taskENTER_CRITICAL(&_mux);
+    const auto encoding = _state.encoding;
+    taskEXIT_CRITICAL(&_mux);
+    return quantizeSetpointFor(std::clamp(tempC, CN105_TEMP_MIN, CN105_TEMP_MAX), encoding);
 }
 
 void CN105Controller::sendRemoteTempPacket(float tempC) {
@@ -561,11 +742,10 @@ void CN105Controller::sendSetPacket(const PendingCommand &cmd) {
     }
 
     if (cmd.flags1 & CN105_FLAG_TEMP) {
-        // quantizeSetpoint is the single source of truth for what the unit
-        // will end up at (and report back) — keep the encoding below in step
-        // with it.
-        float q = quantizeSetpoint(cmd.temp);
-        if (_tempMode) {
+        // Range-aware commands have already been normalized. Retain only
+        // wire-grid conversion here; do not reapply the compatibility clamp.
+        float q = quantizeSetpointFor(cmd.temp, _state.encoding);
+        if (_state.encoding == SetpointRange::Encoding::Enhanced) {
             // Enhanced mode: byte 19 carries 0.5C precision, byte 10 = 0
             pkt[10] = 0x00;
             pkt[19] = (uint8_t)((q * 2.0f) + 128.0f);
@@ -573,7 +753,7 @@ void CN105Controller::sendSetPacket(const PendingCommand &cmd) {
             // Legacy mode: byte 10 carries integer temp, byte 19 = 0
             pkt[10] = (uint8_t)(31 - (int)q);
         }
-        LOG_INFO("SET temp=%.1f%sC (tempMode=%s)", q, "\xC2\xB0", _tempMode ? "enhanced" : "legacy");
+        LOG_INFO("SET temp=%.1f%sC (tempMode=%s)", q, "\xC2\xB0", _state.encoding == SetpointRange::Encoding::Enhanced ? "enhanced" : "legacy");
     }
 
     if (cmd.flags1 & CN105_FLAG_FAN) {
@@ -693,10 +873,17 @@ void CN105Controller::processPacket(const uint8_t *pkt, uint8_t len) {
         case CN105_PKT_CONNECT_OK:
             LOG_INFO("Connected to heat pump");
             taskENTER_CRITICAL(&_mux);
+            ++_state.connectionRevision;
             _state.connected = true;
+            _state.encoding = SetpointRange::Encoding::Unknown;
+            if (_rangeCapabilities.detected.freshMask) {
+                _rangeCapabilities.detected.freshMask = 0;
+                ++_rangeCapabilities.revision;
+            }
             _state.lastUpdate = uptime_ms();
             _lastSuccessfulResponse = _state.lastUpdate;
             taskEXIT_CRITICAL(&_mux);
+            _discovery = Discovery::Idle;
             _connectRetries = 0;
             _cycleRunning = false;
             _awaitingResponse = false;
@@ -721,6 +908,15 @@ void CN105Controller::processPacket(const uint8_t *pkt, uint8_t len) {
             _state.lastUpdate = uptime_ms();
             _lastSuccessfulResponse = _state.lastUpdate;
             taskEXIT_CRITICAL(&_mux);
+            break;
+
+        case 0x7B:
+            if (_discovery == Discovery::Waiting &&
+                (uint32_t)(uptime_ms() - _discoverySentMs) < CN105_RESPONSE_TIMEOUT &&
+                pkt[4] == 16 && len == 22 && pkt[5] == 0xC9) {
+                _discovery = Discovery::Done;
+                handleIdentifyResponse(&pkt[5], pkt[4]);
+            }
             break;
 
         case CN105_PKT_INFO_RESP: {
@@ -810,14 +1006,16 @@ void CN105Controller::handleInfoResponse(const uint8_t *data, uint8_t dataLen) {
 
                 if (dataLen >= 12 && data[11] != 0) {
                     next.targetTemp = ((float)data[11] - 128.0f) / 2.0f;
-                    _tempMode = true;  // Unit supports enhanced temp encoding
+                    next.encoding = SetpointRange::Encoding::Enhanced;
                 } else {
                     next.targetTemp = 31.0f - (float)data[5];
+                    next.encoding = SetpointRange::Encoding::Legacy;
                 }
                 LOG_DEBUG("SETTINGS: power=%s mode=%s fan=%s vane=%s wvane=%s target=%.1f%sC",
                           next.power ? "ON" : "OFF", modeToLogStr(next.mode),
                           fanToLogStr(next.fanSpeed), vaneToLogStr(next.vane),
                           wideVaneToLogStr(next.wideVane), next.targetTemp, "\xC2\xB0");
+                ++next.settingsRevision;
                 settingsDecoded = true;
             }
             break;
@@ -899,6 +1097,9 @@ void CN105Controller::handleInfoResponse(const uint8_t *data, uint8_t dataLen) {
     // controller's write. A field is ours while its latest value has been
     // sent (per field: sentFlags) and is still inside the grace window.
     const bool wasBaselined = _settingsBaselined;
+    if (settingsDecoded && (next.targetTemp != _state.targetTemp || next.mode != _state.mode)) {
+        _refusedTemp = _refusedAnswer = _unconfirmedTemp = NAN;
+    }
     if (settingsDecoded) {
         if (_settingsBaselined) {
             const bool autoNow    = next.power && next.mode == CN105_MODE_AUTO;
@@ -906,7 +1107,8 @@ void CN105Controller::handleInfoResponse(const uint8_t *data, uint8_t dataLen) {
             const bool tempMoved  = fabsf(next.targetTemp - _state.targetTemp) > 0.01f;
             const bool inGrace    = (now - _wanted.lastChange) < CN105_GRACE_SAFETY_MS;
             const uint8_t sent    = _wanted.sentFlags;
-            const bool ourTemp    = _wanted.hasTemp && (sent & CN105_FLAG_TEMP) && inGrace;
+            const bool ourTemp    = (_wanted.hasTemp && (sent & CN105_FLAG_TEMP) && inGrace) ||
+                (next.targetTemp == _supersededTemp && (now - _supersededAt) < CN105_GRACE_SAFETY_MS);
             const bool ourEntry   = ((_wanted.hasMode && (sent & CN105_FLAG_MODE)) ||
                                      (_wanted.hasPower && (sent & CN105_FLAG_POWER))) && inGrace;
             if (autoNow && ((!autoBefore && !ourEntry) || (autoBefore && tempMoved && !ourTemp)))
@@ -937,7 +1139,7 @@ void CN105Controller::handleInfoResponse(const uint8_t *data, uint8_t dataLen) {
     // field staged meanwhile cannot hold a matching answer open (and the
     // refusal check below can never see our own value as a refusal).
     if (settingsDecoded && _wanted.hasTemp && (_wanted.sentFlags & CN105_FLAG_TEMP) &&
-        fabsf(next.targetTemp - quantizeSetpoint(_wanted.targetTemp)) < 0.3f) {
+        fabsf(next.targetTemp - quantizeSetpointFor(_wanted.targetTemp, next.encoding)) < 0.3f) {
         _wanted.hasTemp = false;
         _unconfirmedTemp = NAN;
     }
@@ -949,7 +1151,7 @@ void CN105Controller::handleInfoResponse(const uint8_t *data, uint8_t dataLen) {
     // one. The first answer of a connection has nothing to compare against.
     if (settingsDecoded && _wanted.hasTemp && (_wanted.sentFlags & CN105_FLAG_TEMP) &&
         (now - _wanted.lastChange) >= CN105_GRACE_SAFETY_MS) {
-        const float q = quantizeSetpoint(_wanted.targetTemp);
+        const float q = quantizeSetpointFor(_wanted.targetTemp, next.encoding);
         const bool moved = fabsf(next.targetTemp - _wanted.tempAtSend) > 0.01f;
         if (wasBaselined) {
             if (moved || q == _unconfirmedTemp) {
@@ -963,5 +1165,41 @@ void CN105Controller::handleInfoResponse(const uint8_t *data, uint8_t dataLen) {
         }
         _wanted.hasTemp = false;
     }
+    taskEXIT_CRITICAL(&_mux);
+}
+
+void CN105Controller::handleIdentifyResponse(const uint8_t *data, uint8_t dataLen) {
+    if (dataLen != 16 || !(data[8] & 0x04)) return;
+    // Decode outside the lock. The shared policy decides whether each raw
+    // pair has a usable intersection with this connection's encoding/grid.
+    SetpointRange::Detection candidates{};
+    SetpointRange::Preferences preferences{};
+    static const uint8_t offsets[] = {12, 10, 14};  // Heat, Cool/Dry, Auto
+    for (uint8_t mode = 0; mode < 3; ++mode) {
+        preferences.mode[mode].selection = SetpointRange::Selection::Automatic;
+        const uint8_t low = data[offsets[mode]], high = data[offsets[mode] + 1];
+        // Enhanced endpoint bytes use 128 as the encoding origin; zero,
+        // the disable marker, and 0xFF do not describe an available endpoint.
+        if (low <= 128 || high <= 128 || low == 255 || high == 255 || low >= high) continue;
+        candidates.mode[mode] = {static_cast<int16_t>(low - 128), static_cast<int16_t>(high - 128)};
+        candidates.validMask |= 1 << mode;
+        candidates.freshMask |= 1 << mode;
+    }
+    const auto resolved = SetpointRange::resolve(preferences, candidates, _state.encoding, _state.encoding, 0);
+    taskENTER_CRITICAL(&_mux);
+    bool changed = false;
+    for (uint8_t mode = 0; mode < 3; ++mode) {
+        if (resolved.mode[mode].source != SetpointRange::Source::Fresh) continue;
+        const uint8_t bit = 1 << mode;
+        auto &detected = _rangeCapabilities.detected;
+        const auto previous = detected.mode[mode];
+        const auto range = candidates.mode[mode];
+        if (!(detected.validMask & bit) || !(detected.freshMask & bit) ||
+            previous.min2 != range.min2 || previous.max2 != range.max2) changed = true;
+        detected.mode[mode] = range;
+        detected.validMask |= bit;
+        detected.freshMask |= bit;
+    }
+    if (changed) ++_rangeCapabilities.revision;
     taskEXIT_CRITICAL(&_mux);
 }

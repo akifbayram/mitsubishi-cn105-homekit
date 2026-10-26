@@ -30,15 +30,9 @@ namespace AutoBand {
 /// True while this device last wrote the Auto operating point.
 bool deviceOwns();
 
-/// A band edit or Auto selection from HomeKit, the web UI or a dial.
-void claimDevice();
-
-/// The unit's own controller set this Auto setpoint: hand the range over
-/// and import it as [S-1, S+1], clamped into the setpoint range.
-void importFromUnit(float setpointC);
-
 /// Main-loop poll. Hands over on each external Auto change the controller
-/// has counted since the last call.
+/// has counted since the last call. The shared coordinator defers handover
+/// while a custom-range correction is awaiting confirmation.
 void loop(CN105Controller &cn105);
 
 }  // namespace AutoBand

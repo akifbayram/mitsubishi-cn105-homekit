@@ -35,6 +35,7 @@
 #include "link_sensor.h"
 #include "room_avg.h"
 #include "auto_band.h"
+#include "setpoint_control.h"
 
 #ifdef BLE_ENABLE
 #include "ble_sensor.h"
@@ -152,6 +153,7 @@ extern "C" void app_main(void)
 
     // ── 3. Load persistent settings from NVS ─────────────────────────────
     settings.begin();
+    SetpointControl::begin(cn105);
 
     // ── 4. Logging init + apply saved log level ──────────────────────────
     logging_init();
@@ -360,9 +362,12 @@ extern "C" void app_main(void)
             }, "repl_init", 4096, nullptr, 2, nullptr) == pdPASS;
         }
 
-        // ── Auto band ownership: a wall-controller write hands the range to
-        //    the unit before the engine below could correct it ─────────────
-        AutoBand::loop(cn105);
+        // ── Correct manual-range violations before Auto ownership handover
+        //    and steering; this also runs before HomeKit starts. ────────────
+        if (!safeMode) {
+            SetpointControl::loop();
+            AutoBand::loop(cn105);
+        }
 
         // ── Push state to HomeKit (throttled internally) ─────────────────
         // The thermostat tick also enforces the AUTO temperature band for

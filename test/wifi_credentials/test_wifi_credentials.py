@@ -382,7 +382,9 @@ assert state, "cannot find trial state"
 settings_source = (ROOT / "main/settings.cpp").read_text()
 latch = re.search(r"^static std::atomic<bool> s_factoryResetting[^;]+;", settings_source, re.M)
 assert latch, "cannot find factory reset latch"
-reset_state = latch[0] + "\n" + "\n".join(function(n, settings_source) for n in
+write_mutex = re.search(r"^static std::mutex s_settingsWriteMutex;", settings_source, re.M)
+assert write_mutex, "cannot find settings write/reset mutex"
+reset_state = latch[0] + "\n" + write_mutex[0] + "\n" + "\n".join(function(n, settings_source) for n in
     ["SettingsStore::beginFactoryReset", "SettingsStore::isFactoryResetting"])
 functions = ["wifi_event_handler", "applyStaConfig", "WifiManager::connect",
              "WifiManager::getTrialState", "WifiManager::loop", "WifiManager::getSSID",

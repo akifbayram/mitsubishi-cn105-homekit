@@ -10,6 +10,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import shlex
 
 HERE = Path(__file__).resolve().parent
 MAIN = HERE.parent.parent / "main"
@@ -40,6 +41,8 @@ def function(src, name):
 
 HOST = r'''
 #include <algorithm>
+#include <climits>
+#include <cctype>
 #include <cmath>
 #include <cstring>
 #include <cstdint>
@@ -49,10 +52,14 @@ HOST = r'''
 #include <vector>
 #include <deque>
 #include <atomic>
+#include <mutex>
+#include <thread>
+#include <optional>
+#include <functional>
 #include "sl2_proto.h"
 #include "cn105_baud.h"
 #include "uart_interface.h"
-// The host tests read CN105Controller::_tempMode and _wanted directly, so private is opened here; keep this define below the system includes.
+// Tests inspect mailbox/protocol internals; keep private below system includes.
 #define private public
 using uart_port_t=int;
 using portMUX_TYPE=int;
@@ -76,12 +83,15 @@ static const char* subModeToLogStr(uint8_t){return "";}
 static const char* stageToLogStr(uint8_t){return "";}
 static const char* autoSubModeToLogStr(uint8_t){return "";}
 '''
-CN105 = HOST + clean("cn105_protocol.h") + clean("cn105_protocol.cpp")
+HOST += "\n" + function((MAIN / "esp_utils.h").read_text(), "fnv1a32") + "\n"
+CN105 = HOST + clean("setpoint_range.h") + clean("cn105_protocol.h") + clean("cn105_protocol.cpp")
 PUMP = r'''
 class Pump : public UartInterface {
 public:
  std::deque<uint8_t> rx;
- int infos=0,connects=0,sets=0,remoteSets=0,remoteClears=0,dropTemp=0;
+ int infos=0,connects=0,sets=0,remoteSets=0,remoteClears=0,dropTemp=0,identifies=0;
+ std::vector<std::vector<uint8_t>> sent;
+ std::vector<uint8_t> identifyReply;
  bool responding=true;
  uint32_t readCostMs=0;
  uint8_t mode=CN105_MODE_AUTO;bool power=true;
@@ -98,7 +108,9 @@ public:
   p[21]=CN105Controller::calcChecksum(p,21);
   for(uint8_t b:p)rx.push_back(b);
  }
- void write(const uint8_t* b,size_t) override {
+ void write(const uint8_t* b,size_t n) override {
+  sent.emplace_back(b,b+n);
+  if(b[1]==0x5b){++identifies;if(responding)for(uint8_t v:identifyReply)rx.push_back(v);}
   if(b[1]==0x5a){++connects;if(responding)packet(CN105_PKT_CONNECT_OK,0);}
   if(b[1]==CN105_PKT_INFO_REQ){++infos;if(responding)packet(CN105_PKT_INFO_RESP,b[5]);}
   if(b[1]==CN105_PKT_SET){
@@ -190,7 +202,6 @@ static bool sl2_link_forget_dial(BondedDials* l,const uint8_t mac[6]) {
  return false;
 }
 '''
-LINK += "\n" + function((MAIN / "esp_utils.h").read_text(), "fnv1a32")
 LINK += "\n" + "\n".join(function(adapter, n) for n in
     ["copy_name", "room_catalog_build", "room_catalog_hash", "room_catalog_revision", "h_room_source_set",
      "room_source_reconcile_catalog"])
@@ -211,17 +222,38 @@ struct DeviceSettings{
  bool useFahrenheit=false,autoOwnerUnit=false;
  char deviceName[32]="Test";
 };
-struct Settings{DeviceSettings s;int saves=0;DeviceSettings& get(){return s;}void save(){++saves;}}settings;
+struct SetpointSettings {
+ SetpointRange::Preferences preferences{};SetpointRange::Band band{40,50};bool autoOwnerUnit=false;
+ SetpointRange::Encoding lastEncoding=SetpointRange::Encoding::Unknown;
+};
+struct SettingsStore {
+ DeviceSettings s;int saves=0;SetpointSettings policy;SetpointRange::Detection detected{};
+ DeviceSettings& get(){return s;}void save(){++saves;}
+ SetpointSettings setpointSettings()const{auto p=policy;p.band={(int16_t)std::lround(s.heatingThreshold*2),(int16_t)std::lround(s.coolingThreshold*2)};p.autoOwnerUnit=s.autoOwnerUnit;return p;}
+ bool setpointSettingsAvailable()const{return true;}
+ bool saveSetpointSettings(const SetpointSettings& p){if(p.band.heat2!=s.heatingThreshold*2||p.band.cool2!=s.coolingThreshold*2||p.autoOwnerUnit!=s.autoOwnerUnit)++saves;policy=p;s.heatingThreshold=p.band.heat2/2.f;s.coolingThreshold=p.band.cool2/2.f;s.autoOwnerUnit=p.autoOwnerUnit;return true;}
+ SetpointRange::Detection detectedRanges()const{return detected;}
+ bool saveDetectedRanges(const SetpointRange::Detection& p){detected=p;return true;}
+ static bool isFactoryResetting(){return false;}
+}settings;
 namespace WifiManager{bool isConnected(){return true;}bool hasCredentials(){return true;}}
 struct Recovery{bool isAPActive(){return false;}bool wifiChangeFailed(){return false;}}wifiRecovery;
 static uint32_t time_sync_epoch(){return 0;}
 static CN105Controller* s_ctrl;
 ''' + function(strings, "modeToCapBit") + "\n" + function(strings, "mode_mask_allows")
+# A second scheduling boundary models a CN105 response after the coordinator
+# has made its steering decision but before the driver's conditional staging.
+AUTO += "\nstatic std::function<void()> beforeAutoQueue;\n"
+auto_control = clean("setpoint_control.cpp")
+queue_call = "controller->queueAutoTarget(target, resolvedState, external);"
+assert auto_control.count(queue_call) == 1
+auto_control = auto_control.replace(queue_call,
+    "if (beforeAutoQueue) { auto hook = beforeAutoQueue; beforeAutoQueue = nullptr; hook(); }\n" + queue_call)
+AUTO += "\n" + clean("setpoint_control.h") + auto_control
 # The real ownership module: the dial adapter below and the engine both call it.
 AUTO += "\n" + clean("auto_band.h") + clean("auto_band.cpp").replace('static const char *TAG', 'static const char *auto_band_TAG')
 AUTO += "\n" + adapter[adapter.index("static uint8_t mode_to_sl2"):adapter.index("/* A bonded dial reported")]
 AUTO += "\n" + function(adapter, "h_get_caps")
-AUTO += "\n" + block(thermo, thermo.index("struct AutoTarget")) + ";\n" + function(thermo, "resolveAutoTarget")
 # Run the complete thermostat tick with absent HAP handles, as on an offline
 # boot. Any accidental SDK access before HomeKit exists fails the test.
 AUTO += r'''
@@ -235,8 +267,15 @@ namespace RoomAvg {
 }
 '''
 AUTO += thermo[thermo.index("static hap_char_t"):thermo.index("// ── External controller reference")]
-AUTO += "\n" + "\n".join(function(thermo, n) for n in
-    ["cn105ToHKTargetState", "deriveCurrentState", "homekit_sync_thermostat"])
+# Deterministic scheduling boundary: run a newer operation immediately before
+# the production thermostat delegates steering. No production behavior is mocked.
+AUTO += "\nstatic std::function<void()> beforeAutoSteering;\nstatic void homekit_reconcile_temperature_metadata(CN105Controller&) {}\n"
+steering = function(thermo, "homekit_sync_thermostat")
+steering_call = "SetpointControl::steerAuto();"
+assert steering.count(steering_call) == 1
+steering = steering.replace(steering_call,
+    "if (beforeAutoSteering) { auto hook = beforeAutoSteering; beforeAutoSteering = nullptr; hook(); }\n" + steering_call)
+AUTO += "\n" + "\n".join(function(thermo, n) for n in ["cn105ToHKTargetState", "deriveCurrentState"]) + "\n" + steering
 AUTO += "\nstatic void run_auto_sync(CN105Controller& cn105){homekit_sync_thermostat(cn105);}\n"
 # Execute the production main-loop dispatch, not a duplicate of its gating.
 app = (MAIN / "main.cpp").read_text()
@@ -247,12 +286,13 @@ static void homekit_sync_fan(CN105Controller&){CHECK(homekitStarted);}
 static void homekit_sync_switches(CN105Controller&){CHECK(homekitStarted);}
 static void run_main_control_tick(CN105Controller& cn105){
 '''
-AUTO += app[app.index("        // ── Push state to HomeKit"):app.index("        // ── ESP-NOW remote")]
+AUTO += app[app.index("        // ── Correct manual-range violations"):app.index("        // ── ESP-NOW remote")]
 AUTO += "\n}\n" + PUMP
 
 # H2 compiles SettingsStore and HomeKit setup intact against NVS/HAP boundaries.
 # The reset stub queues work: storage completion is delivered separately.
 HOMEKIT = HOST + (HERE / "homekit_stubs.inc").read_text()
+HOMEKIT += "\n" + clean("setpoint_range.h")
 HOMEKIT += "\n" + clean("settings.h") + "\n" + clean("settings.cpp").replace('static const char *TAG', 'static const char *settings_TAG')
 HOMEKIT += "\n" + clean("homekit_setup.h") + "\n" + clean("homekit_setup.cpp")
 HOMEKIT += '\n#include "web_security.h"\n'
@@ -297,9 +337,142 @@ ws = (MAIN / "web_ws.cpp").read_text()
 start = ws.index('    bool hkReady = homekit_is_started();')
 HOMEKIT += ws[start:ws.index('    section();', start)] + "\nreturn buf;}\n"
 
-SOURCES = {"cn105_polling": CN105 + PUMP, "cn105_float_setters": CN105 + PUMP,
+CONTROL = CN105 + (HERE / "homekit_stubs.inc").read_text().replace("constexpr float CN105_TEMP_MIN=16.0f, CN105_TEMP_MAX=30.5f;", "")
+CONTROL += "\n" + clean("settings.h") + clean("settings.cpp").replace('static const char *TAG', 'static const char *settings_TAG')
+if (MAIN / "setpoint_control.h").exists():
+    CONTROL += "\n" + function(strings, "modeToCapBit") + "\n" + function(strings, "mode_mask_allows")
+    CONTROL += "\n" + clean("setpoint_control.h") + clean("setpoint_control.cpp")
+CONTROL += r'''
+union hap_val_t {uint32_t u;float f;bool b;};
+struct hap_char_t {const char* uuid;hap_val_t value{};int updates=0;};
+struct hap_write_data_t {hap_char_t* hc;hap_val_t val;int* status;};
+static const char* hap_char_get_type_uuid(hap_char_t* c){return c->uuid;}
+static void hap_char_update_val(hap_char_t* c,const hap_val_t* v){c->value=*v;++c->updates;}
+constexpr int HAP_FAIL=-1,HAP_STATUS_SUCCESS=0,HAP_STATUS_VAL_INVALID=1,HAP_STATUS_RES_BUSY=2,HAP_STATUS_RES_ABSENT=3;
+static CN105Controller* g_homekitCtrl;
+static hap_char_t *s_heatThresh=nullptr,*s_coolThresh=nullptr;
+// The policy-only lane omits HAP service creation. The full ranges lane below
+// executes this metadata boundary with production code.
+static void install_temperature_metadata(CN105Controller*) {}
+'''
+for uuid in ["CONFIGURED_NAME", "TEMPERATURE_DISPLAY_UNITS", "TARGET_HEATING_COOLING_STATE", "TARGET_TEMPERATURE", "HEATING_THRESHOLD_TEMPERATURE", "COOLING_THRESHOLD_TEMPERATURE", "ACTIVE", "ROTATION_SPEED", "ON"]:
+    CONTROL += f'\n#define HAP_CHAR_UUID_{uuid} "{uuid}"\n'
+CONTROL += "\n" + function(thermo, "hkTargetStateToCN105Mode") + "\n" + function(thermo, "thermostat_write_cb")
+fan = (MAIN / "homekit_fan.cpp").read_text()
+switches = (MAIN / "homekit_switches.cpp").read_text()
+CONTROL += "\n" + "\n".join(function(fan, name) for name in ["percentToCN105Fan", "fan_write_cb", "fan_auto_write_cb"])
+if "static bool reject_masked_on" in switches:
+    CONTROL += "\n" + function(switches, "reject_masked_on")
+CONTROL += "\n" + "\n".join(function(switches, name) for name in ["fan_mode_write_cb", "dry_mode_write_cb"])
+CONTROL += '\n#include <cstdarg>\n#include <cctype>\n#include <memory>\n#include <cJSON.h>\n' + clean("json_utils.h")
+CONTROL += ws[ws.index('// ── range-config:start'):ws.index('// ── range-config:end')]
+CONTROL += "\n" + "\n".join(function(strings, name) for name in ["strToMode", "strToFan", "strToVane", "strToWideVane"])
+CONTROL += r'''
+static bool webError=false;
+static int httpd_req_to_sockfd(void*){return 0;}
+static void sendWsText(int,const char*){webError=true;}
+static void applyWeb(const char*msg){void* req=nullptr;webError=false;auto parsed=webParseObject(msg);if(!parsed){webError=true;return;}
+'''
+CONTROL += ws[ws.index("        // Decode the complete climate"):ws.index("        // Night gate:")] + "\n}\n"
+CONTROL += PUMP
+
+# Exercise CAPS construction, the complete adapter loop refresh gate, and the
+# production core's sequence persistence against the shared NVS/UART boundaries.
+LINK_RANGES = CONTROL[:CONTROL.index("union hap_val_t")]
+LINK_RANGES += r'''
+#include "sl2_link.h"
+#include "sl2_rxq.h"
+#include "solar.h"
+class EspnowLink {public:void loop();};
+static CN105Controller* s_ctrl;
+static sl2_link_t s_link{};
+static sl2_rxq_t s_rxq{};
+static bool s_started=true;
+static bool s_reqForgetAll=false,s_reqPairStart=false,s_reqPairCancel=false,s_reqForgetRestart=false;
+#define PAIR_WINDOW_S 60
+#define PIN_LED_DATA -1
+#define pdMS_TO_TICKS(ms) (ms)
+static void vTaskDelay(int) {CHECK(false);}
+static void esp_restart() {CHECK(false);}
+static void room_source_reconcile_catalog(uint32_t) {}
+static void room_source_drop_link() {}
+static void drain_forget_dials() {}
+static void snapshot_status() {}
+namespace LinkSensor {static void forget(const uint8_t*) {}}
+namespace WifiManager {static bool isConnected(){return true;}static bool hasCredentials(){return true;}}
+struct Recovery {bool isAPActive(){return false;}bool wifiChangeFailed(){return false;}} wifiRecovery;
+static uint32_t time_sync_epoch(){return 0;}
+void sl2_link_loop(sl2_link_t*) {}
+void sl2_link_pair_start(sl2_link_t*,uint32_t) {CHECK(false);}
+void sl2_link_pair_cancel(sl2_link_t*) {CHECK(false);}
+bool sl2_link_forget_all(sl2_link_t*) {CHECK(false);return false;}
+void sl2_link_on_recv(sl2_link_t*,const uint8_t*,const uint8_t*,const uint8_t*,int) {CHECK(false);}
+'''
+LINK_RANGES += "\n" + clean("auto_band.h")
+LINK_RANGES += adapter[adapter.index("// caps-change watch:"):adapter.index("/* Serin root Ed25519")]
+LINK_RANGES += "\n" + adapter[adapter.index("static uint8_t mode_to_sl2"):adapter.index("/* A bonded dial reported")]
+LINK_RANGES += "\n" + function(adapter, "h_get_caps")
+LINK_RANGES += '\nstatic const char* SL2_NVS_NS="serinlink";\n'
+LINK_RANGES += "\n" + "\n".join(function(adapter, n) for n in ["p_kv_get", "p_kv_set"])
+core = (MAIN / "sl2_link.c").read_text()
+LINK_RANGES += "\n" + "\n".join(function(core, n) for n in ["persist_caps_seq", "mark_all_state_pending", "sl2_link_caps_changed"])
+LINK_RANGES += "\n" + adapter[adapter.index('static const char *SL2_KV_CAPS_FP'):adapter.index("/* ── EspnowLink facade")]
+LINK_RANGES += "\n" + function(adapter, "EspnowLink::loop") + PUMP
+
+# The real checked web configuration and serializer, backed by real NVS/control.
+WEB = CONTROL[:CONTROL.index("union hap_val_t")] + PUMP
+WEB += '\n#include <memory>\n#include <cJSON.h>\n'
+WEB += ws[ws.index('// ── range-config:start'):ws.index('// ── range-config:end')]
+
+WEB += '\n#include <cstdarg>\n' + clean("json_utils.h")
+WEB += "\n" + function(ws, "stateAppend")
+WEB += ws[ws.index('// ── range-state:start'):ws.index('// ── range-state:end')]
+WEB += r'''
+static std::function<void()> afterWebRangeSection;
+static std::string webRangeState(size_t cap) {
+ char storage[8192]="{\"type\":\"state\"";char*buf=storage;
+ size_t bufSz=cap,allocSz=sizeof(storage);int n=strlen(storage);
+'''
+WEB += ws[ws.index('    int kept = n;'):ws.index('    // Keep the complete profile',ws.index('    int kept = n;'))]
+WEB += "\nwebAppendRangeState(buf,bufSz,&n,&want);section();\n"
+# A scheduling boundary after capture exposes any later mutable policy reads.
+WEB += "\nif(afterWebRangeSection){auto hook=afterWebRangeSection;afterWebRangeSection=nullptr;hook();}\n"
+if '    // Dual setpoint thresholds.' in ws:
+    WEB += "\nconst auto& cfg=settings.get();\n"
+    WEB += ws[ws.index('    // Dual setpoint thresholds.'):ws.index('    // Night gate location.')]
+
+WEB += ws[ws.index('    n = kept;',ws.index('    // Close on the last section')):ws.index('    if (dropped) {',ws.index('    n = kept;',ws.index('    // Close on the last section')))]
+WEB += "\nreturn buf;}\n"
+
+# Full production thermostat + setup, with only the HAP/HTTP/NVS boundaries replaced.
+RANGES = CONTROL[:CONTROL.index("union hap_val_t")]
+for uuid in ["CURRENT_HEATING_COOLING_STATE", "CURRENT_TEMPERATURE", "TEMPERATURE_DISPLAY_UNITS", "TARGET_HEATING_COOLING_STATE", "TARGET_TEMPERATURE", "HEATING_THRESHOLD_TEMPERATURE", "COOLING_THRESHOLD_TEMPERATURE"]:
+    RANGES += f'\n#define HAP_CHAR_UUID_{uuid} "{uuid}"\n'
+RANGES += "\n" + (HERE / "hap_ranges_stubs.inc").read_text()
+RANGES += "\n" + clean("homekit_setup.h") + clean("homekit_setup.cpp").replace('static const char *TAG', 'static const char *setup_TAG')
+RANGES += "\n" + clean("homekit_thermostat.cpp").replace('static const char *TAG', 'static const char *thermo_TAG') + PUMP
+
+SDK = MAIN.parent / "components/esp-homekit-sdk/components/homekit/esp_hap_core/src"
+RANGES += "\n" + (HERE / "hap_sdk_read_stubs.inc").read_text()
+RANGES += "\n" + function((SDK / "esp_hap_serv.c").read_text(), "hap_serv_def_bulk_read_cb")
+sdk_ip = (SDK / "esp_hap_ip_services.c").read_text()
+RANGES += "\n" + function(sdk_ip, "hap_prepare_char_db")
+RANGES += "\n" + function(sdk_ip, "hap_prepare_serv_db")
+# Extract the actual GET /characteristics response gates, including error status.
+# Request parsing/session authentication are outside this read-status boundary.
+start = sdk_ip.index('        if (hc->permission & HAP_CHAR_PERM_SPECIAL_READ)', sdk_ip.index('/* Loop through the characteristics and include their data'))
+end = sdk_ip.index('\n', sdk_ip.index('}', sdk_ip.index('json_gen_obj_set_int(&jstr, "status"', start)))
+RANGES += r'''
+static json_gen_str_t sdk_characteristic(hap_char_t*hc){
+ hap_status_t status=HAP_STATUS_SUCCESS;hap_read_data_t read_arr[]={{hc,&status}};
+ bool read_err=hap_serv_def_bulk_read_cb(read_arr,1,nullptr,nullptr)!=HAP_SUCCESS;
+ bool include_status=false;int i=0;json_gen_str_t jstr;jstr.iid=hc->iid;
+''' + sdk_ip[start:end] + "\nreturn jstr;}\n"
+
+SOURCES = {"link_ranges": LINK_RANGES,"web_ranges": WEB,"homekit_ranges": RANGES,"setpoint_control": CONTROL, "cn105_polling": CN105 + PUMP, "cn105_float_setters": CN105 + PUMP,
+           "cn105_capabilities": CN105 + PUMP,
            "link_source": LINK, "ble_handoff": BLE, "auto_band": AUTO,
-           "factory_reset": FACTORY, "homekit_pairing": HOMEKIT}
+           "factory_reset": FACTORY, "homekit_pairing": HOMEKIT, "setpoint_settings": HOMEKIT}
 failed = False
 with tempfile.TemporaryDirectory(prefix="cn105-native-delivery-") as directory:
     build = Path(directory)
@@ -309,10 +482,13 @@ with tempfile.TemporaryDirectory(prefix="cn105-native-delivery-") as directory:
         path = build / (name + ".cpp")
         path.write_text(source + "\n" + (HERE / ("test_" + name + ".cpp")).read_text())
         exe = build / name
-        subprocess.run(["g++", "-std=c++17", "-DUNIT_TEST", "-I" + str(MAIN), str(path), *([str(MAIN / "solar.cpp")] if name == "auto_band" else []), "-o", str(exe)], check=True)
+        subprocess.run(["g++", "-std=c++17", "-DUNIT_TEST", "-I" + str(MAIN), str(path), *([str(MAIN / "solar.cpp")] if name in ("auto_band", "link_ranges") else []),
+                        *([str(MAIN / "setpoint_range.cpp")] if name.startswith("cn105_") or name in ("link_ranges", "auto_band", "homekit_pairing", "factory_reset", "setpoint_settings", "setpoint_control", "homekit_ranges", "web_ranges") else []), *(shlex.split(subprocess.check_output(["pkg-config", "--cflags", "--libs", "libcjson"], text=True)) if name in ("web_ranges", "setpoint_control") else []), "-o", str(exe)], check=True)
         cases = re.findall(r'CASE\("([^"]+)"\)', (HERE / ("test_" + name + ".cpp")).read_text())
         for case in cases:
-            result = subprocess.run([str(exe), case])
-            print(f"{name}/{case}: {'PASS' if result.returncode == 0 else 'FAIL'}", flush=True)
-            failed |= result.returncode != 0
+            for storage_mode in (["staged", "immediate"] if name == "setpoint_settings" else [None]):
+                result = subprocess.run([str(exe), case] + ([storage_mode] if storage_mode else []))
+                label = f"/{storage_mode}" if storage_mode else ""
+                print(f"{name}/{case}{label}: {'PASS' if result.returncode == 0 else 'FAIL'}", flush=True)
+                failed |= result.returncode != 0
 sys.exit(1 if failed else 0)

@@ -46,6 +46,15 @@ bool homekit_is_started(void);
 // Differs from settings.get().modeMask after a web-UI change until restart.
 uint8_t homekit_get_boot_mode_mask(void);
 
+// Installed temperature metadata, in canonical half-degrees (target, heat, cool).
+struct HomekitTemperatureMetadata {
+    int16_t min2[3], max2[3];
+    uint8_t step2[3];
+};
+/// Called in the HAP HTTP context (or before hap_start) after installation.
+/// Reconciles metadata and service shape in a single configuration update.
+void homekit_record_temperature_metadata(const HomekitTemperatureMetadata& metadata);
+
 /// Reconcile the live HAP service shape (mode-gated services + Remote Sensor
 /// accessory presence) against the shape recorded in NVS, bumping the HAP
 /// config number on mismatch so paired Home apps refresh their cached
@@ -54,8 +63,9 @@ uint8_t homekit_get_boot_mode_mask(void);
 void homekit_reconcile_service_shape(void);
 
 /// Record the live HAP service shape in NVS WITHOUT bumping the config
-/// number. Use after a runtime mutation whose SDK call already bumped c#
-/// (hap_add_bridged_accessory does) — reconciling there would bump twice.
+/// number. Use after a runtime mutation whose SDK call already requested c#
+/// (hap_add_bridged_accessory does). This does not acknowledge temperature
+/// metadata: that requires a successful enqueue observed by reconciliation.
 void homekit_record_service_shape(void);
 
 #ifdef __cplusplus

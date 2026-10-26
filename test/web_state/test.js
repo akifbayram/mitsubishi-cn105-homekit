@@ -11,73 +11,116 @@ function snap(ui) {
 }
 function same(a, b, msg) { assert.deepStrictEqual(a, b, msg); checks++; }
 
-// ── Unit switching ─────────────────────────────────────────────────────────
-// Re-entering the F branch for sliders that already show F used to push every
-// handle through the C→F table a second time: 72 °F reads as 72 °C, the table
-// has no such row, and the nearest one is 30.5 °C = 88 °F. The slider then
-// sends that back as a real setpoint. Both branches must be idempotent, and
-// the °C/°F buttons must ignore a tap on the unit already in use.
-
-// The shipped page starts in Celsius, so a tap on °C is the reachable case.
-same(DEFAULTS.target.min, '16', 'tempSlider ships in Celsius');
-
+// Units change labels while every slider position stays in canonical Celsius.
+same(DEFAULTS.target.min, '16', 'the page starts in Celsius');
 {
   const ui = newUi('C');
   const before = snap(ui);
   ui.tap('C');
-  same(snap(ui), before, 'tapping °C while already °C moves no slider');
-  assert.deepStrictEqual(ui.sent, [], 'tapping the active unit sends no config');
-  assert.strictEqual(ui.cmdArmed(), false, 'tapping the active unit does not re-arm the command lock');
-  checks += 2;
-  // The same re-entry through the push path (onState re-applies at 1 Hz).
+  same(snap(ui), before, 'active unit tap changes nothing');
+  same(ui.sent, [], 'active unit tap sends nothing');
+  ui.tap('F');
+  same(snap(ui), before, 'F labels do not move canonical positions');
+  assert.strictEqual(ui.label(22),71,'native table labels remain compatible');
   ui.configureSliders();
   ui.configureSliders();
-  same(snap(ui), before, 'C branch is idempotent');
+  ui.tap('F');
+  same(snap(ui),before,'repeated updates preserve all positions');
+  same(ui.sent,[{cmd:'config',tempUnit:'F'}],'only changed unit is persisted');
 }
-
 {
   const ui = newUi('C');
+  const ranges={ftabId:0,heat:{min:10,max:31,step:0.5},cool:{min:18,max:30,step:1},auto:{min:10,max:31,step:0.5}};
+  ui.setState({mode:'heat',setpointRanges:ranges});
+  for (const c of [10,30.5,31]) {
+    ui.target.value=c;ui.heat.value=c;ui.cool.value=c;
+    for(let i=0;i<12;i++) {ui.tap('F');ui.configureSliders();ui.tap('C');}
+    same([ui.target.selectedC,ui.heat.selectedC,ui.cool.selectedC],[c,c,c],'extended endpoint survives repeated switches');
+  }
+  assert.strictEqual(ui.label(10),50,'extended profiles use linear conversion');
+  same([ui.target.min,ui.target.max,ui.target.step],['10','31','0.5'],'custom min does not rely on 61 F');
+  ui.setState({mode:'dry',setpointRanges:ranges});
+  same([ui.target.min,ui.target.max,ui.target.step],['18','30','1'],'Dry target uses Cool/Dry range');
+  same([ui.heat.min,ui.cool.max],['10','31'],'band controls retain Auto range');
+  ranges.heat={min:22.5,max:23,step:0.5};
+  ui.setState({mode:'heat',setpointRanges:ranges});
   ui.tap('F');
-  const inF = snap(ui);
-  same(inF, {
-    target: { min: '61', max: '88', step: '1', value: '71' },   // 22.0 °C
-    heat: { min: '61', max: '88', step: '1', value: '68' },     // 20.0 °C
-    cool: { min: '61', max: '88', step: '1', value: '77' }      // 25.0 °C
-  }, 'C→F converts all three sliders and re-ranges them');
-
-  ui.tap('F');
-  same(snap(ui), inF, 'tapping °F while already °F moves no slider');
-  assert.deepStrictEqual(ui.sent, [{ cmd: 'config', tempUnit: 'F' }],
-    'tapping °F twice sends one config, not two');
-  checks++;
-
-  ui.configureSliders();
-  ui.configureSliders();
-  same(snap(ui), inF, 'F branch is idempotent');
-
-  ui.tap('C');
-  same(snap(ui), {
-    target: { min: '16', max: '30.5', step: '0.5', value: '22' },
-    heat: { min: '16', max: '30.5', step: '0.5', value: '20' },
-    cool: { min: '16', max: '30.5', step: '0.5', value: '25' }
-  }, 'F→C restores the values the page started with');
+  ui.target.value=22.5;ui.configureSliders();
+  assert.strictEqual(ui.target.selectedC,22.5);
+  ui.target.value=23;ui.configureSliders();
+  assert.strictEqual(ui.target.selectedC,23);
+  ranges.ftabId=1;
+  assert.strictEqual(ui.label(10),50,'physical readback outside a native profile must not be clamped');
+  ranges.ftabId=0;
+  same([ui.label(22.5),ui.label(23)],[73,73],'shared F labels keep distinct canonical endpoints');
+}
+{
+  const {newRanges}=require('./extract.js');
+  const climate=newRanges();
+  climate.ack({ok:false,code:'outside_range',msg:'Temperature is outside the selected range'});
+  same(climate.toasts,['Temperature is outside the selected range'],'ordinary climate rejection remains visible');
+  const ui=newRanges();
+  ui.submit({cmd:'config',rangeHeatSource:'manual',rangeHeatMin:10,rangeHeatMax:31},'Saved');
+  same(ui.toasts,[],'sending does not claim persistence');
+  ui.submit({cmd:'config',rangeHeatSource:'manual',rangeHeatMin:11,rangeHeatMax:31},'Latest saved');
+  ui.ack({requestId:1,ok:true});
+  assert.strictEqual(ui.dirty(),true,'late ack cannot approve newer submission');
+  same(ui.toasts,[],'out of order ack shows no success');
+  ui.editAgain();
+  ui.ack({requestId:2,ok:true});
+  assert.strictEqual(ui.dirty(),true,'matching ack cannot approve edits made after sending');
+  same(ui.toasts,[],'newer unsaved edit remains visible');
+  ui.submit({cmd:'config'},'Latest saved');
+  ui.ack({requestId:3,ok:false,code:'storage_failed',msg:'Could not save settings'});
+  assert.strictEqual(ui.dirty(),true,'storage failure preserves edits');
+  ui.submit({cmd:'config'},'Latest saved');
+  ui.ack({requestId:4,ok:true});
+  assert.strictEqual(ui.dirty(),false,'matching ack confirms the current edit');
+  assert.strictEqual(ui.toasts[ui.toasts.length-1],'Latest saved');
+}
+{
+  const {newRanges}=require('./extract.js');
+  const ui=newRanges();
+  const ranges={heat:{min:16,max:30.5,selection:'compatibility',manualMin:0,manualMax:0},cool:{min:18,max:29,selection:'automatic',manualMin:0,manualMax:0},auto:{min:16,max:30.5,selection:'compatibility',manualMin:0,manualMax:0}};
+  ui.render({setpointRanges:ranges});
+  same(ui.addEdits({cmd:'config'}),{cmd:'config'},'unrelated saves leave every mode untouched');
+  assert.strictEqual(ui.els.rangeHeatSource.value,'compatibility','compatibility remains visible');
+  ui.els.rangeHeatSource.value='manual';
+  ui.els.rangeHeatMin.value='10';ui.els.rangeHeatMax.value='14';
+  ui.edit('Heat');
+  ui.render({setpointRanges:ranges});
+  same(ui.addEdits({cmd:'config'}),{cmd:'config',rangeHeatSource:'manual',rangeHeatMin:10,rangeHeatMax:14},'refresh preserves raw custom selection and only edited mode is submitted');
+  const out={};ui.export({setpointRanges:ranges},out);
+  same(out,{rangeHeatSource:'compatibility',rangeCoolSource:'automatic',rangeAutoSource:'compatibility'},'backup contains selections without detection cache');
+  const previous={setpointRanges:ranges};
+  assert.strictEqual(mergeState(previous,{trunc:true,power:true}).setpointRanges,ranges,'partial pushes retain complete preferences');
 }
 
-// Every setpoint the table can represent survives C→F→C unchanged, on all
-// three sliders — the target one is not a special case.
+// Whole-policy rollback preserves the exact profile/band used by real export.
 {
-  const probe = newUi('C');
-  for (let f = 61; f <= 88; f++) {
-    const c = probe.fToCTable(f);
-    const ui = newUi('C');
-    ui.target.value = c; ui.heat.value = c; ui.cool.value = c;
-    ui.tap('F');
-    same([ui.target.value, ui.heat.value, ui.cool.value],
-      [String(f), String(f), String(f)], `${c} °C → ${f} °F`);
-    ui.tap('C');
-    same([ui.target.value, ui.heat.value, ui.cool.value],
-      [String(c), String(c), String(c)], `${c} °C round trip`);
-  }
+  const {newRanges}=require('./extract.js');
+  const ui=newRanges();
+  const low={setpointRanges:{auto:{selection:'manual',manualMin:10,manualMax:18}},heatThresh:12,coolThresh:16,autoUnit:false};
+  const retained=mergeState(low,{trunc:true,power:true});
+  const lowBackup=ui.exportFile(retained).settings;
+  same([retained.autoUnit,lowBackup.rangeAutoMin,lowBackup.rangeAutoMax,lowBackup.heatThresh,lowBackup.coolThresh],
+    [false,10,18,12,16],'omitted atomic policy retains profile, both band endpoints and ownership for export');
+
+  const high={setpointRanges:{auto:{selection:'manual',manualMin:22,manualMax:30}},heatThresh:24,coolThresh:28,autoUnit:true};
+  const replaced=mergeState(retained,{trunc:true,...high});
+  const highBackup=ui.exportFile(replaced).settings;
+  same([replaced.autoUnit,highBackup.rangeAutoMin,highBackup.rangeAutoMax,highBackup.heatThresh,highBackup.coolThresh],
+    [true,22,30,24,28],'complete newer policy replaces all export inputs together');
+  same([low.heatThresh,low.coolThresh,low.autoUnit],[12,16,false],'merging does not mutate the prior complete policy');
+}
+
+// Operational thresholds may be projected; backup keeps deliberate saved intent.
+{
+  const {newRanges}=require('./extract.js');
+  const ui=newRanges();
+  const live={heatThresh:24,coolThresh:26,savedHeatThresh:20,savedCoolThresh:25};
+  const backup=ui.exportFile(live).settings;
+  same([backup.heatThresh,backup.coolThresh],[20,25],'backup exports saved thresholds rather than discovery projection');
 }
 
 // ── Partial state frames ───────────────────────────────────────────────────
@@ -578,12 +621,39 @@ same(DEFAULTS.target.min, '16', 'tempSlider ships in Celsius');
   // Firmware side, pinned on source text: the set handler only acts on a
   // target that is a finite number, and the Origin check runs before the 101.
   const ws = fs.readFileSync(path.join(__dirname, '..', '..', 'main', 'web_ws.cpp'), 'utf8');
-  assert.ok(/jsonGetFloat\(msg, "target", &floatVal\)\s*&&\s*std::isfinite\(floatVal\)/.test(ws),
-    'set target must be gated on jsonGetFloat and isfinite');
+  assert.ok(/cJSON_IsNumber\(value\).*std::isfinite\(value->valuedouble\)/.test(ws),
+    'set targets must be gated on JSON numeric type and finite values');
   const srv = fs.readFileSync(path.join(__dirname, '..', '..', 'main', 'web_server.cpp'), 'utf8');
   assert.ok(/\.ws_pre_handshake_cb\s*=\s*wsPreHandshake/.test(srv),
     '/ws must register the Origin check as ws_pre_handshake_cb');
   checks += 2;
 }
 
-console.log('PASS: web state handling (' + checks + ' checks)');
+(async function(){
+  const {newRanges}=require('./extract.js');
+  async function importFile(ui,settings){
+    ui.import({files:[{text:()=>Promise.resolve(JSON.stringify({app:'cn105-homekit-settings',settings}))}],value:'file'});
+    await new Promise(resolve=>setImmediate(resolve));
+  }
+  const malformed=newRanges();
+  await importFile(malformed,{rangeHeatSource:'manual',rangeHeatMin:10,heatThresh:20,coolThresh:25});
+  same(malformed.sent,[],'malformed import sends no partial profile or band');
+  const invalidBand=newRanges();
+  await importFile(invalidBand,{rangeHeatSource:'manual',rangeHeatMin:10,rangeHeatMax:31,heatThresh:'bad'});
+  same(invalidBand.sent,[],'invalid imported band sends nothing');
+  const equalBounds=newRanges();
+  await importFile(equalBounds,{rangeHeatSource:'manual',rangeHeatMin:22,rangeHeatMax:22,heatThresh:20});
+  same(equalBounds.sent,[],'empty imported range sends no profile or band');
+  const good=newRanges();
+  await importFile(good,{rangeAutoSource:'manual',rangeAutoMin:10,rangeAutoMax:31,heatThresh:12,coolThresh:16});
+  same(good.sent,[{cmd:'config',rangeAutoSource:'manual',rangeAutoMin:10,rangeAutoMax:31,heatThresh:12,coolThresh:16,requestId:1}],'range and band import is one checked transaction');
+  same(good.toasts,[],'import waits for its acknowledgment');
+  good.ack({requestId:99,ok:true});
+  same(good.toasts,[],'unrelated ack cannot approve import');
+  good.ack({requestId:1,ok:true});
+  same(good.toasts,['Settings imported'],'matching ack confirms persisted import');
+  const old=newRanges();
+  await importFile(old,{deviceName:'Old backup',heatThresh:20,coolThresh:25});
+  same(old.sent,[{cmd:'config',deviceName:'Old backup',heatThresh:20,coolThresh:25,requestId:1}],'old backup leaves range choices untouched');
+  console.log('PASS: web state handling ('+checks+' checks plus range transactions)');
+})().catch(function(e){console.error(e);process.exitCode=1});

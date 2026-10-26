@@ -46,12 +46,12 @@ int main(int,char**argv){
  }
  CASE("initial_setup") {
   CHECK(!storedPaired());CHECK(start());CHECK(!storedPaired());
-  CHECK(!strcmp(webHkSetupValue(true,controllers,homekit_get_setup_code()),"234-56-789"));
+  CHECK(!strcmp(webHkSetupValue(true,controllers,homekit_get_setup_code()),"746-93-323"));
  }
  CASE("live_count_fallback_hides_credentials") {
   CHECK(start());controllers=1;
-  CHECK(httpSetup().find("234-56-789")==std::string::npos);
-  CHECK(wsSetup().find("234-56-789")==std::string::npos);
+  CHECK(httpSetup().find("746-93-323")==std::string::npos);
+  CHECK(wsSetup().find("746-93-323")==std::string::npos);
   CHECK(wsSetup().find("X-HM://")==std::string::npos);
  }
  CASE("startup_latches_existing_pairing") {
@@ -61,12 +61,12 @@ int main(int,char**argv){
   CHECK(start());controllers=1;event(HAP_EVENT_CTRL_PAIRED);CHECK(storedPaired());
   int commits=hkNvs.commits;event(HAP_EVENT_CTRL_CONNECTED);CHECK(hkNvs.commits==commits);
   controllers=0;event(HAP_EVENT_CTRL_UNPAIRED);CHECK(storedPaired());
-  CHECK(httpSetup().find("234-56-789")==std::string::npos);
-  CHECK(wsSetup().find("234-56-789")==std::string::npos);
+  CHECK(httpSetup().find("746-93-323")==std::string::npos);
+  CHECK(wsSetup().find("746-93-323")==std::string::npos);
   CHECK(wsSetup().find("X-HM://")==std::string::npos);
   reboot();settings.save();CHECK(storedPaired());
-  CHECK(httpSetup().find("234-56-789")==std::string::npos);
-  CHECK(wsSetup().find("234-56-789")==std::string::npos);
+  CHECK(httpSetup().find("746-93-323")==std::string::npos);
+  CHECK(wsSetup().find("746-93-323")==std::string::npos);
   CHECK(wsSetup().find("X-HM://")==std::string::npos);
   CHECK(wsSetup().find("\"hkPaired\":true")!=std::string::npos);
  }
@@ -81,7 +81,7 @@ int main(int,char**argv){
   // The SDK erases storage but leaves its in-memory controller entries valid.
   CHECK(homekit_get_controller_count()==2);event(HAP_EVENT_CTRL_CONNECTED);settings.save();CHECK(!storedPaired());
   reboot();settings.save();CHECK(!storedPaired());CHECK(start());
-  CHECK(httpSetup().find("234-56-789")!=std::string::npos);
+  CHECK(httpSetup().find("746-93-323")!=std::string::npos);
   CHECK(wsSetup().find("X-HM://test")!=std::string::npos);
   controllers=1;event(HAP_EVENT_CTRL_PAIRED);CHECK(storedPaired());
  }
