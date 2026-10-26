@@ -321,7 +321,7 @@ The **Room Sensor** card carries the BLE settings on boards with Bluetooth:
 - **Single / Average** — pick between one feeding source and a blend of several
 - **Headline** — what the heat pump currently sees, the sensors behind it, and why (equal average, one sensor, fallback, or a spread warning when the contributors disagree)
 - **Source rows** — one row per available source, each showing its live reading, battery, signal, and how long ago it last reported. Tap to select in Single mode, check to include in Average mode.
-- **Add Sensor…** — scan for nearby thermometers with their live temperature and humidity, or *Enter address manually…* to type a MAC. Up to 4 sensors; each can be renamed after the room it sits in, or removed.
+- **Add Sensor…** — scan for nearby thermometers with their live temperature and humidity, or *Enter address manually…* to type a MAC. The scan keeps looking until you pick a sensor or tap *Stop Scanning* (at most 10 minutes); some sensors take a minute or more to appear. Up to 4 sensors; each can be renamed after the room it sits in, or removed.
 - **Enable Remote Sensors** — turn BLE scanning on or off
 - **Sensor Timeout** — how long a source may go quiet before it counts as stale (30–3600 s)
 - **Manage Sensors** — rename or remove a sensor, and set a calibration offset per sensor (±9.9 °C, entered in the display unit), applied to each reading before it is used or averaged

@@ -21,6 +21,7 @@ private:
     CN105Controller *_ctrl   = nullptr;
     uint32_t _lastStatePush  = 0;
     std::atomic<bool> _discoveryRequested{false}; // HTTPD -> main command
+    std::atomic<bool> _discoveryResync{false};    // HTTPD -> main: a client joined mid-scan
     bool _discoveryPushPending = false; // main-owned admission retries
     bool _discoveryDonePending = false;
     bool _apMode = false;               // True when fallback AP is active

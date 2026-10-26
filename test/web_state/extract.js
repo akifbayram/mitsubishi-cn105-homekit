@@ -180,4 +180,13 @@ for (const name of ['roomSensors', 'roomRowHtml', 'renderRoomHero', 'renderRoomB
     throw new Error(`room-model block does not define ${name}()`);
 }
 
-module.exports = { newUi: factory, newRanges: rangeFactory, newRoom: roomFactory, newRoomRender: roomRenderFactory, mergeState, DEFAULTS };
+// The Add Sensor control's view for a state push: button label/state and the
+// elapsed-time status line, as one pure function.
+const bleScanView = vm.runInThisContext(
+  '(function(){' + block('ble-scan-view') + '\nreturn bleScanView;})',
+  { filename: 'web/index.html#ble-scan-view' }
+)();
+if (typeof bleScanView !== 'function')
+  throw new Error('ble-scan-view block does not define bleScanView()');
+
+module.exports = { newUi: factory, newRanges: rangeFactory, newRoom: roomFactory, newRoomRender: roomRenderFactory, mergeState, bleScanView, DEFAULTS };

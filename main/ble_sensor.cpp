@@ -67,18 +67,15 @@ static void setSlotMac(SlotState &sl, const char* mac) {
     sl.mac[17] = '\0';
 }
 
-// ── Scan duty profiles ──────────────────────────────────────────────────────
-// SEARCH runs a 90 % window to find the sensor fast; TRACK drops to 30 % once
-// readings flow — advertisements arrive every ~2 s, so a 60 ms window every
-// 200 ms still catches one within a few seconds while easing WiFi coexistence
-// and power. Both stay ACTIVE scans: Govee V2 readings ride in the SCAN_RSP.
-enum class ScanProfile : uint8_t { SEARCH, TRACK };
-struct ScanParams { uint16_t itvl, window; };            // units of 0.625 ms
-static constexpr ScanParams SCAN_PARAMS[] = {
-    {160, 144},   // SEARCH: 100 ms interval / 90 ms window
-    {320,  96},   // TRACK:  200 ms interval / 60 ms window
-};
-static std::atomic<ScanProfile> s_scanProfile{ScanProfile::SEARCH};
+// ── Scan window ─────────────────────────────────────────────────────────────
+// One window, all the time: listen 90 ms of every 100 ms. Sensors advertise
+// every ~10 s to several minutes, so every missed packet is a long wait. A
+// 30 % window used once readings flowed lost two thirds of them on the bench
+// (2026-10-26) and went deaf for up to 8 minutes, close to the stale timeout,
+// with no measurable gain in Wi-Fi latency. ACTIVE: Govee V2 readings ride in
+// the SCAN_RSP.
+static constexpr uint16_t SCAN_ITVL   = 160;   // 100 ms, units of 0.625 ms
+static constexpr uint16_t SCAN_WINDOW = 144;   //  90 ms
 
 static std::atomic<bool> s_scanning{false};
 static std::atomic<bool> s_staleReverted{false};
@@ -110,6 +107,9 @@ static int      s_lastPushedCount    = 0;
 static uint32_t s_discoveryGen       = 0;   // bumped every time the list is cleared
 static std::atomic<bool>     s_discoveryMode{false};
 static std::atomic<uint32_t> s_discoveryStart{0};
+// Cancel/pick/disable from the httpd task; pollDiscoveryComplete() on main
+// ends the session, since stopping the scan must not run on httpd.
+static std::atomic<bool>     s_discoveryStopReq{false};
 
 // ── Spinlock helper ─────────────────────────────────────────────────────────
 template<typename T>
@@ -351,9 +351,8 @@ static void startScan() {
     memset(&params, 0, sizeof(params));
     params.passive = 0;              // Active scan — required for sensors that put data in SCAN_RSP (e.g. Govee V2)
     params.filter_duplicates = 0;    // We want repeated advertisements
-    const ScanParams& sp = SCAN_PARAMS[(uint8_t)s_scanProfile.load()];
-    params.itvl   = sp.itvl;
-    params.window = sp.window;
+    params.itvl   = SCAN_ITVL;
+    params.window = SCAN_WINDOW;
 
     int rc = ble_gap_disc(BLE_OWN_ADDR_PUBLIC, BLE_HS_FOREVER, &params, gap_event_cb, NULL);
     if (rc == 0) {
@@ -467,6 +466,7 @@ void BleSensor::setBleEnabled(bool on) {
     if (!on) {
         s_pendingClear.store(true);
         s_staleReverted.store(false);
+        stopDiscovery();   // an open Add Sensor session must not outlive the radio
     }
     LOG_INFO("BLE %s", on ? "enabled" : "disabled");
 }
@@ -522,15 +522,10 @@ void BleSensor::loop(CN105Controller &cn105) {
 
     float temp = NAN;
     uint32_t lastUpd = 0;
-    bool allConfiguredActive = true;
     taskENTER_CRITICAL(&s_mux);
     if (slot >= 0) {
         temp    = s_slots[slot].temp;
         lastUpd = s_slots[slot].lastUpdate;
-    }
-    for (const SlotState &sl : s_slots) {
-        if (sl.valid && !freshAt(sl.lastUpdate, now, staleMs))
-            allConfiguredActive = false;
     }
     taskEXIT_CRITICAL(&s_mux);
 
@@ -538,14 +533,7 @@ void BleSensor::loop(CN105Controller &cn105) {
     bool stale  = lastUpd > 0 && !active;
     bool feed   = (slot >= 0);
 
-    // Radio duty: hunt hard until every configured sensor's readings flow,
-    // then back off (see ScanProfile)
-    ScanProfile want = (allConfiguredActive && !s_discoveryMode.load())
-                       ? ScanProfile::TRACK
-                       : ScanProfile::SEARCH;
-    if (s_scanProfile.exchange(want) != want) s_pendingRestart.store(true);
-
-    // Deferred scan stop+restart (enable, address change, profile switch, discovery)
+    // Deferred scan stop+restart (enable, address change, discovery start)
     if (s_pendingRestart.exchange(false)) {
         stopScan();
         if (wantScan()) startScan();
@@ -724,19 +712,30 @@ void BleSensor::startDiscovery() {
     s_lastPushedCount    = 0;
     s_discoveryGen++;    // voids indices readers sampled from the old list
     taskEXIT_CRITICAL(&s_mux);
+    s_discoveryStopReq.store(false);   // a stop that raced the last session's end
     s_discoveryStart.store(uptime_ms());
     s_discoveryMode.store(true);
 
     // The enable toggle may still have its NimBLE init queued (loop() drains it
     // at 1 Hz) — queue again so a Scan tap right after enabling still works
     if (!s_nimbleInitialized.load()) s_pendingSync.store(true);
-    s_pendingRestart.store(true);   // (re)start with the SEARCH profile
+    // A scan already tracking sensors uses the same window, so only start one
+    // that isn't running (no sensors yet, or a failed start to retry)
+    if (!s_scanning.load()) s_pendingRestart.store(true);
 
-    LOG_INFO("Discovery scan started (%lums)", (unsigned long)BLE_DISCOVERY_MS);
+    LOG_INFO("Discovery scan started (up to %lus)", (unsigned long)(BLE_DISCOVERY_MS / 1000));
+}
+
+void BleSensor::stopDiscovery() {
+    if (s_discoveryMode.load()) s_discoveryStopReq.store(true);
 }
 
 bool BleSensor::isDiscovering() {
     return s_discoveryMode.load();
+}
+
+uint32_t BleSensor::discoveryElapsedMs() {
+    return s_discoveryMode.load() ? uptime_ms() - s_discoveryStart.load() : 0;
 }
 
 bool BleSensor::pollDiscoveryUpdate() {
@@ -748,21 +747,22 @@ bool BleSensor::pollDiscoveryUpdate() {
     return fresh;
 }
 
+// Main task. Ends the session at the cap or on a queued stop (cancel, pick,
+// BLE disabled) and reports that once, so every browser resets its button.
 bool BleSensor::pollDiscoveryComplete() {
-    if (s_discoveryMode.load() &&
-        uptime_ms() - s_discoveryStart.load() >= BLE_DISCOVERY_MS) {
-        s_discoveryMode.store(false);
+    if (!s_discoveryMode.load()) return false;
+    const bool stopped = s_discoveryStopReq.exchange(false);
+    if (!stopped && uptime_ms() - s_discoveryStart.load() < BLE_DISCOVERY_MS) return false;
+    s_discoveryMode.store(false);
 
-        // Stop scanning if no target configured; otherwise the next loop() pass
-        // restores the TRACK profile via the usual restart path
-        if (!targetConfigured() && s_scanning.load()) {
-            stopScan();
-        }
-
-        LOG_INFO("Discovery complete: %d sensor(s) found", readLocked(s_discoveryCount));
-        return true;
+    // Configured sensors keep the scan running; with none, release the radio
+    if (!targetConfigured() && s_scanning.load()) {
+        stopScan();
     }
-    return false;
+
+    LOG_INFO("Discovery %s: %d sensor(s) found", stopped ? "stopped" : "complete",
+             readLocked(s_discoveryCount));
+    return true;
 }
 
 int BleSensor::discoveryResults(BleDiscoveredDevice* out, int max, bool* truncated) {

@@ -9,9 +9,10 @@
 uint32_t uptime_ms() {return 1500;}
 size_t logging_drain(char *,size_t) {return 0;}
 namespace BleSensor {
-bool complete=true, updated=false;
+bool complete=true, updated=false, discovering=false;
 int starts=0;
-void startDiscovery() {++starts; complete=false; updated=false;}
+bool isDiscovering() {return discovering;}
+void startDiscovery() {++starts; complete=false; updated=false; discovering=true;}
 bool pollDiscoveryComplete() {bool result=complete; complete=false; return result;}
 bool pollDiscoveryUpdate() {bool result=updated; updated=false; return result;}
 }
@@ -27,6 +28,7 @@ public:
     void *_server=reinterpret_cast<void *>(1);
     uint32_t _lastStatePush=1000;
     std::atomic<bool> _discoveryRequested{false};
+    std::atomic<bool> _discoveryResync{false};
     bool _discoveryPushPending=false, _discoveryDonePending=false;
     bool admit=false;
     std::vector<bool> attempts;
@@ -52,5 +54,22 @@ int main() {
     BleSensor::complete=true;
     ui.loop();
     REQUIRE(ui.attempts.back());
-    std::puts("PASS: production loop retries rejected scan completion and resets it on a new scan");
+    // A browser that connects mid-scan (a reload during a long session) gets
+    // the list found so far, without restarting the session.
+    BleSensor::discovering=false;
+    ui._discoveryRequested.store(true);
+    ui.loop();                     // a new session opens
+    REQUIRE(BleSensor::starts==2);
+    const size_t before=ui.attempts.size();
+    ui._discoveryResync.store(true);
+    ui.loop();
+    REQUIRE(BleSensor::starts==2);
+    REQUIRE(ui.attempts.size()==before+1);
+    REQUIRE(!ui.attempts.back());
+    // A connect with no scan open sends nothing.
+    BleSensor::discovering=false;
+    ui._discoveryResync.store(true);
+    ui.loop();
+    REQUIRE(ui.attempts.size()==before+1);
+    std::puts("PASS: production loop retries rejected scan completion and resets it on a new scan; late joiners get the current list");
 }

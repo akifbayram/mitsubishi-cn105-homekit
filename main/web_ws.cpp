@@ -76,6 +76,9 @@ esp_err_t WebUI::handleWebSocket(httpd_req_t *req) {
         // Push initial state immediately (broadcast reaches this new client too)
         webUI.pushState();
         webUI.sendDeviceInfo(fd);
+        // A page (re)loaded during a long Add Sensor session missed the
+        // sensors found so far; main re-sends the list if a scan is open.
+        webUI._discoveryResync.store(true);
         return ESP_OK;
     }
 
@@ -685,6 +688,7 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
                 BleSensor::setSensor(slot, addMac,
                                      addName[0] ? addName : (keepStored ? nullptr : defName));
                 LOG_INFO("Config bleAdd slot=%d mac=%s", slot, addMac);
+                BleSensor::stopDiscovery();   // a pick (or manual add) ends Add Sensor
             }
         }
 
@@ -715,6 +719,15 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
             _discoveryRequested.store(true); // start/reset pending results on main
             LOG_INFO("BLE discovery scan requested");
         }
+#endif
+
+    } else if (strcmp(cmd, "bleScanStop") == 0) {
+#ifdef BLE_ENABLE
+        // Cancel. A start still queued for main is dropped with it; the
+        // session itself ends on main, which then pushes done to every client.
+        _discoveryRequested.store(false);
+        BleSensor::stopDiscovery();
+        LOG_INFO("BLE discovery stop requested");
 #endif
 
     } else if (strcmp(cmd, "wifi") == 0) {
@@ -1330,6 +1343,7 @@ void WebUI::pushState() {
             ",\"bleAddr\":\"%s\""
             ",\"bleBattLow\":%s"
             ",\"bleDiscovering\":%s"
+            ",\"bleScanSec\":%lu"
             ",\"bleSensorType\":%s%s%s",
             BleSensor::isBleEnabled() ? "true" : "false",
             bleTStr,
@@ -1343,6 +1357,7 @@ void WebUI::pushState() {
             BleSensor::getAddr(),
             (bleB >= 0 && bleB <= BLE_BATT_LOW_PCT) ? "true" : "false",
             BleSensor::isDiscovering() ? "true" : "false",
+            (unsigned long)(BleSensor::discoveryElapsedMs() / 1000),
             sType ? "\"" : "", sType ? sType : "null", sType ? "\"" : ""
         );
     }
@@ -1570,6 +1585,8 @@ void WebUI::loop() {
         _discoveryDonePending = false;
         _discoveryPushPending = true;
     }
+    if (_discoveryResync.exchange(false) && BleSensor::isDiscovering())
+        _discoveryPushPending = true;
     if (BleSensor::pollDiscoveryComplete()) {
         _discoveryDonePending = true;
         _discoveryPushPending = true;

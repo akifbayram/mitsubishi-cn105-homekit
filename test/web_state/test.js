@@ -629,6 +629,31 @@ same(DEFAULTS.target.min, '16', 'the page starts in Celsius');
   checks += 2;
 }
 
+// ── Add Sensor session ─────────────────────────────────────────────────────
+// Sensors can take minutes to show up, so the scan stays open until the user
+// picks one or stops it. While it runs, the button is Stop and a status line
+// counts up from the firmware's elapsed time, which every browser shares.
+{
+  const { bleScanView } = require('./extract.js');
+  const open = bleScanView(true, 75, false);
+  assert.strictEqual(open.btn, 'Stop Scanning', 'an open session turns the button into Stop');
+  assert.strictEqual(open.disabled, false, 'Stop must be clickable');
+  assert.strictEqual(open.scanning, true);
+  assert.ok(/^Searching\u2026 1:15\./.test(open.status), 'elapsed time reads m:ss: ' + open.status);
+  assert.ok(/a minute or more/.test(open.status), 'status sets the expectation that sensors are slow');
+  assert.ok(/ 0:05\./.test(bleScanView(true, 5, false).status), 'seconds are zero-padded');
+  const idle = bleScanView(false, 0, false);
+  assert.deepStrictEqual(idle, { btn: 'Add Sensor\u2026', disabled: false, scanning: false, status: '' },
+    'no session: plain Add Sensor with no status line');
+  const full = bleScanView(false, 0, true);
+  assert.strictEqual(full.btn, 'Sensor list full');
+  assert.strictEqual(full.disabled, true, 'a full list cannot start a scan');
+  // A session that is already open still shows Stop even if the list filled,
+  // so it can always be ended.
+  assert.strictEqual(bleScanView(true, 0, true).disabled, false);
+  checks += 10;
+}
+
 (async function(){
   const {newRanges}=require('./extract.js');
   async function importFile(ui,settings){

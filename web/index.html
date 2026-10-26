@@ -788,6 +788,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
 
     <div id="bleAddWrap">
       <button class="btn-secondary" style="width:100%" id="bleAddBtn" onclick="startBleScan()">Add Sensor&hellip;</button>
+      <div class="ble-help" id="bleScanStatus" role="status" style="display:none"></div>
       <div id="bleScanResults" style="display:none;margin-top:10px"></div>
       <button type="button" id="bleManualToggle" style="background:none;border:none;padding:0;margin-top:8px;cursor:pointer;font-size:12px;color:var(--accent)" onclick="toggleBleManual()">Enter address manually&hellip;</button>
       <div id="bleManualWrap" style="display:none;margin-top:8px">
@@ -2369,9 +2370,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       $('bleAddWrap').style.display=(hasBle&&bleOn)?'':'none';
       var addBtn=$('bleAddBtn');
       var listFull=(s.bleSensors||[]).length>=MAX_BLE_SENSORS;
-      if(s.bleDiscovering){addBtn.textContent='Scanning…';addBtn.disabled=true;addBtn.classList.add('scanning')}
-      else if(addBtn.classList.contains('scanning')){addBtn.textContent='Add Sensor…';addBtn.disabled=false;addBtn.classList.remove('scanning')}
-      else{addBtn.disabled=listFull;addBtn.textContent=listFull?'Sensor list full':'Add Sensor…'}
+      applyBleScanView(bleScanView(!!s.bleDiscovering,s.bleScanSec||0,listFull));
       $('bleManualToggle').style.display=listFull?'none':'';
       if(listFull)$('bleManualWrap').style.display='none';
     }else{
@@ -2968,21 +2967,48 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   // Test hook: lets a headless harness drive the closure-scoped state
   // handler directly (no live WebSocket needed). Not used by the UI.
   window.__setState=function(s){onState(s)};
+  // ── ble-scan-view:start
+  // What the Add Sensor control shows for a state push. Sensors can take
+  // minutes to show up, so a session stays open until the user picks one or
+  // stops it (the firmware caps it at 10 minutes): the button doubles as Stop
+  // and a status line counts up from the firmware's elapsed time.
+  function bleScanView(discovering,sec,listFull){
+    if(discovering){
+      var m=Math.floor(sec/60),r=sec%60;
+      return {btn:'Stop Scanning',disabled:false,scanning:true,
+        status:'Searching\u2026 '+m+':'+(r<10?'0':'')+r+'. Some sensors take a minute or more to appear.'};
+    }
+    return {btn:listFull?'Sensor list full':'Add Sensor\u2026',disabled:listFull,scanning:false,status:''};
+  }
+  // ── ble-scan-view:end
+  function applyBleScanView(v){
+    var btn=$('bleAddBtn'),st=$('bleScanStatus');
+    btn.textContent=v.btn;btn.disabled=v.disabled;btn.classList.toggle('scanning',v.scanning);
+    st.textContent=v.status;st.style.display=v.status?'':'none';
+  }
+  function bleListFull(){return !!(lastState&&(lastState.bleSensors||[]).length>=MAX_BLE_SENSORS)}
+  function hideBleScanResults(){
+    bleScanPicked=true;   // ignore trailing pushes from the session being ended
+    $('bleScanResults').style.display='none';
+    $('bleScanResults').textContent='';
+  }
   var bleScanPicked=false;
   window.startBleScan=function(){
     if(!ensureConnected()) return;
-    var btn=$('bleAddBtn');
-    btn.textContent='Scanning\u2026';btn.disabled=true;btn.classList.add('scanning');
+    if($('bleAddBtn').classList.contains('scanning')){   // the button is Stop while a scan runs
+      hideBleScanResults();
+      send({cmd:'bleScanStop'});
+      applyBleScanView(bleScanView(false,0,bleListFull()));
+      return;
+    }
+    applyBleScanView(bleScanView(true,0,false));
     bleScanPicked=false;
     $('bleScanResults').style.display='none';
     $('bleScanResults').textContent='';
     send({cmd:'bleScan'});
   };
   function onBleScanResults(msg){
-    if(msg.done){
-      var btn=$('bleAddBtn');
-      btn.textContent='Add Sensor\u2026';btn.disabled=false;btn.classList.remove('scanning');
-    }
+    if(msg.done) applyBleScanView(bleScanView(false,0,bleListFull()));
     // Hide sensors that are already on the list \u2014 "Add" offers new ones only.
     if(msg.devices&&lastState&&lastState.bleSensors){
       var known={};lastState.bleSensors.forEach(function(b){known[(b.addr||'').toUpperCase()]=1});
@@ -3050,16 +3076,16 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     bleToastTimer=setTimeout(function(){t.style.display='none'},3000);
   }
   function pickBleSensor(addr){
-    bleScanPicked=true;
-    $('bleScanResults').style.display='none';
-    $('bleScanResults').textContent='';
+    hideBleScanResults();
     // Saved with a default name ("Sensor N"); rename lives under Manage Sensors.
+    // The firmware ends the scan on the add, so the control resets right away.
     if(!send({cmd:'config',bleAddMac:addr})){showToast('Not connected — change not sent',true);return}
+    applyBleScanView(bleScanView(false,0,false));
     showBleToast('Sensor added: '+addr);
   }
   window.pickBleSensor=pickBleSensor;
-  // Manual add-by-MAC — for sensors that are out of range right now or
-  // advertise too rarely for a 10 s discovery window to catch.
+  // Manual add-by-MAC — for sensors that are out of range right now, or
+  // that a scan has not caught yet.
   window.toggleBleManual=function(){
     var w=$('bleManualWrap');
     var open=w.style.display==='none';

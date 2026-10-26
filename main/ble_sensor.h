@@ -12,7 +12,7 @@
 constexpr uint32_t BLE_KEEPALIVE_MS     = 20000;  // Resend temp to HP every 20s
 constexpr uint32_t BLE_RESEND_MIN_MS    = 5000;   // Min gap between value-change resends
 constexpr int      BLE_MAX_DISCOVERED   = 20;     // Max devices in discovery scan
-constexpr uint32_t BLE_DISCOVERY_MS     = 10000;  // Discovery scan duration
+constexpr uint32_t BLE_DISCOVERY_MS     = 600000; // Discovery session cap; pick/cancel end it sooner
 constexpr int8_t   BLE_BATT_LOW_PCT     = 20;     // Battery % at/below = low (HomeKit + web UI)
 
 // ── Discovery result ────────────────────────────────────────────────────────
@@ -90,7 +90,9 @@ namespace BleSensor {
 
     // Discovery scan
     void startDiscovery();
+    void stopDiscovery();                // Any task; ends the session on the next poll
     bool isDiscovering();
+    uint32_t discoveryElapsedMs();       // 0 when no session is open
     bool pollDiscoveryUpdate();          // Returns true when new devices found
     bool pollDiscoveryComplete();        // Returns true once when done
     // Copy current results into out (up to max). Returns count; *truncated set
