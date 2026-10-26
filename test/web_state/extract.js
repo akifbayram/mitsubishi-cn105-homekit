@@ -141,22 +141,27 @@ const roomRenderFactory = vm.runInThisContext(
 // Real settings/import code with DOM, transport and toast boundaries only.
 const rangeFactory = vm.runInThisContext(
   '(function(){return function(){\n' +
-  'var els={},sent=[],toasts=[],settingsDirty=true,lastState=null,window={},exported=null,RUNNING_FW_VER="test";\n' +
-  'function $(id){if(!els[id])els[id]={value:"",textContent:"",hidden:false,style:{},classList:{toggle:function(){}},querySelector:function(){return null},appendChild:function(){}};return els[id]}\n' +
+  'var els={},sent=[],toasts=[],settingsDirty=true,lastState=null,window={},exported=null,RUNNING_FW_VER="test",tempUnit="C";\n' +
+  'function $(id){if(!els[id])els[id]={value:"",textContent:"",hidden:false,style:{},classList:{toggle:function(){}},setAttribute:function(){},querySelector:function(){return null},appendChild:function(){}};return els[id]}\n' +
+  'function setpointF(c){return Math.round(c*9/5+32)}\n' +   // ftabId 0: linear; the table is the temp-unit suite's job
   'var document={body:{appendChild:function(){}},createElement:function(){return {click:function(){},remove:function(){}}}};\n' +
   'function Blob(parts){this.parts=parts}\n' +
   'var URL={createObjectURL:function(blob){exported=JSON.parse(blob.parts[0]);return "blob:test"},revokeObjectURL:function(){}};\n' +
-  'function setTimeout(){}\n' +
+  'var timers=[],online=true;\n' +
+  'function setTimeout(f){timers.push(f)}\n' +
   'function showToast(t){toasts.push(t)}\n' +
-  'function send(m){sent.push(m);return true}\n' +
+  'function send(m){if(!online)return false;sent.push(m);return true}\n' +
   'function ensureConnected(){return true}\n' +
   'function fmtTemp(c){return c==null?"--":String(c)}\n' +
   block('range-settings') + '\n' +
   src.slice(src.indexOf('  window.exportSettings=function'),src.indexOf('  window.importSettings=function')) + '\n' +
   src.slice(src.indexOf('  window.importSettings=function'),src.indexOf('  // Destructive commands need')) + '\n' +
   'return {sent:sent,toasts:toasts,els:els,submit:submitCheckedConfig,ack:onRangeResult,render:renderRangeSettings,\n' +
-  'edit:window.editRange,addEdits:addRangeEdits,export:exportRangeSettings,import:window.importSettings,\n' +
+  'addEdits:addRangeEdits,export:exportRangeSettings,import:window.importSettings,\n' +
+  'view:rangeView,pick:pickRange,nudge:nudgeRange,next:nextBound,unit:function(u){tempUnit=u},\n' +
+  'setCap:setCap,caps:getCapMask,applyCaps:applyCapMask,advertised:advertisedRange,\n' +
   'dirty:function(){return settingsDirty},pending:function(){return rangePending},\n' +
+  'offline:function(){online=false},fireTimers:function(){timers.splice(0).forEach(function(f){f()})},\n' +
   'editAgain:markSettingsEdited,exportFile:function(st){lastState=st;window.exportSettings();return exported}};\n' +
   '};})', { filename:'web/index.html#range-settings' }
 )();

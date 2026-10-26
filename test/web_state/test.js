@@ -10,6 +10,8 @@ function snap(ui) {
   };
 }
 function same(a, b, msg) { assert.deepStrictEqual(a, b, msg); checks++; }
+// Device card and mode-page nav bar: is each Save button resting?
+const saveIdle = (ui) => ['settingsSaveBtn', 'mpSave'].map((id) => ui.els[id] && ui.els[id].disabled);
 
 // Units change labels while every slider position stays in canonical Celsius.
 same(DEFAULTS.target.min, '16', 'the page starts in Celsius');
@@ -62,6 +64,8 @@ same(DEFAULTS.target.min, '16', 'the page starts in Celsius');
   const ui=newRanges();
   ui.submit({cmd:'config',rangeHeatSource:'manual',rangeHeatMin:10,rangeHeatMax:31},'Saved');
   same(ui.toasts,[],'sending does not claim persistence');
+  same(ui.els.settingsSaveStatus.textContent,'Saving…','progress shows under the Device Save');
+  same(saveIdle(ui),[true,true],'every Save rests while a save is in flight');
   ui.submit({cmd:'config',rangeHeatSource:'manual',rangeHeatMin:11,rangeHeatMax:31},'Latest saved');
   ui.ack({requestId:1,ok:true});
   assert.strictEqual(ui.dirty(),true,'late ack cannot approve newer submission');
@@ -70,30 +74,135 @@ same(DEFAULTS.target.min, '16', 'the page starts in Celsius');
   ui.ack({requestId:2,ok:true});
   assert.strictEqual(ui.dirty(),true,'matching ack cannot approve edits made after sending');
   same(ui.toasts,[],'newer unsaved edit remains visible');
+  same(saveIdle(ui),[false,false],'unsaved edits light every Save up');
   ui.submit({cmd:'config'},'Latest saved');
   ui.ack({requestId:3,ok:false,code:'storage_failed',msg:'Could not save settings'});
   assert.strictEqual(ui.dirty(),true,'storage failure preserves edits');
+  same(saveIdle(ui),[false,false],'a failed save leaves Save lit');
   ui.submit({cmd:'config'},'Latest saved');
   ui.ack({requestId:4,ok:true});
   assert.strictEqual(ui.dirty(),false,'matching ack confirms the current edit');
+  same(saveIdle(ui),[true,true],'nothing left to save, so Save rests');
   assert.strictEqual(ui.toasts[ui.toasts.length-1],'Latest saved');
 }
+// The mode page has no status line, so a save that fails before any reply must toast.
+{
+  const {newRanges}=require('./extract.js');
+  const offline=newRanges();
+  offline.offline();
+  offline.submit({cmd:'config'},'Settings saved');
+  same(offline.toasts,['Not connected — not saved'],'an unsendable save says so wherever Save was pressed');
+  const silent=newRanges();
+  silent.submit({cmd:'config'},'Settings saved');
+  silent.fireTimers();
+  same(silent.toasts,['Save not confirmed. Reconnect and try again.'],'an unconfirmed save says so too');
+  same(saveIdle(silent),[false,false],'and Save lights up again to retry');
+}
+
+// The Modes page offers Heat Pump Limits or Custom Limits. A mode still on the compatibility
+// range reads as Custom 16–30.5 but stays compatibility until a bound changes:
+// a real manual 16–30.5 is off-grid on whole-degree units.
+const limits=(v)=>({custom:v.custom,min:v.min,max:v.max});
 {
   const {newRanges}=require('./extract.js');
   const ui=newRanges();
-  const ranges={heat:{min:16,max:30.5,selection:'compatibility',manualMin:0,manualMax:0},cool:{min:18,max:29,selection:'automatic',manualMin:0,manualMax:0},auto:{min:16,max:30.5,selection:'compatibility',manualMin:0,manualMax:0}};
+  const ranges={heat:{min:16,max:30.5,step:0.5,selection:'compatibility',manualMin:0,manualMax:0,reference:{min:10,max:28,source:'fresh'}},
+    cool:{min:18,max:29,step:0.5,selection:'automatic',manualMin:0,manualMax:0,reference:{min:18,max:29,source:'fresh'}},
+    auto:{min:16,max:30.5,step:0.5,selection:'compatibility',manualMin:0,manualMax:0,reference:null}};
   ui.render({setpointRanges:ranges});
   same(ui.addEdits({cmd:'config'}),{cmd:'config'},'unrelated saves leave every mode untouched');
-  assert.strictEqual(ui.els.rangeHeatSource.value,'compatibility','compatibility remains visible');
-  ui.els.rangeHeatSource.value='manual';
-  ui.els.rangeHeatMin.value='10';ui.els.rangeHeatMax.value='14';
-  ui.edit('Heat');
+  same(limits(ui.view('Heat')),{custom:true,min:16,max:30.5},'compatibility reads as Custom 16–30.5');
+  ui.pick('Heat',false);
+  same(limits(ui.view('Heat')),{custom:false,min:10,max:28},'Heat Pump Limits previews what the unit reports');
+  same(ui.addEdits({cmd:'config'}),{cmd:'config',rangeHeatSource:'automatic'},'Heat Pump Limits replaces compatibility');
+  ui.pick('Heat',true);
+  same(ui.addEdits({cmd:'config'}),{cmd:'config'},'Custom again restores compatibility untouched');
+  ui.nudge('Heat','min',1);
   ui.render({setpointRanges:ranges});
-  same(ui.addEdits({cmd:'config'}),{cmd:'config',rangeHeatSource:'manual',rangeHeatMin:10,rangeHeatMax:14},'refresh preserves raw custom selection and only edited mode is submitted');
+  same(ui.addEdits({cmd:'config'}),{cmd:'config',rangeHeatSource:'manual',rangeHeatMin:16.5,rangeHeatMax:30.5},'a bound change makes it a real custom range that survives refresh');
+  same(ui.next('Heat','min',-1),16,'the low bound steps back down');
   const out={};ui.export({setpointRanges:ranges},out);
   same(out,{rangeHeatSource:'compatibility',rangeCoolSource:'automatic',rangeAutoSource:'compatibility'},'backup contains selections without detection cache');
   const previous={setpointRanges:ranges};
   assert.strictEqual(mergeState(previous,{trunc:true,power:true}).setpointRanges,ranges,'partial pushes retain complete preferences');
+}
+
+// Custom returns to the saved custom range, otherwise starts from the unit's.
+{
+  const {newRanges}=require('./extract.js');
+  const ui=newRanges();
+  const ranges={heat:{min:18,max:26,step:0.5,selection:'manual',manualMin:18,manualMax:26,reference:{min:10,max:28,source:'fresh'}},
+    cool:{min:19,max:30,step:0.5,selection:'automatic',manualMin:0,manualMax:0,reference:{min:19,max:30,source:'fresh'}},
+    auto:{min:19,max:28,step:0.5,selection:'automatic',manualMin:0,manualMax:0,reference:{min:19,max:28,source:'fresh'}}};
+  ui.render({setpointRanges:ranges});
+  ui.pick('Heat',false);ui.pick('Heat',true);
+  same(ui.addEdits({cmd:'config'}),{cmd:'config'},'Heat Pump Limits then Custom restores the saved custom range');
+  ui.pick('Cool',true);
+  same(ui.addEdits({cmd:'config'}),{cmd:'config',rangeCoolSource:'manual',rangeCoolMin:19,rangeCoolMax:30},'a first custom range starts from the heat pump limits');
+  ui.nudge('Heat','min',-1);ui.nudge('Heat','min',-1);
+  same(limits(ui.view('Heat')),{custom:true,min:17,max:26},'each press moves one half degree');
+}
+
+// Steps follow the unit's grid. Compatibility always reports 0.5, so it borrows
+// the grid from a mode that reports one.
+{
+  const {newRanges}=require('./extract.js');
+  const ui=newRanges();
+  const ranges={heat:{min:16,max:30.5,step:0.5,selection:'compatibility',manualMin:0,manualMax:0,reference:null},
+    cool:{min:16,max:30,step:1,selection:'automatic',manualMin:0,manualMax:0,reference:null},
+    auto:{min:20,max:25,step:1,selection:'manual',manualMin:20,manualMax:25,reference:null}};
+  ui.render({setpointRanges:ranges});
+  ui.nudge('Heat','max',-1);
+  same(ui.addEdits({cmd:'config'}),{cmd:'config',rangeHeatSource:'manual',rangeHeatMin:16,rangeHeatMax:30},'whole-degree units snap 30.5 to 30 in one press');
+  same(ui.next('Heat','min',-1),null,'whole-degree custom ranges stop at 16');
+  ui.nudge('Auto','min',1);ui.nudge('Auto','min',1);ui.nudge('Auto','min',1);
+  same(limits(ui.view('Auto')),{custom:true,min:23,max:25},'Auto low climbs to 2 degrees under high');
+  same(ui.next('Auto','min',1),null,'Auto keeps its 2 degree gap');
+}
+
+// Fahrenheit: a press always changes the displayed whole degree.
+{
+  const {newRanges}=require('./extract.js');
+  const ui=newRanges();
+  const ranges={heat:{min:17.5,max:26,step:0.5,selection:'manual',manualMin:17.5,manualMax:26,reference:null},
+    cool:{min:16,max:30.5,step:0.5,selection:'compatibility',manualMin:0,manualMax:0,reference:null},
+    auto:{min:16,max:30.5,step:0.5,selection:'compatibility',manualMin:0,manualMax:0,reference:null}};
+  ui.render({setpointRanges:ranges});
+  ui.unit('F');
+  same(ui.next('Heat','min',1),18.5,'64 °F at 17.5 and 18 °C, so the next press lands on 65 °F');
+  same(ui.next('Heat','min',-1),17,'down from 64 °F lands on 63 °F');
+}
+
+// One mode mask behind the list, with mode_mask_sanitize()'s rules mirrored.
+{
+  const {newRanges}=require('./extract.js');
+  const ui=newRanges();
+  ui.applyCaps(31);
+  ui.setCap('heat',false);
+  same(ui.caps(),2|4|8,'turning Heat off turns Auto off too');
+  same(ui.toasts.length,1,'and says so');
+  ui.setCap('auto',true);
+  same(ui.caps(),2|4|8,'Auto cannot turn on without Heat and Cool');
+  ui.setCap('cool',false);ui.setCap('dry',false);ui.setCap('fan',false);
+  same(ui.caps(),8,'the last real mode stays on');
+  ui.setCap('heat',true);ui.setCap('cool',true);ui.setCap('auto',true);
+  same(ui.caps(),1|2|8|16,'Auto turns back on once Heat and Cool are on');
+}
+
+// Home app and Link get one range: the union over the enabled modes.
+{
+  const {newRanges}=require('./extract.js');
+  const ui=newRanges();
+  const ranges={heat:{min:10,max:28,step:0.5,selection:'automatic',manualMin:0,manualMax:0,reference:{min:10,max:28,source:'fresh'}},
+    cool:{min:16,max:30.5,step:0.5,selection:'manual',manualMin:16,manualMax:30.5,reference:{min:19,max:30,source:'fresh'}},
+    auto:{min:19,max:28,step:0.5,selection:'automatic',manualMin:0,manualMax:0,reference:{min:19,max:28,source:'fresh'}}};
+  ui.render({setpointRanges:ranges});
+  ui.applyCaps(31);
+  same(ui.advertised(),{min:10,max:30.5},'spans every enabled mode');
+  ui.setCap('heat',false);
+  same(ui.advertised(),{min:16,max:30.5},'a disabled mode drops out');
+  ui.setCap('cool',false);
+  same(ui.advertised(),{min:16,max:30.5},'Dry keeps the shared Cool range in use');
 }
 
 // Whole-policy rollback preserves the exact profile/band used by real export.

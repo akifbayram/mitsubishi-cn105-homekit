@@ -57,9 +57,10 @@ body{
   position:relative; overflow:hidden;
 }
 @media (min-width:472px){
-  body{align-items:center; padding:24px 0;}
+  body{padding:24px 0;}
+  /* Fill the window like a phone screen, content from the top, even on a short page (a mode page). */
   .frame{
-    min-height:auto; border-radius:46px; border:1px solid var(--border);
+    min-height:calc(100vh - 48px); border-radius:46px; border:1px solid var(--border);
     box-shadow:0 34px 70px -24px rgba(0,0,0,.65);
   }
 }
@@ -441,6 +442,8 @@ button.wifi-row:active{background:var(--surface3);}
 .btn-secondary.quiet{color:var(--text2);}
 .btn-danger{background:var(--surface2);color:var(--red);}
 .save-btn[disabled],.btn-secondary[disabled],.btn-primary[disabled],.btn-danger[disabled]{opacity:.4;cursor:default;}
+/* A resting Save reads as grey, not faded blue: blue means there is something to save. */
+.save-btn[disabled]{background:var(--surface2);color:var(--text3);opacity:1;}
 .save-btn.scanning{opacity:.7;cursor:default;}
 .btn-row{display:flex;gap:9px;}
 .btn-row>*{flex:1;min-width:0;}
@@ -572,13 +575,55 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
 /* Utility */
 .hidden{display:none !important;}
 .spin-svg{animation:spin 1s linear infinite;}
-.range-setting{gap:12px;padding-left:0;padding-right:0;align-items:flex-start;border-bottom:none}
-.range-setting+.range-setting{border-top:1px solid var(--sep)}
-.range-fields{display:flex;flex-direction:column;align-items:flex-end;gap:8px}
-.range-fields select{font:inherit;font-size:13px;color:var(--text2);background:var(--bg);border:1px solid var(--sep);border-radius:7px;padding:5px}
-.range-bounds{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--text3)}
-.range-bounds[hidden]{display:none}
-.range-bounds input{width:55px;min-width:0;border:1px solid var(--sep);border-radius:5px;background:transparent;color:var(--text2);padding:4px;font:inherit;text-align:right}
+
+/* ===== Settings › Modes list and the per-mode page ===== */
+/* .mode-label looks like a .group-label but is not one: those become collapsible sections. */
+.mode-label{margin:0;padding:22px 12px 0 24px;font-size:12px;font-weight:500;color:var(--text2);letter-spacing:.3px;text-transform:uppercase;}
+.mode-row{width:100%;border:0;border-bottom:1px solid var(--sep);background:none;font:inherit;color:inherit;text-align:left;cursor:pointer;}
+.mode-row:active{background:var(--surface2);}
+.mode-row:focus-visible{outline-offset:-3px;}
+.mode-main{display:flex;flex-direction:column;flex:1;min-width:0;}
+.mode-ico{display:grid;place-items:center;flex:none;width:29px;height:29px;border-radius:7px;background:var(--c);color:#fff;transition:background .2s,color .2s;}
+.mode-ico svg{width:17px;height:17px;}
+.mode-ico.off{background:var(--surface3);color:var(--text2);}
+.mode-ico.lg{width:54px;height:54px;border-radius:14px;margin:0 auto 10px;}
+.mode-ico.lg svg{width:30px;height:30px;}
+.mode-val{font-size:15px;color:var(--text2);font-variant-numeric:tabular-nums;white-space:nowrap;}
+.mode-chev{width:14px;height:14px;flex:none;fill:none;stroke:var(--text3);stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round;}
+.mode-foot{margin:8px 24px 0;font-size:12px;color:var(--text2);font-variant-numeric:tabular-nums;}
+.save-status{margin-top:8px;font-size:12px;text-align:center;}
+.save-status:empty{display:none;}
+.mode-page{display:none;padding-bottom:28px;}
+.frame.mode-open>.container{display:none;}
+.frame.mode-open>.mode-page{display:block;animation:modePush .3s cubic-bezier(.2,.8,.2,1);}
+@keyframes modePush{from{transform:translateX(100%)}}
+/* Side padding matches the cards' 16px inset, so Save lines up with their right edge. */
+.mp-nav{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:20px 16px 4px;}
+.mp-back{justify-self:start;display:flex;align-items:center;gap:2px;padding:4px 4px 4px 0;border:none;background:none;color:var(--accent);font:inherit;font-size:16px;cursor:pointer;}
+.mp-back svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round;}
+.mp-title{margin:0;font-size:16px;font-weight:600;color:var(--text);}
+.mp-save{justify-self:end;height:32px;padding:0 16px;border:none;border-radius:16px;background:var(--accent);color:#fff;font:inherit;font-size:15px;font-weight:600;cursor:pointer;transition:background .2s,color .2s,opacity .15s;}
+.mp-save:active{opacity:.7;}
+.mp-save:disabled{background:var(--seg);color:var(--text3);cursor:default;opacity:1;}
+.mp-hero{text-align:center;padding:16px 22px 14px;}
+.mp-big{font-size:42px;font-weight:600;letter-spacing:-1px;color:var(--text);font-variant-numeric:tabular-nums;}
+.mp-big.off{color:var(--text3);}
+.mp-cap{min-height:17px;margin-top:2px;font-size:13px;color:var(--text2);}
+.mp-track{position:relative;height:8px;margin:18px 6px 6px;border-radius:4px;background:var(--seg);}
+.mp-band{position:absolute;top:-5px;bottom:-5px;border-radius:9px;border:1.5px dashed color-mix(in srgb,var(--c) 65%,transparent);}
+.mp-fill{position:absolute;top:0;bottom:0;border-radius:4px;background:var(--c);transition:left .2s,width .2s;}
+.mp-scale{display:flex;justify-content:space-between;margin:0 6px;font-size:11px;color:var(--text3);font-variant-numeric:tabular-nums;}
+.mp-check{width:20px;height:20px;flex:none;fill:none;stroke:var(--accent);stroke-width:2.6;stroke-linecap:round;stroke-linejoin:round;}
+.mode-row[aria-checked="false"] .mp-check{visibility:hidden;}
+.mp-steprow{display:flex;align-items:center;gap:12px;}
+.mp-val{min-width:44px;text-align:right;font-size:17px;font-weight:500;color:var(--text);font-variant-numeric:tabular-nums;}
+.stepper{display:inline-flex;flex:none;overflow:hidden;border-radius:9px;background:var(--surface2);}
+.stepper button{width:46px;height:32px;border:none;background:transparent;color:var(--text);font:inherit;font-size:20px;line-height:1;cursor:pointer;}
+.stepper button+button{border-left:1px solid var(--sep);}
+.stepper button:active{background:var(--surface3);}
+.stepper button:disabled{opacity:.3;cursor:default;}
+.stepper button:focus-visible{outline-offset:-3px;}
+.mp-warn{margin:8px 24px 0;font-size:12px;line-height:1.4;color:var(--orange);}
 </style>
 </head>
 <body>
@@ -587,6 +632,13 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
 <svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
 <symbol id="icCopy" viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></symbol>
 <symbol id="icCheck" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+<symbol id="icChev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
+<!-- Mode icons (mode selector, Modes list, mode page) carry their own fill/stroke. -->
+<symbol id="icHeat" viewBox="0 0 24 24"><path fill="currentColor" d="M13 2c.5 3-1.5 4-2.5 6S9 12 10 13c-.6-.2-1.6-1-1.8-2.5C6.8 12 6 13.4 6 15a6 6 0 0 0 12 0c0-4-3-5.5-5-13z"/></symbol>
+<symbol id="icCool" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" d="M12 2v20M3.3 7l17.4 10M20.7 7L3.3 17"/></symbol>
+<symbol id="icAuto" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.7"/><path fill="currentColor" d="M12 3a9 9 0 0 0 0 18z"/></symbol>
+<symbol id="icDry" viewBox="0 0 24 24"><path fill="currentColor" d="M12 3s6 6.5 6 11a6 6 0 0 1-12 0c0-4.5 6-11 6-11z"/></symbol>
+<symbol id="icFan" viewBox="0 0 24 24"><g fill="currentColor"><circle cx="12" cy="12" r="1.8"/><path d="M12 11c-.5-3 0-6 1.8-6 1.6 0 2 1.7 1 3.2-.8 1.2-1.9 2-2.8 2.8zM13 12c3-.5 6 0 6 1.8 0 1.6-1.7 2-3.2 1-1.2-.8-2-1.9-2.8-2.8zM12 13c.5 3 0 6-1.8 6-1.6 0-2-1.7-1-3.2.8-1.2 1.9-2 2.8-2.8zM11 12c-3 .5-6 0-6-1.8 0-1.6 1.7-2 3.2-1 1.2.8 2 1.9 2.8 2.8z"/></g></symbol>
 </defs></svg>
 <main class="frame">
 <div class="container">
@@ -616,11 +668,11 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     <div class="seg mode-seg" id="modeGrp">
       <div class="seg-bg"></div>
       <button data-v="off" onclick="setMode(this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3v9"/><path d="M6.5 7a8 8 0 1 0 11 0"/></svg>Off</button>
-      <button data-v="heat" onclick="setMode(this)"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M13 2c.5 3-1.5 4-2.5 6S9 12 10 13c-.6-.2-1.6-1-1.8-2.5C6.8 12 6 13.4 6 15a6 6 0 0 0 12 0c0-4-3-5.5-5-13z"/></svg>Heat</button>
-      <button data-v="cool" onclick="setMode(this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M12 2v20M3.3 7l17.4 10M20.7 7L3.3 17"/></svg>Cool</button>
-      <button data-v="auto" onclick="setMode(this)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor" stroke="none"/></svg>Auto</button>
-      <button data-v="dry" onclick="setMode(this)"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3s6 6.5 6 11a6 6 0 0 1-12 0c0-4.5 6-11 6-11z"/></svg>Dry</button>
-      <button data-v="fan" onclick="setMode(this)"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="1.8"/><path d="M12 11c-.5-3 0-6 1.8-6 1.6 0 2 1.7 1 3.2-.8 1.2-1.9 2-2.8 2.8zM13 12c3-.5 6 0 6 1.8 0 1.6-1.7 2-3.2 1-1.2-.8-2-1.9-2.8-2.8zM12 13c.5 3 0 6-1.8 6-1.6 0-2-1.7-1-3.2.8-1.2 1.9-2 2.8-2.8zM11 12c-3 .5-6 0-6-1.8 0-1.6 1.7-2 3.2-1 1.2.8 2 1.9 2.8 2.8z"/></svg>Fan</button>
+      <button data-v="heat" onclick="setMode(this)"><svg aria-hidden="true"><use href="#icHeat"/></svg>Heat</button>
+      <button data-v="cool" onclick="setMode(this)"><svg aria-hidden="true"><use href="#icCool"/></svg>Cool</button>
+      <button data-v="auto" onclick="setMode(this)"><svg aria-hidden="true"><use href="#icAuto"/></svg>Auto</button>
+      <button data-v="dry" onclick="setMode(this)"><svg aria-hidden="true"><use href="#icDry"/></svg>Dry</button>
+      <button data-v="fan" onclick="setMode(this)"><svg aria-hidden="true"><use href="#icFan"/></svg>Fan</button>
     </div>
   </div>
 
@@ -1017,32 +1069,6 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       </div>
     </div>
     <div class="inset-block">
-      <div class="lbl">Temperature Ranges</div>
-      <div class="sub">Choose automatic limits or a custom range. Values are in °C.</div>
-      <div class="range-setting inset-row">
-        <div><label class="lbl" for="rangeHeatSource">Heat</label><div class="sub" id="rangeHeatReference">Waiting for settings</div></div>
-        <div class="range-fields">
-          <select id="rangeHeatSource" aria-label="Heat range" onchange="editRange('Heat')"><option value="automatic">Automatic</option><option value="manual">Custom</option></select>
-          <div id="rangeHeatBounds" class="range-bounds" hidden><input type="number" id="rangeHeatMin" min="10" max="31" step="0.5" aria-label="Heat minimum Celsius" oninput="editRange('Heat')"><span>–</span><input type="number" id="rangeHeatMax" min="10" max="31" step="0.5" aria-label="Heat maximum Celsius" oninput="editRange('Heat')"><span>°C</span></div>
-        </div>
-      </div>
-      <div class="range-setting inset-row">
-        <div><label class="lbl" for="rangeCoolSource">Cool / Dry</label><div class="sub" id="rangeCoolReference">Waiting for settings</div></div>
-        <div class="range-fields">
-          <select id="rangeCoolSource" aria-label="Cool / Dry range" onchange="editRange('Cool')"><option value="automatic">Automatic</option><option value="manual">Custom</option></select>
-          <div id="rangeCoolBounds" class="range-bounds" hidden><input type="number" id="rangeCoolMin" min="10" max="31" step="0.5" aria-label="Cool / Dry minimum Celsius" oninput="editRange('Cool')"><span>–</span><input type="number" id="rangeCoolMax" min="10" max="31" step="0.5" aria-label="Cool / Dry maximum Celsius" oninput="editRange('Cool')"><span>°C</span></div>
-        </div>
-      </div>
-      <div class="range-setting inset-row">
-        <div><label class="lbl" for="rangeAutoSource">Auto</label><div class="sub" id="rangeAutoReference">Waiting for settings</div></div>
-        <div class="range-fields">
-          <select id="rangeAutoSource" aria-label="Auto range" onchange="editRange('Auto')"><option value="automatic">Automatic</option><option value="manual">Custom</option></select>
-          <div id="rangeAutoBounds" class="range-bounds" hidden><input type="number" id="rangeAutoMin" min="10" max="31" step="0.5" aria-label="Auto minimum Celsius" oninput="editRange('Auto')"><span>–</span><input type="number" id="rangeAutoMax" min="10" max="31" step="0.5" aria-label="Auto maximum Celsius" oninput="editRange('Auto')"><span>°C</span></div>
-        </div>
-      </div>
-      <div class="sub" id="rangeSaveStatus" role="status"></div>
-    </div>
-    <div class="inset-block">
       <div class="lbl">Vane Type</div>
       <div class="sub" style="margin:2px 0 10px">Match this to your indoor unit's louvers.</div>
       <div class="seg compact" id="vaneTypeGrp">
@@ -1052,32 +1078,9 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
         <button data-v="2" class="active" onclick="pickSetting(this)">Vert + Horiz</button>
       </div>
     </div>
-    <div class="inset-block">
-      <div class="lbl">Unit Capabilities</div>
-      <div class="sub" style="margin:2px 0 4px">Match this to the modes your unit supports. Unsupported modes are hidden here, in the Home app, and on a paired Link.</div>
-      <div class="inset-row" style="padding-left:0;padding-right:0">
-        <span class="lbl">Heat</span>
-        <label class="ios-toggle"><input type="checkbox" id="capHeat" onchange="onCapChange(this)" aria-label="Unit supports heating"><span class="ios-toggle-slider"></span></label>
-      </div>
-      <div class="inset-row" style="padding-left:0;padding-right:0">
-        <span class="lbl">Cool</span>
-        <label class="ios-toggle"><input type="checkbox" id="capCool" onchange="onCapChange(this)" aria-label="Unit supports cooling"><span class="ios-toggle-slider"></span></label>
-      </div>
-      <div class="inset-row" id="capAutoRow" style="padding-left:0;padding-right:0">
-        <div><div class="lbl">Auto</div><div class="sub">Requires both Heat and Cool.</div></div>
-        <label class="ios-toggle"><input type="checkbox" id="capAuto" onchange="onCapChange(this)" aria-label="Unit supports auto mode"><span class="ios-toggle-slider"></span></label>
-      </div>
-      <div class="inset-row" style="padding-left:0;padding-right:0">
-        <span class="lbl">Dry</span>
-        <label class="ios-toggle"><input type="checkbox" id="capDry" onchange="onCapChange(this)" aria-label="Unit supports dry mode"><span class="ios-toggle-slider"></span></label>
-      </div>
-      <div class="inset-row" style="padding-left:0;padding-right:0;border-bottom:none">
-        <span class="lbl">Fan</span>
-        <label class="ios-toggle"><input type="checkbox" id="capFan" onchange="onCapChange(this)" aria-label="Unit supports fan-only mode"><span class="ios-toggle-slider"></span></label>
-      </div>
-    </div>
     <div style="padding:14px 18px 18px;border-top:1px solid var(--sep)">
-      <button class="save-btn" onclick="saveConfig()">Save Settings</button>
+      <button class="save-btn" id="settingsSaveBtn" onclick="saveConfig()" disabled>Save Settings</button>
+      <div class="save-status" id="settingsSaveStatus" role="status"></div>
       <div class="btn-row" style="margin-top:9px">
         <button class="btn-secondary" onclick="exportSettings()">Export Settings</button>
         <label class="btn-secondary" style="cursor:pointer">Import Settings<input type="file" accept=".json,application/json" hidden onchange="importSettings(this)"></label>
@@ -1107,11 +1110,22 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
         </p>
         <button class="btn-danger" onclick="factoryReset()">Factory Reset&hellip;</button>
       </details>
-      <div id="capBanner" class="ble-banner muted" style="display:none;margin-top:12px;flex-direction:column;align-items:stretch;gap:10px;text-align:center">
-        Mode changes saved. Restart to apply them to HomeKit.
-        <button class="btn-danger" onclick="restartDevice()">Reboot Now</button>
-      </div>
     </div>
+  </div>
+
+  <!-- ===== MODES ===== -->
+  <h2 class="group-label">Modes</h2>
+  <div class="card flush" id="modeList">
+    <button type="button" class="inset-row mode-row" data-mode="heat" style="--c:var(--orange)" onclick="openModePage('heat')"><span class="mode-ico" id="modeIco-heat"><svg aria-hidden="true"><use href="#icHeat"/></svg></span><span class="mode-main"><span class="lbl">Heat</span><span class="sub" id="modeSub-heat" hidden></span></span><span class="mode-val" id="modeVal-heat"></span><svg class="mode-chev" aria-hidden="true"><use href="#icChev"/></svg></button>
+    <button type="button" class="inset-row mode-row" data-mode="cool" style="--c:var(--accent)" onclick="openModePage('cool')"><span class="mode-ico" id="modeIco-cool"><svg aria-hidden="true"><use href="#icCool"/></svg></span><span class="mode-main"><span class="lbl">Cool</span><span class="sub" id="modeSub-cool" hidden></span></span><span class="mode-val" id="modeVal-cool"></span><svg class="mode-chev" aria-hidden="true"><use href="#icChev"/></svg></button>
+    <button type="button" class="inset-row mode-row" data-mode="auto" style="--c:var(--purple)" onclick="openModePage('auto')"><span class="mode-ico" id="modeIco-auto"><svg aria-hidden="true"><use href="#icAuto"/></svg></span><span class="mode-main"><span class="lbl">Auto</span><span class="sub" id="modeSub-auto" hidden></span></span><span class="mode-val" id="modeVal-auto"></span><svg class="mode-chev" aria-hidden="true"><use href="#icChev"/></svg></button>
+    <button type="button" class="inset-row mode-row" data-mode="dry" style="--c:var(--teal)" onclick="openModePage('dry')"><span class="mode-ico" id="modeIco-dry"><svg aria-hidden="true"><use href="#icDry"/></svg></span><span class="mode-main"><span class="lbl">Dry</span><span class="sub" id="modeSub-dry" hidden></span></span><span class="mode-val" id="modeVal-dry"></span><svg class="mode-chev" aria-hidden="true"><use href="#icChev"/></svg></button>
+    <button type="button" class="inset-row mode-row" data-mode="fan" style="--c:var(--fan)" onclick="openModePage('fan')"><span class="mode-ico" id="modeIco-fan"><svg aria-hidden="true"><use href="#icFan"/></svg></span><span class="mode-main"><span class="lbl">Fan</span><span class="sub" id="modeSub-fan" hidden></span></span><span class="mode-val" id="modeVal-fan"></span><svg class="mode-chev" aria-hidden="true"><use href="#icChev"/></svg></button>
+  </div>
+  <p class="mode-foot">Home app &amp; Link range: <span id="modeEnv">--</span></p>
+  <div id="capBanner" class="ble-banner info" style="display:none;margin:12px 16px 0;flex-direction:column;align-items:stretch;gap:10px;text-align:center">
+    Mode changes saved. Restart to apply them to HomeKit.
+    <button class="btn-danger" onclick="restartDevice()">Reboot Now</button>
   </div>
 
   <!-- ===== FIRMWARE ===== -->
@@ -1205,6 +1219,45 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   <div class="footer">{{BRAND_NAME}} · <span id="footerFw">{{FW_VERSION}}</span> · <a id="supportLink" href="{{SUPPORT_URL}}" target="_blank" rel="noopener">Help &amp; Support</a></div>
 
 </div>
+
+<!-- Drill-in from Device › Modes: replaces .container while open (see openModePage). -->
+<section class="mode-page" id="modePage" aria-labelledby="mpTitle">
+  <div class="mp-nav">
+    <button type="button" class="mp-back" id="mpBack" onclick="leaveModePage()"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>Back</button>
+    <h2 class="mp-title" id="mpTitle"></h2>
+    <button type="button" class="mp-save" id="mpSave" onclick="saveConfig()" disabled>Save</button>
+  </div>
+  <div class="mp-hero">
+    <span class="mode-ico lg" id="mpIco"></span>
+    <div class="mp-big" id="mpBig"></div>
+    <div class="mp-cap" id="mpCap"></div>
+    <div id="mpTrack">
+      <div class="mp-track"><div class="mp-band" id="mpBand"></div><div class="mp-fill" id="mpFill"></div></div>
+      <div class="mp-scale"><span id="mpScaleLo"></span><span id="mpScaleHi"></span></div>
+    </div>
+  </div>
+  <div class="card flush">
+    <div class="inset-row" id="mpAvailRow">
+      <div><div class="lbl">Available</div><div class="sub" id="mpAvailSub" hidden>Needs Heat and Cool</div></div>
+      <label class="ios-toggle"><input type="checkbox" id="mpAvail" onchange="toggleModeCap(this)" aria-label="Available on this unit"><span class="ios-toggle-slider"></span></label>
+    </div>
+  </div>
+  <div id="mpRange">
+    <h3 class="mode-label" id="mpRangeLbl"></h3>
+    <div class="card flush" role="radiogroup" aria-labelledby="mpRangeLbl">
+      <button type="button" class="inset-row mode-row" role="radio" id="mpOptUnit" onclick="pickModeRange(false)"><span class="mode-main"><span class="lbl">Heat Pump Limits</span><span class="sub" id="mpUnitSub"></span></span><svg class="mp-check" aria-hidden="true"><use href="#icCheck"/></svg></button>
+      <button type="button" class="inset-row mode-row" role="radio" id="mpOptCustom" onclick="pickModeRange(true)"><span class="mode-main"><span class="lbl">Custom Limits</span></span><svg class="mp-check" aria-hidden="true"><use href="#icCheck"/></svg></button>
+    </div>
+    <div id="mpCustom">
+      <h3 class="mode-label">Custom Range</h3>
+      <div class="card flush">
+        <div class="inset-row"><span class="lbl">Low</span><span class="mp-steprow"><span class="mp-val" id="mpLow"></span><span class="stepper"><button type="button" id="mpLowDn" onclick="nudgeModeRange('min',-1)" aria-label="Lower the low limit">&minus;</button><button type="button" id="mpLowUp" onclick="nudgeModeRange('min',1)" aria-label="Raise the low limit">+</button></span></span></div>
+        <div class="inset-row"><span class="lbl">High</span><span class="mp-steprow"><span class="mp-val" id="mpHigh"></span><span class="stepper"><button type="button" id="mpHighDn" onclick="nudgeModeRange('max',-1)" aria-label="Lower the high limit">&minus;</button><button type="button" id="mpHighUp" onclick="nudgeModeRange('max',1)" aria-label="Raise the high limit">+</button></span></span></div>
+      </div>
+    </div>
+    <p class="mp-warn" id="mpWarn" hidden></p>
+  </div>
+</section>
 </main>
 
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
@@ -3386,35 +3439,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   function getSegVal(id){var g=document.getElementById(id),a=g&&g.querySelector('button.active');return a?a.getAttribute('data-v'):null;}
 
   // ── Unit capabilities (mode mask) ──────────────────────────────────────────
-  // Bit values mirror MODE_CAP_* in main/mode_caps.h.
-  var CAP_BITS={heat:1,cool:2,dry:4,fan:8,auto:16};
-  var CAP_IDS={heat:'capHeat',cool:'capCool',dry:'capDry',fan:'capFan',auto:'capAuto'};
-  function getCapMask(){var m=0;for(var k in CAP_IDS){if($(CAP_IDS[k]).checked)m|=CAP_BITS[k];}return m;}
-  var lastCapMask=null;
-  function applyCapMask(m){
-    if(m===lastCapMask)return;  // runs on every 1 Hz push; skip unchanged
-    lastCapMask=m;
-    for(var k in CAP_IDS){$(CAP_IDS[k]).checked=!!(m&CAP_BITS[k]);}
-    updateCapDeps();
-  }
-  function updateCapDeps(){
-    // Mirrors mode_mask_sanitize() for UX; the firmware re-sanitizes anyway.
-    var autoOk=$('capHeat').checked&&$('capCool').checked;
-    var auto=$('capAuto');
-    auto.disabled=!autoOk;
-    if(!autoOk&&auto.checked)auto.checked=false;
-    $('capAutoRow').classList.toggle('cap-disabled',!autoOk);
-  }
-  window.onCapChange=function(inp){
-    if(!($('capHeat').checked||$('capCool').checked||$('capDry').checked||$('capFan').checked)){
-      inp.checked=true;
-      showToast('At least one mode must stay enabled',true);
-      return;
-    }
-    updateCapDeps();
-    markSettingsEdited();
-    lastCapMask=null;  // user edited: next push must reapply even if the mask value is unchanged
-  };
+  // The mask itself lives in the range-settings block with the Modes list.
   var lastModeVis=null;
   function applyModeVisibility(mask,currentMode){
     // A disabled mode that is currently active (e.g. set via IR remote) stays
@@ -3447,13 +3472,29 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     }
   };
   // ── range-settings:start
-  var rangeDraft={},rangeRequestId=0,rangePending=null,rangeEditVersion=0;
+  // Settings › Modes: one list for the capability mask and the setpoint ranges.
+  var rangeDraft={},rangeRequestId=0,rangePending=null,rangeEditVersion=0,rangeState=null,openMode=null;
   var RANGE_NAMES=['Heat','Cool','Auto'];
-  function markSettingsEdited(){settingsDirty=true;rangeEditVersion++;}
-  function rangeStatus(text,error){
-    $('rangeSaveStatus').textContent=text;
-    $('rangeSaveStatus').style.color=error?'var(--red)':'var(--text3)';
+  var COMPAT_RANGE={min:16,max:30.5};  // compatibilityRange in main/setpoint_range.cpp
+  // Bit values mirror MODE_CAP_* in main/mode_caps.h.
+  var CAP_BITS={heat:1,cool:2,dry:4,fan:8,auto:16},CAP_REAL=15,CAP_HEAT_COOL=3;
+  var capMask=null,lastCapMask=null;
+  // The range each mode uses (Dry shares Cool's, Fan has none) and the modes keeping each range in use.
+  var MODE_RANGE={heat:'Heat',cool:'Cool',auto:'Auto',dry:'Cool',fan:null};
+  var RANGE_CAPS={Heat:1,Cool:6,Auto:16};
+  var MODE_KEYS=['heat','cool','auto','dry','fan'];
+  function markSettingsEdited(){settingsDirty=true;rangeEditVersion++;renderSaveState();}
+  // Save lights up only while there is something to save, and rests while a save is in flight.
+  function renderSaveState(){
+    var idle=!settingsDirty||!!rangePending;
+    ['settingsSaveBtn','mpSave'].forEach(function(id){$(id).disabled=idle;});
   }
+  function rangeStatus(text,error){
+    $('settingsSaveStatus').textContent=text;
+    $('settingsSaveStatus').style.color=error?'var(--red)':'var(--text3)';
+  }
+  // The mode page's Save has no status line under it, so failures also toast.
+  function saveFailed(text){rangeStatus(text,true);showToast(text,true);}
   function validRangeSettings(st){
     RANGE_NAMES.forEach(function(name){
       var source=st['range'+name+'Source'],min=st['range'+name+'Min'],max=st['range'+name+'Max'];
@@ -3477,10 +3518,11 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   function submitCheckedConfig(cfg,success){
     validRangeSettings(cfg);
     cfg.requestId=++rangeRequestId;
-    if(!send(cfg)){rangeStatus('Not connected — not saved',true);return false;}
+    if(!send(cfg)){saveFailed('Not connected — not saved');return false;}
     rangePending={id:cfg.requestId,version:rangeEditVersion,success:success};
+    renderSaveState();
     var id=cfg.requestId;
-    setTimeout(function(){if(rangePending&&rangePending.id===id){rangePending=null;rangeStatus('Save not confirmed. Reconnect and try again.',true);}},10000);
+    setTimeout(function(){if(rangePending&&rangePending.id===id){rangePending=null;renderSaveState();saveFailed('Save not confirmed. Reconnect and try again.');}},10000);
     rangeStatus('Saving…',false);
     return true;
   }
@@ -3490,47 +3532,169 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       return;
     }
     var pending=rangePending;rangePending=null;
-    if(!msg.ok){rangeStatus(msg.msg||'Could not save settings',true);showToast(msg.msg||'Could not save settings',true);return;}
+    renderSaveState();
+    if(!msg.ok){saveFailed(msg.msg||'Could not save settings');return;}
     if(pending.version!==rangeEditVersion){rangeStatus('Earlier changes saved. Save your latest edits.',false);return;}
     settingsDirty=false;
+    renderSaveState();
     RANGE_NAMES.forEach(function(name){if(rangeDraft[name])rangeDraft[name].dirty=false;});
     rangeStatus(pending.success||'Settings saved',false);
     showToast(pending.success||'Settings saved');
   }
   function renderRangeSettings(st){
-    var ranges=st.setpointRanges;
-    if(!ranges) return;
+    if(!st.setpointRanges) return;
+    rangeState=st.setpointRanges;
     RANGE_NAMES.forEach(function(name){
-      var r=ranges[name.toLowerCase()],draft=rangeDraft[name];
-      if(!r) return;
-      if(!draft||!draft.dirty){
-        draft=rangeDraft[name]={source:r.selection,min:r.manualMin>=10?r.manualMin:r.min,max:r.manualMax>=10?r.manualMax:r.max,dirty:false};
-        var select=$('range'+name+'Source');
-        var compatibility=select.querySelector('option[value="compatibility"]');
-        if(r.selection==='compatibility'&&!compatibility){
-          var opt=document.createElement('option');opt.value='compatibility';opt.textContent='Existing limits';select.appendChild(opt);
-        }else if(r.selection!=='compatibility'&&compatibility){select.removeChild(compatibility);}
-        select.value=draft.source;
-        $('range'+name+'Min').value=draft.min;$('range'+name+'Max').value=draft.max;
-      }
-      $('range'+name+'Bounds').hidden=draft.source!=='manual';
-      var ref=r.reference;
-      $('range'+name+'Reference').textContent=ref?(ref.source==='fresh'?'Detected: ':'Last known: ')+ref.min+'–'+ref.max+' °C':'No detected limits';
+      var r=rangeOf(name),draft=rangeDraft[name];
+      if(r&&(!draft||!draft.dirty))
+        rangeDraft[name]={source:r.selection,min:r.manualMin>=10?r.manualMin:r.min,max:r.manualMax>=10?r.manualMax:r.max,dirty:false};
     });
+    renderModes();
   }
-  window.editRange=function(name){
-    rangeDraft[name]={source:$('range'+name+'Source').value,min:$('range'+name+'Min').value,max:$('range'+name+'Max').value,dirty:true};
-    $('range'+name+'Bounds').hidden=rangeDraft[name].source!=='manual';
-    markSettingsEdited();
-  };
+  function rangeOf(name){return rangeState&&rangeState[name.toLowerCase()];}
+  // The range a mode uses under the draft: the device's own resolution until edited,
+  // then a preview (Heat Pump Limits previews the unit's report before grid snapping).
+  // Compatibility reads as Custom; it stays compatibility until a bound changes,
+  // because a manual 16–30.5 is off-grid on whole-degree units.
+  function rangeView(name){
+    var r=rangeOf(name),d=rangeDraft[name];
+    if(!r||!d) return null;
+    var lim=!d.dirty?r:d.source==='manual'?d:d.source==='automatic'&&r.reference?r.reference:COMPAT_RANGE;
+    return {min:lim.min,max:lim.max,custom:d.source!=='automatic',reference:r.reference};
+  }
+  // Custom bounds move on the unit's grid: whole degrees from 16 on Legacy units.
+  // Compatibility always reports a 0.5 step, so it borrows the grid from a mode that doesn't.
+  function rangeGrid(name){
+    var r=rangeOf(name),step=r&&r.selection!=='compatibility'?r.step:0;
+    if(!step) RANGE_NAMES.forEach(function(n){var o=rangeOf(n);if(o&&o.selection!=='compatibility'&&o.step>step)step=o.step;});
+    step=step||0.5;
+    return {step:step,lo:step>=1?16:10,hi:31,gap:name==='Auto'?2:step};
+  }
+  function snapGrid(v,step,up){return (up?Math.ceil(v/step-1e-9):Math.floor(v/step+1e-9))*step;}
+  function fmtLimit(c){return tempUnit==='F'?String(setpointF(c)):c%1?c.toFixed(1):String(c);}
+  function fmtLimits(r){return fmtLimit(r.min)+'–'+fmtLimit(r.max)+'°';}
+  // A press moves to the next grid value whose label differs (°F labels are whole degrees);
+  // null when that would leave the envelope or close the gap to the other bound.
+  function nextBound(name,which,dir){
+    var v=rangeView(name);
+    if(!v) return null;
+    var g=rangeGrid(name),shown=fmtLimit(v[which]);
+    var other=which==='min'?snapGrid(v.max,g.step,false):snapGrid(v.min,g.step,true);
+    var x=snapGrid(v[which],g.step,dir<0)+dir*g.step;
+    while(fmtLimit(x)===shown&&x>g.lo&&x<g.hi) x+=dir*g.step;
+    var lo=which==='min'?g.lo:other+g.gap,hi=which==='min'?other-g.gap:g.hi;
+    return x<lo||x>hi?null:x;
+  }
+  function nudgeRange(name,which,dir){
+    var x=nextBound(name,which,dir);
+    if(x==null) return;
+    var v=rangeView(name),step=rangeGrid(name).step,d=rangeDraft[name];
+    d.source='manual';
+    d.min=which==='min'?x:snapGrid(v.min,step,true);
+    d.max=which==='max'?x:snapGrid(v.max,step,false);
+    d.dirty=true;
+    markSettingsEdited();renderModes();
+  }
+  // Custom returns to the saved custom range (compatibility or manual), else starts from the unit's.
+  function pickRange(name,custom){
+    var r=rangeOf(name),d=rangeDraft[name],from=rangeView(name);
+    if(!from||custom===from.custom) return;
+    if(!custom) d.source='automatic';
+    else if(r.selection==='compatibility') d.source='compatibility';
+    else{
+      d.source='manual';
+      d.min=r.selection==='manual'?r.manualMin:from.min;
+      d.max=r.selection==='manual'?r.manualMax:from.max;
+    }
+    d.dirty=d.source!==r.selection||d.source==='manual'&&(d.min!==r.manualMin||d.max!==r.manualMax);
+    markSettingsEdited();renderModes();
+  }
+  function capOn(key){return capMask!=null&&!!(capMask&CAP_BITS[key]);}
+  function autoBlocked(key){return key==='auto'&&capMask!=null&&(capMask&CAP_HEAT_COOL)!==CAP_HEAT_COOL;}
+  function getCapMask(){return capMask;}
+  function applyCapMask(m){
+    if(m===lastCapMask)return;  // runs on every 1 Hz push; skip unchanged
+    lastCapMask=capMask=m;
+    renderModes();
+  }
+  // Mirrors mode_mask_sanitize() for feedback; the firmware re-sanitizes anyway.
+  function setCap(key,on){
+    var m=on?capMask|CAP_BITS[key]:capMask&~CAP_BITS[key];
+    if(on&&autoBlocked(key)){showToast('Auto needs Heat and Cool',true);return false;}
+    if(!(m&CAP_REAL)){showToast('At least one mode must stay enabled',true);return false;}
+    if(m&CAP_BITS.auto&&(m&CAP_HEAT_COOL)!==CAP_HEAT_COOL){m&=~CAP_BITS.auto;showToast('Auto turned off too. It needs Heat and Cool.');}
+    capMask=m;
+    lastCapMask=null;  // user edited: the push after saving must reapply even if the mask is unchanged
+    markSettingsEdited();renderModes();
+    return true;
+  }
+  // What HomeKit and a paired Link offer: the union of the enabled modes' ranges.
+  function advertisedRange(){
+    var a=null;
+    RANGE_NAMES.forEach(function(name){
+      var v=rangeView(name);
+      if(!v||!(capMask&RANGE_CAPS[name])) return;
+      a=a?{min:Math.min(a.min,v.min),max:Math.max(a.max,v.max)}:{min:v.min,max:v.max};
+    });
+    return a;
+  }
+  function rangeTag(v){
+    if(v.custom) return 'Custom limits';
+    return !v.reference?'Default':v.reference.source==='fresh'?'Heat pump limits':'Heat pump limits (last known)';
+  }
+  function rangeTitle(name){
+    if(name!=='Cool') return name;
+    return capOn('cool')&&capOn('dry')?'Cool & Dry':capOn('dry')?'Dry':'Cool';
+  }
+  function renderModes(){
+    MODE_KEYS.forEach(function(key){
+      var on=capOn(key),name=MODE_RANGE[key],v=name&&rangeView(name),sub='',val='';
+      if(!on){val=capMask==null?'':'Off';if(autoBlocked(key))sub='Needs Heat and Cool';}
+      else if(v){sub=rangeTag(v)+(rangeDraft[name].dirty?' · Edited':'');val=fmtLimits(v);}
+      $('modeSub-'+key).textContent=sub;
+      $('modeSub-'+key).hidden=!sub;
+      $('modeVal-'+key).textContent=val;
+      $('modeIco-'+key).classList.toggle('off',!on);
+    });
+    var a=advertisedRange();
+    $('modeEnv').textContent=a?fmtLimits(a):'--';
+    if(openMode) renderModePage();
+  }
+  // Position on the 10–31 °C editable span.
+  function spanPct(c){return (c-10)/21*100+'%';}
+  function renderModePage(){
+    var key=openMode,on=capOn(key),blocked=autoBlocked(key),name=MODE_RANGE[key],v=on&&name&&rangeView(name);
+    $('mpBig').textContent=!on?'Off':v?fmtLimits(v):'On';
+    $('mpBig').classList.toggle('off',!on);
+    $('mpCap').textContent=v?rangeTag(v):'';
+    $('mpIco').classList.toggle('off',!on);
+    $('mpAvail').checked=on;
+    $('mpAvail').disabled=blocked;
+    $('mpAvailRow').classList.toggle('cap-disabled',blocked);
+    $('mpAvailSub').hidden=!blocked;
+    $('mpTrack').hidden=$('mpRange').hidden=!v;
+    if(!v) return;
+    var ref=v.reference,out=v.custom&&ref&&(v.min<ref.min||v.max>ref.max);
+    $('mpFill').style.left=spanPct(v.min);$('mpFill').style.width='calc('+spanPct(v.max)+' - '+spanPct(v.min)+')';
+    $('mpBand').hidden=!ref;
+    if(ref){$('mpBand').style.left=spanPct(ref.min);$('mpBand').style.width='calc('+spanPct(ref.max)+' - '+spanPct(ref.min)+')';}
+    $('mpScaleLo').textContent=fmtLimit(10)+'°';$('mpScaleHi').textContent=fmtLimit(31)+'°';
+    $('mpRangeLbl').textContent=rangeTitle(name)+' Range';
+    $('mpUnitSub').textContent=ref?fmtLimits(ref)+(ref.source==='fresh'?'':' · last known'):'Not reported, using '+fmtLimits(COMPAT_RANGE);
+    $('mpOptUnit').setAttribute('aria-checked',String(!v.custom));
+    $('mpOptCustom').setAttribute('aria-checked',String(v.custom));
+    $('mpCustom').hidden=!v.custom;
+    $('mpLow').textContent=fmtLimit(v.min)+'°';$('mpHigh').textContent=fmtLimit(v.max)+'°';
+    $('mpLowDn').disabled=nextBound(name,'min',-1)==null;$('mpLowUp').disabled=nextBound(name,'min',1)==null;
+    $('mpHighDn').disabled=nextBound(name,'max',-1)==null;$('mpHighUp').disabled=nextBound(name,'max',1)==null;
+    $('mpWarn').hidden=!out;
+    if(out) $('mpWarn').textContent='The unit may refuse setpoints outside '+fmtLimits(ref)+'.';
+  }
   function addRangeEdits(cfg){
     RANGE_NAMES.forEach(function(name){
       var draft=rangeDraft[name];if(!draft||!draft.dirty)return;
       cfg['range'+name+'Source']=draft.source;
-      if(draft.source==='manual'){
-        cfg['range'+name+'Min']=draft.min===''?NaN:Number(draft.min);
-        cfg['range'+name+'Max']=draft.max===''?NaN:Number(draft.max);
-      }
+      if(draft.source==='manual'){cfg['range'+name+'Min']=draft.min;cfg['range'+name+'Max']=draft.max;}
     });
     return cfg;
   }
@@ -3549,16 +3713,58 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     if(failed) el.textContent='Range not applied · Reported '+fmtTemp(st.actualTarget)+'° · Requested '+fmtTemp(st.desiredTarget)+'°';
   }
   // ── range-settings:end
+
+  // ── Mode page navigation ─────────────────────────────────────────────────────
+  // The page swaps in for .container and gets a history entry, so the browser's
+  // Back (and the iOS edge swipe) returns to the list instead of leaving the site.
+  var MODE_PAGE={heat:['Heat','var(--orange)','icHeat'],cool:['Cool','var(--accent)','icCool'],
+    auto:['Auto','var(--purple)','icAuto'],dry:['Dry','var(--teal)','icDry'],fan:['Fan','var(--fan)','icFan']};
+  var modeReturnY=0;
+  window.openModePage=function(key){
+    var page=$('modePage'),meta=MODE_PAGE[key];
+    openMode=key;modeReturnY=window.scrollY;
+    page.style.setProperty('--c',meta[1]);
+    $('mpTitle').textContent=meta[0];
+    $('mpIco').innerHTML='<svg aria-hidden="true"><use href="#'+meta[2]+'"/></svg>';
+    renderModePage();
+    // Push before scrolling: the browser restores the list entry's saved scroll on Back.
+    history.pushState({modePage:key},'');
+    page.parentNode.classList.add('mode-open');
+    window.scrollTo(0,0);
+    $('mpBack').focus({preventScroll:true});
+  };
+  function closeModePage(){
+    if(!openMode) return;
+    var row=document.querySelector('.mode-row[data-mode="'+openMode+'"]');
+    openMode=null;
+    $('modePage').parentNode.classList.remove('mode-open');
+    // Thumbs positioned while the list was hidden measured zero widths.
+    refreshSegThumbs(document.querySelector('.frame>.container'));
+    window.scrollTo(0,modeReturnY);
+    if(row) row.focus({preventScroll:true});
+  }
+  window.leaveModePage=function(){
+    if(history.state&&history.state.modePage) history.back();
+    else closeModePage();
+  };
+  window.addEventListener('popstate',closeModePage);
+  document.addEventListener('keydown',function(e){if(e.key==='Escape'&&openMode)leaveModePage();});
+  window.toggleModeCap=function(input){if(!setCap(openMode,input.checked))input.checked=capOn(openMode);};
+  window.pickModeRange=function(custom){pickRange(MODE_RANGE[openMode],custom);};
+  window.nudgeModeRange=function(which,dir){nudgeRange(MODE_RANGE[openMode],which,dir);};
+
   window.saveConfig=function(){
     var name=$('cfgDeviceName').value.replace(/["\\\n\r]/g,'').trim();
     var baud=parseInt(getSegVal('baudGrp'));
     var cfg={
       cmd:'config',deviceName:name,pollInterval:parseInt($('cfgPoll').value),
-      cn105Baud:baud,vaneConfig:parseInt(getSegVal('vaneTypeGrp')),modeMask:getCapMask(),
+      cn105Baud:baud,vaneConfig:parseInt(getSegVal('vaneTypeGrp')),
       trustedHost:$('cfgTrustedHost').value.trim().toLowerCase()
     };
+    // Before the first state push there is no mask to send; the device keeps its own.
+    if(getCapMask()!=null) cfg.modeMask=getCapMask();
     try{submitCheckedConfig(addRangeEdits(cfg),'Settings saved');}
-    catch(e){rangeStatus(e.message,true);showToast(e.message,true);}
+    catch(e){saveFailed(e.message);}
 
   };
 
