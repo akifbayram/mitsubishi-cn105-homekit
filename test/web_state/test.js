@@ -70,7 +70,7 @@ same(DEFAULTS.target.min, '16', 'the page starts in Celsius');
   ui.ack({requestId:1,ok:true});
   assert.strictEqual(ui.dirty(),true,'late ack cannot approve newer submission');
   same(ui.toasts,[],'out of order ack shows no success');
-  ui.editAgain();
+  ui.editDevice();
   ui.ack({requestId:2,ok:true});
   assert.strictEqual(ui.dirty(),true,'matching ack cannot approve edits made after sending');
   same(ui.toasts,[],'newer unsaved edit remains visible');
@@ -93,6 +93,7 @@ same(DEFAULTS.target.min, '16', 'the page starts in Celsius');
   offline.submit({cmd:'config'},'Settings saved');
   same(offline.toasts,['Not connected — not saved'],'an unsendable save says so wherever Save was pressed');
   const silent=newRanges();
+  silent.editDevice();
   silent.submit({cmd:'config'},'Settings saved');
   silent.fireTimers();
   same(silent.toasts,['Save not confirmed. Reconnect and try again.'],'an unconfirmed save says so too');
@@ -173,6 +174,50 @@ const limits=(v)=>({custom:v.custom,min:v.min,max:v.max});
   same(ui.next('Heat','min',-1),17,'down from 64 °F lands on 63 °F');
 }
 
+// Every upgraded install starts with all three modes on compatibility, which always
+// reports 0.5, so there is no grid to borrow: step whole degrees from 16, valid on
+// both encodings, rather than send a half degree a Legacy unit rejects.
+{
+  const {newRanges}=require('./extract.js');
+  const ui=newRanges();
+  const compat={min:16,max:30.5,step:0.5,selection:'compatibility',manualMin:0,manualMax:0,reference:null};
+  ui.render({setpointRanges:{heat:{...compat},cool:{...compat},auto:{...compat}}});
+  same(ui.next('Heat','min',-1),null,'no grid known: Low stops at 16');
+  ui.nudge('Heat','min',1);
+  same(ui.addEdits({cmd:'config'}),{cmd:'config',rangeHeatSource:'manual',rangeHeatMin:17,rangeHeatMax:30},'no grid known: whole degrees, 30.5 snapped to 30');
+}
+
+// No mask before the first state push: the Available switch must not invent one,
+// or Save would send a single-mode mask and switch every other mode off.
+{
+  const {newRanges}=require('./extract.js');
+  const ui=newRanges();
+  same(ui.setCap('heat',false),false,'no mask yet, nothing changes');
+  same(ui.caps(),null,'and nothing would be sent');
+}
+
+// Save lights only while something differs from what the device holds.
+{
+  const {newRanges}=require('./extract.js');
+  const ui=newRanges();
+  const ranges={heat:{min:16,max:30.5,step:0.5,selection:'compatibility',manualMin:0,manualMax:0,reference:{min:10,max:28,source:'fresh'}},
+    cool:{min:19,max:30,step:0.5,selection:'automatic',manualMin:0,manualMax:0,reference:{min:19,max:30,source:'fresh'}},
+    auto:{min:19,max:28,step:0.5,selection:'automatic',manualMin:0,manualMax:0,reference:{min:19,max:28,source:'fresh'}}};
+  ui.render({setpointRanges:ranges});
+  ui.applyCaps(31);
+  same(saveIdle(ui),[true,true],'nothing changed: Save rests');
+  ui.setCap('fan',false);
+  same(saveIdle(ui),[false,false],'a mode switched off lights Save');
+  ui.setCap('fan',true);
+  same(saveIdle(ui),[true,true],'switching it back on leaves nothing to save');
+  ui.pick('Heat',false);
+  same(saveIdle(ui),[false,false],'a different range choice lights Save');
+  ui.pick('Heat',true);
+  same(saveIdle(ui),[true,true],'returning to the saved choice leaves nothing to save');
+  ui.editDevice();
+  same(saveIdle(ui),[false,false],'a Device card edit lights Save');
+}
+
 // One mode mask behind the list, with mode_mask_sanitize()'s rules mirrored.
 {
   const {newRanges}=require('./extract.js');
@@ -203,6 +248,8 @@ const limits=(v)=>({custom:v.custom,min:v.min,max:v.max});
   same(ui.advertised(),{min:16,max:30.5},'a disabled mode drops out');
   ui.setCap('cool',false);
   same(ui.advertised(),{min:16,max:30.5},'Dry keeps the shared Cool range in use');
+  ui.setCap('dry',false);
+  same(ui.advertised(),{min:16,max:30.5},'Fan alone: the firmware falls back to the compatibility range');
 }
 
 // Whole-policy rollback preserves the exact profile/band used by real export.

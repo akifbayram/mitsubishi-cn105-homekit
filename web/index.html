@@ -608,7 +608,6 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
 .mp-hero{text-align:center;padding:16px 22px 14px;}
 .mp-big{font-size:42px;font-weight:600;letter-spacing:-1px;color:var(--text);font-variant-numeric:tabular-nums;}
 .mp-big.off{color:var(--text3);}
-.mp-cap{min-height:17px;margin-top:2px;font-size:13px;color:var(--text2);}
 .mp-track{position:relative;height:8px;margin:18px 6px 6px;border-radius:4px;background:var(--seg);}
 .mp-band{position:absolute;top:-5px;bottom:-5px;border-radius:9px;border:1.5px dashed color-mix(in srgb,var(--c) 65%,transparent);}
 .mp-fill{position:absolute;top:0;bottom:0;border-radius:4px;background:var(--c);transition:left .2s,width .2s;}
@@ -1220,7 +1219,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
 
 </div>
 
-<!-- Drill-in from Device › Modes: replaces .container while open (see openModePage). -->
+<!-- Drill-in from the Modes list: replaces .container while open (see openModePage). -->
 <section class="mode-page" id="modePage" aria-labelledby="mpTitle">
   <div class="mp-nav">
     <button type="button" class="mp-back" id="mpBack" onclick="leaveModePage()"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>Back</button>
@@ -1230,7 +1229,6 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   <div class="mp-hero">
     <span class="mode-ico lg" id="mpIco"></span>
     <div class="mp-big" id="mpBig"></div>
-    <div class="mp-cap" id="mpCap"></div>
     <div id="mpTrack">
       <div class="mp-track"><div class="mp-band" id="mpBand"></div><div class="mp-fill" id="mpFill"></div></div>
       <div class="mp-scale"><span id="mpScaleLo"></span><span id="mpScaleHi"></span></div>
@@ -3438,8 +3436,8 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
 
   function getSegVal(id){var g=document.getElementById(id),a=g&&g.querySelector('button.active');return a?a.getAttribute('data-v'):null;}
 
-  // ── Unit capabilities (mode mask) ──────────────────────────────────────────
-  // The mask itself lives in the range-settings block with the Modes list.
+  // ── Mode visibility ──────────────────────────────────────────────────────────
+  // The mode mask itself lives in the range-settings block with the Modes list.
   var lastModeVis=null;
   function applyModeVisibility(mask,currentMode){
     // A disabled mode that is currently active (e.g. set via IR remote) stays
@@ -3458,7 +3456,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
 
   // A tap on a Save-Settings segmented control (Vane Type, CN105 Baud Rate):
   // select it and hold off state pushes until the user saves.
-  window.pickSetting=function(b){setActive(b.parentNode.id,b.getAttribute('data-v'));markSettingsEdited();};
+  window.pickSetting=function(b){setActive(b.parentNode.id,b.getAttribute('data-v'));markDeviceEdited();};
   // Log level lives in the Logs card, away from the Device card's Save button,
   // so it applies on tap. The firmware's config handler takes each field
   // independently, so a logLevel-only frame is a valid partial config.
@@ -3477,16 +3475,23 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   var RANGE_NAMES=['Heat','Cool','Auto'];
   var COMPAT_RANGE={min:16,max:30.5};  // compatibilityRange in main/setpoint_range.cpp
   // Bit values mirror MODE_CAP_* in main/mode_caps.h.
-  var CAP_BITS={heat:1,cool:2,dry:4,fan:8,auto:16},CAP_REAL=15,CAP_HEAT_COOL=3;
-  var capMask=null,lastCapMask=null;
+  var CAP_BITS={heat:1,cool:2,dry:4,fan:8,auto:16};
+  var CAP_HEAT_COOL=CAP_BITS.heat|CAP_BITS.cool,CAP_REAL=CAP_HEAT_COOL|CAP_BITS.dry|CAP_BITS.fan;
+  // capSaved is the mask the device holds; capMask the edited copy (null until the first push).
+  var capMask=null,capSaved=null,lastCapMask=null,deviceEdited=false;
   // The range each mode uses (Dry shares Cool's, Fan has none) and the modes keeping each range in use.
   var MODE_RANGE={heat:'Heat',cool:'Cool',auto:'Auto',dry:'Cool',fan:null};
-  var RANGE_CAPS={Heat:1,Cool:6,Auto:16};
+  var RANGE_CAPS={Heat:CAP_BITS.heat,Cool:CAP_BITS.cool|CAP_BITS.dry,Auto:CAP_BITS.auto};
   var MODE_KEYS=['heat','cool','auto','dry','fan'];
   function markSettingsEdited(){settingsDirty=true;rangeEditVersion++;renderSaveState();}
-  // Save lights up only while there is something to save, and rests while a save is in flight.
+  // Device card fields keep no saved copy to compare against, so any edit counts.
+  function markDeviceEdited(){deviceEdited=true;markSettingsEdited();}
+  function hasUnsavedChanges(){
+    return deviceEdited||capMask!==capSaved||RANGE_NAMES.some(function(name){return rangeDraft[name]&&rangeDraft[name].dirty;});
+  }
+  // Save lights up only while something differs from the device, and rests while a save is in flight.
   function renderSaveState(){
-    var idle=!settingsDirty||!!rangePending;
+    var idle=!hasUnsavedChanges()||!!rangePending;
     ['settingsSaveBtn','mpSave'].forEach(function(id){$(id).disabled=idle;});
   }
   function rangeStatus(text,error){
@@ -3535,9 +3540,9 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     renderSaveState();
     if(!msg.ok){saveFailed(msg.msg||'Could not save settings');return;}
     if(pending.version!==rangeEditVersion){rangeStatus('Earlier changes saved. Save your latest edits.',false);return;}
-    settingsDirty=false;
-    renderSaveState();
+    settingsDirty=false;deviceEdited=false;capSaved=capMask;
     RANGE_NAMES.forEach(function(name){if(rangeDraft[name])rangeDraft[name].dirty=false;});
+    renderSaveState();
     rangeStatus(pending.success||'Settings saved',false);
     showToast(pending.success||'Settings saved');
   }
@@ -3559,15 +3564,19 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   function rangeView(name){
     var r=rangeOf(name),d=rangeDraft[name];
     if(!r||!d) return null;
-    var lim=!d.dirty?r:d.source==='manual'?d:d.source==='automatic'&&r.reference?r.reference:COMPAT_RANGE;
+    var lim=COMPAT_RANGE;
+    if(!d.dirty) lim=r;
+    else if(d.source==='manual') lim=d;
+    else if(d.source==='automatic'&&r.reference) lim=r.reference;
     return {min:lim.min,max:lim.max,custom:d.source!=='automatic',reference:r.reference};
   }
   // Custom bounds move on the unit's grid: whole degrees from 16 on Legacy units.
-  // Compatibility always reports a 0.5 step, so it borrows the grid from a mode that doesn't.
+  // Compatibility always reports a 0.5 step, so it borrows the grid from a mode that doesn't;
+  // with nothing to borrow (every upgraded install), whole degrees from 16 suit both grids.
   function rangeGrid(name){
     var r=rangeOf(name),step=r&&r.selection!=='compatibility'?r.step:0;
     if(!step) RANGE_NAMES.forEach(function(n){var o=rangeOf(n);if(o&&o.selection!=='compatibility'&&o.step>step)step=o.step;});
-    step=step||0.5;
+    step=step||1;
     return {step:step,lo:step>=1?16:10,hi:31,gap:name==='Auto'?2:step};
   }
   function snapGrid(v,step,up){return (up?Math.ceil(v/step-1e-9):Math.floor(v/step+1e-9))*step;}
@@ -3614,11 +3623,13 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   function getCapMask(){return capMask;}
   function applyCapMask(m){
     if(m===lastCapMask)return;  // runs on every 1 Hz push; skip unchanged
-    lastCapMask=capMask=m;
+    lastCapMask=capMask=capSaved=m;
     renderModes();
   }
   // Mirrors mode_mask_sanitize() for feedback; the firmware re-sanitizes anyway.
+  // Before the first push there is no mask to edit, only one to invent.
   function setCap(key,on){
+    if(capMask==null) return false;
     var m=on?capMask|CAP_BITS[key]:capMask&~CAP_BITS[key];
     if(on&&autoBlocked(key)){showToast('Auto needs Heat and Cool',true);return false;}
     if(!(m&CAP_REAL)){showToast('At least one mode must stay enabled',true);return false;}
@@ -3628,15 +3639,17 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     markSettingsEdited();renderModes();
     return true;
   }
-  // What HomeKit and a paired Link offer: the union of the enabled modes' ranges.
+  // What HomeKit and a paired Link offer: the union of the enabled modes' ranges,
+  // or the compatibility range when only Fan is on (resolve() in setpoint_range.cpp).
   function advertisedRange(){
+    if(capMask==null) return null;
     var a=null;
     RANGE_NAMES.forEach(function(name){
       var v=rangeView(name);
       if(!v||!(capMask&RANGE_CAPS[name])) return;
       a=a?{min:Math.min(a.min,v.min),max:Math.max(a.max,v.max)}:{min:v.min,max:v.max};
     });
-    return a;
+    return a||{min:COMPAT_RANGE.min,max:COMPAT_RANGE.max};
   }
   function rangeTag(v){
     if(v.custom) return 'Custom limits';
@@ -3658,29 +3671,30 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     });
     var a=advertisedRange();
     $('modeEnv').textContent=a?fmtLimits(a):'--';
+    renderSaveState();
     if(openMode) renderModePage();
   }
-  // Position on the 10–31 °C editable span.
+  // Position and width on the 10–31 °C editable span.
   function spanPct(c){return (c-10)/21*100+'%';}
+  function placeOnSpan(el,r){el.style.left=spanPct(r.min);el.style.width='calc('+spanPct(r.max)+' - '+spanPct(r.min)+')';}
   function renderModePage(){
     var key=openMode,on=capOn(key),blocked=autoBlocked(key),name=MODE_RANGE[key],v=on&&name&&rangeView(name);
     $('mpBig').textContent=!on?'Off':v?fmtLimits(v):'On';
     $('mpBig').classList.toggle('off',!on);
-    $('mpCap').textContent=v?rangeTag(v):'';
     $('mpIco').classList.toggle('off',!on);
     $('mpAvail').checked=on;
-    $('mpAvail').disabled=blocked;
+    $('mpAvail').disabled=blocked||capMask==null;
     $('mpAvailRow').classList.toggle('cap-disabled',blocked);
     $('mpAvailSub').hidden=!blocked;
     $('mpTrack').hidden=$('mpRange').hidden=!v;
     if(!v) return;
     var ref=v.reference,out=v.custom&&ref&&(v.min<ref.min||v.max>ref.max);
-    $('mpFill').style.left=spanPct(v.min);$('mpFill').style.width='calc('+spanPct(v.max)+' - '+spanPct(v.min)+')';
+    placeOnSpan($('mpFill'),v);
     $('mpBand').hidden=!ref;
-    if(ref){$('mpBand').style.left=spanPct(ref.min);$('mpBand').style.width='calc('+spanPct(ref.max)+' - '+spanPct(ref.min)+')';}
+    if(ref) placeOnSpan($('mpBand'),ref);
     $('mpScaleLo').textContent=fmtLimit(10)+'°';$('mpScaleHi').textContent=fmtLimit(31)+'°';
     $('mpRangeLbl').textContent=rangeTitle(name)+' Range';
-    $('mpUnitSub').textContent=ref?fmtLimits(ref)+(ref.source==='fresh'?'':' · last known'):'Not reported, using '+fmtLimits(COMPAT_RANGE);
+    $('mpUnitSub').textContent=ref?fmtLimits(ref)+(ref.source==='fresh'?'':' · last known'):'Not reported';
     $('mpOptUnit').setAttribute('aria-checked',String(!v.custom));
     $('mpOptCustom').setAttribute('aria-checked',String(v.custom));
     $('mpCustom').hidden=!v.custom;
@@ -4482,9 +4496,9 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   }
   $('cfgSSID').addEventListener('input',checkWifiFields);
   $('cfgPass').addEventListener('input',checkWifiFields);
-  $('cfgDeviceName').addEventListener('input',function(){markSettingsEdited();});
-  $('cfgPoll').addEventListener('input',function(){markSettingsEdited();});
-  $('cfgTrustedHost').addEventListener('input',function(){markSettingsEdited();});
+  $('cfgDeviceName').addEventListener('input',function(){markDeviceEdited();});
+  $('cfgPoll').addEventListener('input',function(){markDeviceEdited();});
+  $('cfgTrustedHost').addEventListener('input',function(){markDeviceEdited();});
 
   // ── Init ───────────────────────────────────────────────────────────────────
   initCollapsibleSections();

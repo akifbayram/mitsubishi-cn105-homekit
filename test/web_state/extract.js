@@ -162,7 +162,7 @@ const rangeFactory = vm.runInThisContext(
   'setCap:setCap,caps:getCapMask,applyCaps:applyCapMask,advertised:advertisedRange,\n' +
   'dirty:function(){return settingsDirty},pending:function(){return rangePending},\n' +
   'offline:function(){online=false},fireTimers:function(){timers.splice(0).forEach(function(f){f()})},\n' +
-  'editAgain:markSettingsEdited,exportFile:function(st){lastState=st;window.exportSettings();return exported}};\n' +
+  'editDevice:markDeviceEdited,exportFile:function(st){lastState=st;window.exportSettings();return exported}};\n' +
   '};})', { filename:'web/index.html#range-settings' }
 )();
 
