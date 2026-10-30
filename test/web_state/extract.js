@@ -142,7 +142,7 @@ const roomRenderFactory = vm.runInThisContext(
 const rangeFactory = vm.runInThisContext(
   '(function(){return function(){\n' +
   'var els={},sent=[],toasts=[],settingsDirty=true,lastState=null,window={},exported=null,RUNNING_FW_VER="test",tempUnit="C";\n' +
-  'function $(id){if(!els[id])els[id]={value:"",textContent:"",hidden:false,style:{},classList:{toggle:function(){}},setAttribute:function(){},querySelector:function(){return null},appendChild:function(){}};return els[id]}\n' +
+  'function $(id){if(!els[id])els[id]={value:"",textContent:"",hidden:false,style:{},classList:{toggle:function(){}},setAttribute:function(k,v){this[k]=v},querySelector:function(){return null},appendChild:function(){}};return els[id]}\n' +
   'function setpointF(c){return Math.round(c*9/5+32)}\n' +   // ftabId 0: linear; the table is the temp-unit suite's job
   'var document={body:{appendChild:function(){}},createElement:function(){return {click:function(){},remove:function(){}}}};\n' +
   'function Blob(parts){this.parts=parts}\n' +
@@ -162,7 +162,8 @@ const rangeFactory = vm.runInThisContext(
   'setCap:setCap,caps:getCapMask,applyCaps:applyCapMask,advertised:advertisedRange,\n' +
   'dirty:function(){return settingsDirty},pending:function(){return rangePending},\n' +
   'offline:function(){online=false},fireTimers:function(){timers.splice(0).forEach(function(f){f()})},\n' +
-  'editDevice:markDeviceEdited,exportFile:function(st){lastState=st;window.exportSettings();return exported}};\n' +
+  'editDevice:markDeviceEdited,exportFile:function(st){lastState=st;window.exportSettings();return exported},\n' +
+  'pickAutoSingle:pickAutoSingle,openPage:function(k){openMode=k;renderModePage()}};\n' +
   '};})', { filename:'web/index.html#range-settings' }
 )();
 
@@ -194,4 +195,12 @@ const bleScanView = vm.runInThisContext(
 if (typeof bleScanView !== 'function')
   throw new Error('ble-scan-view block does not define bleScanView()');
 
-module.exports = { newUi: factory, newRanges: rangeFactory, newRoom: roomFactory, newRoomRender: roomRenderFactory, mergeState, bleScanView, DEFAULTS };
+// Which Auto control the Climate card shows, its headline, and whether a saved
+// setting still waits for a restart, as pure functions of a state frame.
+const autoViewBlock = vm.runInThisContext(
+  '(function(){' + block('auto-view') + '\nreturn {autoView:autoView,singleHeadline:singleHeadline,restartPending:restartPending};})',
+  { filename: 'web/index.html#auto-view' }
+)();
+
+module.exports = { newUi: factory, newRanges: rangeFactory, newRoom: roomFactory, newRoomRender: roomRenderFactory, mergeState, bleScanView, DEFAULTS,
+  autoView: autoViewBlock.autoView, singleHeadline: autoViewBlock.singleHeadline, restartPending: autoViewBlock.restartPending };

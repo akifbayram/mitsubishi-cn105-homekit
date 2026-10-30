@@ -344,13 +344,14 @@ Result saveAutoSingle(bool single) {
     std::lock_guard<std::mutex> lock(controlMutex);
     if (!controller || SettingsStore::isFactoryResetting()) return Result::Unavailable;
     if (settings.get().autoSingleSetpoint == single) return Result::Ok;
-    if (!single && settings.autoSingleBoot()) {
-        if (!settings.setpointSettingsAvailable()) return Result::Unavailable;
-        if (!handAutoToUnitLocked()) return Result::StorageFailure;
-    }
-    settings.get().autoSingleSetpoint = single;
-    settings.save();
-    return Result::Ok;
+    const bool handOver = !single && settings.autoSingleBoot();
+    if (handOver && !settings.setpointSettingsAvailable()) return Result::Unavailable;
+    const auto previous = settings.setpointSettings();
+    if (handOver && !handAutoToUnitLocked()) return Result::StorageFailure;
+    if (settings.saveAutoSingle(single)) return Result::Ok;
+    // Still Single, so the handover must not outlive the mode that asked for it.
+    if (handOver) settings.saveSetpointSettings(previous);
+    return Result::StorageFailure;
 }
 
 void loop() {

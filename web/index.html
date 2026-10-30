@@ -712,8 +712,8 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
           </div>
         </div>
         <p class="range-help hidden" id="autoOwnerNote">This range was set from the heat pump's own controller, so this device is not steering it. Move either slider to take over.</p>
-        <p class="range-help">Auto change-over is handled by the heat pump: it switches between heating and cooling once the room drifts about 4&deg;F (2&deg;C) past the set point, so a switch can lag. On a multi-zone system an idle head left in Auto can hold the outdoor unit's mode and block other zones &mdash; Mitsubishi advises against Auto there.</p>
       </div>
+      <p class="range-help hidden" id="autoHelp">Auto change-over is handled by the heat pump: it switches between heating and cooling once the room drifts about 4&deg;F (2&deg;C) past the set point, so a switch can lag. On a multi-zone system an idle head left in Auto can hold the outdoor unit's mode and block other zones &mdash; Mitsubishi advises against Auto there.</p>
     </div>
   </div>
 
@@ -1238,6 +1238,13 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     <div class="inset-row" id="mpAvailRow">
       <div><div class="lbl">Available</div><div class="sub" id="mpAvailSub" hidden>Needs Heat and Cool</div></div>
       <label class="ios-toggle"><input type="checkbox" id="mpAvail" onchange="toggleModeCap(this)" aria-label="Available on this unit"><span class="ios-toggle-slider"></span></label>
+    </div>
+  </div>
+  <div id="mpAuto" hidden>
+    <h3 class="mode-label" id="mpSpLbl">Auto Set Point</h3>
+    <div class="card flush" role="radiogroup" aria-labelledby="mpSpLbl">
+      <button type="button" class="inset-row mode-row" role="radio" id="mpSpRange" onclick="pickAutoSingle(false)"><span class="mode-main"><span class="lbl">Range</span></span><svg class="mp-check" aria-hidden="true"><use href="#icCheck"/></svg></button>
+      <button type="button" class="inset-row mode-row" role="radio" id="mpSpSingle" onclick="pickAutoSingle(true)"><span class="mode-main"><span class="lbl">Single</span><span class="sub">The heat pump's own set point</span></span><svg class="mp-check" aria-hidden="true"><use href="#icCheck"/></svg></button>
     </div>
   </div>
   <div id="mpRange">
@@ -1876,15 +1883,31 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       lbl.textContent='Idle · holding'; targetTemp.textContent=fmtTemp(s.heatThresh)+'–'+fmtTemp(s.coolThresh); targetTemp.style.color='var(--text2)';
     }
   }
+  // ── auto-view:start
+  // Which Auto control the card shows: the band ('range') or the plain setpoint
+  // slider ('single'). Keyed on the mode this boot runs; a frame without the
+  // field is Range. Tested by test/web_state/.
+  function autoView(s){
+    if(!s||s.mode!=='auto'||!s.connected||!s.power) return null;
+    return s.autoSingleBoot?'single':'range';
+  }
   // Single-mode headline reacts to the active mode (Cooling to / Heating to / …).
-  function setSingleHeadline(s){
+  function singleHeadline(s,view){
     var H={heat:'Heating to',cool:'Cooling to',dry:'Drying to',fan:'Fan only'};
-    $('setLbl').textContent=(!s||!s.power)?'Off':(H[s.mode]||'Set');
+    return (!s||!s.power)?'Off':view==='single'?'Auto at':(H[s.mode]||'Set');
+  }
+  function restartPending(s){
+    return s.modeMask!==s.modeMaskBoot||(s.autoSingle!=null&&s.autoSingleBoot!=null&&s.autoSingle!==s.autoSingleBoot);
+  }
+  // ── auto-view:end
+  function setSingleHeadline(s,view){
+    $('setLbl').textContent=singleHeadline(s,view);
     targetTemp.style.color='';
   }
   function renderDual(s){
-    var auto=s&&s.mode==='auto'&&s.connected&&s.power;
-    if(auto){
+    var view=autoView(s);
+    $('autoHelp').classList.toggle('hidden',!view);
+    if(view==='range'){
       dualTemp.classList.remove('hidden');
       sliderRow.style.display='none';
       $('targetWrap').style.display='none';
@@ -1899,7 +1922,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       dualTemp.classList.add('hidden');
       sliderRow.style.display='';
       $('targetWrap').style.display='';
-      setSingleHeadline(s);
+      setSingleHeadline(s,view);
     }
   }
 
@@ -2516,7 +2539,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     if(s.modeMask!=null){
       applyModeVisibility(s.modeMask, s.power?s.mode:null);
       if(s.modeMaskBoot!=null){
-        $('capBanner').style.display=(s.modeMask!==s.modeMaskBoot)?'flex':'none';
+        $('capBanner').style.display=restartPending(s)?'flex':'none';
       }
     }
 
@@ -3479,6 +3502,8 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   var CAP_HEAT_COOL=CAP_BITS.heat|CAP_BITS.cool,CAP_REAL=CAP_HEAT_COOL|CAP_BITS.dry|CAP_BITS.fan;
   // capSaved is the mask the device holds; capMask the edited copy (null until the first push).
   var capMask=null,capSaved=null,lastCapMask=null,deviceEdited=false;
+  // The Auto setpoint mode the device holds and its edited copy (null until a push reports it).
+  var autoSingleDraft=null,autoSingleSaved=null;
   // The range each mode uses (Dry shares Cool's, Fan has none) and the modes keeping each range in use.
   var MODE_RANGE={heat:'Heat',cool:'Cool',auto:'Auto',dry:'Cool',fan:null};
   var RANGE_CAPS={Heat:CAP_BITS.heat,Cool:CAP_BITS.cool|CAP_BITS.dry,Auto:CAP_BITS.auto};
@@ -3487,7 +3512,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   // Device card fields keep no saved copy to compare against, so any edit counts.
   function markDeviceEdited(){deviceEdited=true;markSettingsEdited();}
   function hasUnsavedChanges(){
-    return deviceEdited||capMask!==capSaved||RANGE_NAMES.some(function(name){return rangeDraft[name]&&rangeDraft[name].dirty;});
+    return deviceEdited||capMask!==capSaved||autoSingleDraft!==autoSingleSaved||RANGE_NAMES.some(function(name){return rangeDraft[name]&&rangeDraft[name].dirty;});
   }
   // Save lights up only while something differs from the device, and rests while a save is in flight.
   function renderSaveState(){
@@ -3519,6 +3544,8 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       ['Source','Min','Max'].forEach(function(suffix){var key='range'+name+suffix;if(Object.prototype.hasOwnProperty.call(from,key))to[key]=from[key];});
     });
     ['heatThresh','coolThresh'].forEach(function(key){if(Object.prototype.hasOwnProperty.call(from,key))to[key]=from[key];});
+    // Absent in files from before the setting: the device keeps its mode.
+    if(typeof from.autoSingle==='boolean') to.autoSingle=from.autoSingle;
   }
   function submitCheckedConfig(cfg,success){
     validRangeSettings(cfg);
@@ -3540,7 +3567,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     renderSaveState();
     if(!msg.ok){saveFailed(msg.msg||'Could not save settings');return;}
     if(pending.version!==rangeEditVersion){rangeStatus('Earlier changes saved. Save your latest edits.',false);return;}
-    settingsDirty=false;deviceEdited=false;capSaved=capMask;
+    settingsDirty=false;deviceEdited=false;capSaved=capMask;autoSingleSaved=autoSingleDraft;
     RANGE_NAMES.forEach(function(name){if(rangeDraft[name])rangeDraft[name].dirty=false;});
     renderSaveState();
     rangeStatus(pending.success||'Settings saved',false);
@@ -3554,6 +3581,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       if(r&&(!draft||!draft.dirty))
         rangeDraft[name]={source:r.selection,min:r.manualMin>=10?r.manualMin:r.min,max:r.manualMax>=10?r.manualMax:r.max,dirty:false};
     });
+    if(st.autoSingle!=null&&autoSingleDraft===autoSingleSaved) autoSingleDraft=autoSingleSaved=st.autoSingle;
     renderModes();
   }
   function rangeOf(name){return rangeState&&rangeState[name.toLowerCase()];}
@@ -3616,6 +3644,12 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       d.max=r.selection==='manual'?r.manualMax:from.max;
     }
     d.dirty=d.source!==r.selection||d.source==='manual'&&(d.min!==r.manualMin||d.max!==r.manualMax);
+    markSettingsEdited();renderModes();
+  }
+  // Before a push reports the mode there is nothing to edit, only one to invent.
+  function pickAutoSingle(on){
+    if(autoSingleDraft==null) return;
+    autoSingleDraft=on;
     markSettingsEdited();renderModes();
   }
   function capOn(key){return capMask!=null&&!!(capMask&CAP_BITS[key]);}
@@ -3686,6 +3720,9 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     $('mpAvail').disabled=blocked||capMask==null;
     $('mpAvailRow').classList.toggle('cap-disabled',blocked);
     $('mpAvailSub').hidden=!blocked;
+    $('mpAuto').hidden=!(key==='auto'&&on);
+    $('mpSpRange').setAttribute('aria-checked',String(autoSingleDraft!==true));
+    $('mpSpSingle').setAttribute('aria-checked',String(autoSingleDraft===true));
     $('mpTrack').hidden=$('mpRange').hidden=!v;
     if(!v) return;
     var ref=v.reference,out=v.custom&&ref&&(v.min<ref.min||v.max>ref.max);
@@ -3710,9 +3747,12 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       cfg['range'+name+'Source']=draft.source;
       if(draft.source==='manual'){cfg['range'+name+'Min']=draft.min;cfg['range'+name+'Max']=draft.max;}
     });
+    // Only an edit is sent: an unknown mode must never read as Range.
+    if(autoSingleDraft!==autoSingleSaved) cfg.autoSingle=autoSingleDraft;
     return cfg;
   }
   function exportRangeSettings(st,out){
+    if(st.autoSingle!=null) out.autoSingle=st.autoSingle;
     if(!st.setpointRanges) return;
     RANGE_NAMES.forEach(function(name){
       var r=st.setpointRanges[name.toLowerCase()];if(!r)return;
@@ -3765,6 +3805,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   document.addEventListener('keydown',function(e){if(e.key==='Escape'&&openMode)leaveModePage();});
   window.toggleModeCap=function(input){if(!setCap(openMode,input.checked))input.checked=capOn(openMode);};
   window.pickModeRange=function(custom){pickRange(MODE_RANGE[openMode],custom);};
+  window.pickAutoSingle=pickAutoSingle;
   window.nudgeModeRange=function(which,dir){nudgeRange(MODE_RANGE[openMode],which,dir);};
 
   window.saveConfig=function(){

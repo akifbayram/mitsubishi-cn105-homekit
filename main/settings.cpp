@@ -233,6 +233,18 @@ bool SettingsStore::saveDetectedRanges(const SetpointRange::Detection& next) {
     _detected.freshMask = 0; // This store holds history; the driver owns freshness.
     return true;
 }
+bool SettingsStore::saveAutoSingle(bool single) {
+    std::lock_guard<std::mutex> lock(s_settingsWriteMutex);
+    if (isFactoryResetting() || !_handle) return false;
+    if (nvs_set_u8(_handle, "autoSingle", single ? 1 : 0) != ESP_OK || isFactoryResetting() ||
+        nvs_commit(_handle) != ESP_OK || isFactoryResetting()) {
+        discardPending(_handle);
+        return false;
+    }
+    _settings.autoSingleSetpoint = single;
+    ++_generation;
+    return true;
+}
 
 // Key renames (RevK `.old=` pattern): on boot, if newKey is absent and oldKey
 // holds a value, the value is copied (type read from NVS, so entries need no

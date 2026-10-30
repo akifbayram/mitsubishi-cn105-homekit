@@ -165,6 +165,9 @@ public:
     bool saveSetpointSettings(const SetpointSettings& next);
     SetpointRange::Detection detectedRanges() const;
     bool saveDetectedRanges(const SetpointRange::Detection& next);
+    // Checked save of the Auto setpoint mode: on failure the saved choice stays
+    // as it was, so the caller can report it and the user can retry.
+    bool saveAutoSingle(bool single);
     // Boot-latched before factory erase; all normal NVS writers must stop.
     static void beginFactoryReset();
     static bool isFactoryResetting();

@@ -248,7 +248,7 @@ static bool webConfigTypes(const cJSON* root) {
         if (cJSON_HasObjectItem(root, key) && !webGetInt(root, key, &integer)) return false;
     for (const char* key : {"deviceName", "trustedHost", "tempUnit", "bleAddr", "bleAddMac", "bleAddName", "bleRenName"})
         if (cJSON_HasObjectItem(root, key) && !cJSON_IsString(cJSON_GetObjectItemCaseSensitive(root, key))) return false;
-    for (const char* key : {"betaChannel", "bleEnabled"})
+    for (const char* key : {"betaChannel", "bleEnabled", "autoSingle"})
         if (cJSON_HasObjectItem(root, key) && !cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(root, key))) return false;
     return true;
 }
@@ -346,6 +346,10 @@ static SetpointRange::Result webApplyRangeConfig(const char* text, char* reply, 
         next.autoOwnerUnit = false;
     }
     if (valid) result = edited ? SetpointControl::applySettings(next) : Result::Ok;
+    // Stored now, applied at the next boot. A file without the key keeps the mode.
+    bool autoSingle;
+    if (result == Result::Ok && webGetBool(root.get(), "autoSingle", &autoSingle))
+        result = SetpointControl::saveAutoSingle(autoSingle);
     webRangeReply(root.get(), result, reply, cap);
     return result;
 }
@@ -951,6 +955,10 @@ static void webAppendRangeState(char* buf, size_t cap, int* n, int* want) {
                 saved.autoOwnerUnit ? "true" : "false");
     stateAppend(buf, cap, n, want, ",\"savedHeatThresh\":%.1f,\"savedCoolThresh\":%.1f",
                 saved.band.heat2 / 2.f, saved.band.cool2 / 2.f);
+    // Saved and boot-latched Auto setpoint mode; they differ until a restart.
+    stateAppend(buf, cap, n, want, ",\"autoSingle\":%s,\"autoSingleBoot\":%s",
+                settings.get().autoSingleSetpoint ? "true" : "false",
+                settings.autoSingleBoot() ? "true" : "false");
     for (int i = 0; i < 2; ++i) {
         const float value = i ? status.desiredC : status.actualC;
         const char* field = i ? "desiredTarget" : "actualTarget";
@@ -990,10 +998,11 @@ void WebUI::pushState() {
     // config + HomeKit (setup code + URI) + 195 room/Link + 215 blend +
     // roomOffs + 278 legacy BLE + 928 for four bleSensors[] entries with
     // 48-char escaped names + 1 closing brace = 3602 B. The complete ranges,
-    // saved preferences/band/owner, three detection references and target status
-    // add at most 1144 B (bounded enum strings and half-degree endpoints).
-    // 3602 + 1144 = 4746 B; 5120 leaves 374 B of headroom. Whole sections
-    // still roll back atomically if future fields exceed that budget.
+    // saved preferences/band/owner, Auto setpoint mode, three detection
+    // references and target status add at most 1186 B (bounded enum strings
+    // and half-degree endpoints). 3602 + 1186 = 4788 B; 5120 leaves 332 B of
+    // headroom. Whole sections still roll back atomically if future fields
+    // exceed that budget.
     constexpr size_t bufSz = 5120;
     // Tail the sections can never eat, so the closing brace (and the
     // truncation marker) always fit however full the body ran.

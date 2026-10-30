@@ -229,6 +229,7 @@ struct SetpointSettings {
 struct SettingsStore {
  DeviceSettings s;int saves=0;SetpointSettings policy;SetpointRange::Detection detected{};bool singleBoot=false;
  DeviceSettings& get(){return s;}void save(){++saves;}bool autoSingleBoot()const{return singleBoot;}
+ bool saveAutoSingle(bool v){s.autoSingleSetpoint=v;++saves;return true;}
  SetpointSettings setpointSettings()const{auto p=policy;p.band={(int16_t)std::lround(s.heatingThreshold*2),(int16_t)std::lround(s.coolingThreshold*2)};p.autoOwnerUnit=s.autoOwnerUnit;return p;}
  bool setpointSettingsAvailable()const{return true;}
  bool saveSetpointSettings(const SetpointSettings& p){if(p.band.heat2!=s.heatingThreshold*2||p.band.cool2!=s.coolingThreshold*2||p.autoOwnerUnit!=s.autoOwnerUnit)++saves;policy=p;s.heatingThreshold=p.band.heat2/2.f;s.coolingThreshold=p.band.cool2/2.f;s.autoOwnerUnit=p.autoOwnerUnit;return true;}
