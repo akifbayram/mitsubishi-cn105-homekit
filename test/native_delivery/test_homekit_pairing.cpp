@@ -29,6 +29,34 @@ int main(int,char**argv){
   settings.get().autoOwnerUnit=true;settings.save();reboot();CHECK(settings.get().autoOwnerUnit);
   CHECK(hkNvs.committed["ac-settings"]["autoOwner"]==std::vector<uint8_t>{1});
  }
+ CASE("range_shape_unchanged_no_bump") {
+  CHECK(start());reboot();CHECK(start());
+  CHECK(hkNvs.committed["hk-meta"]["svcShape"]==std::vector<uint8_t>{0x1F});CHECK(configCalls==0);
+ }
+ CASE("auto_single_defaults_range") {
+  CHECK(!settings.get().autoSingleSetpoint);CHECK(!settings.autoSingleBoot());settings.save();
+  CHECK(hkNvs.committed["ac-settings"]["autoSingle"]==std::vector<uint8_t>{0});
+ }
+ CASE("auto_single_absent_key_is_range") {
+  // Any device upgrading from older firmware has settings but no key.
+  settings.save();hkNvs.committed["ac-settings"].erase("autoSingle");reboot();
+  CHECK(!settings.get().autoSingleSetpoint);CHECK(!settings.autoSingleBoot());
+ }
+ CASE("auto_single_latches_at_boot") {
+  settings.get().autoSingleSetpoint=true;settings.save();CHECK(!settings.autoSingleBoot());
+  reboot();CHECK(settings.get().autoSingleSetpoint);CHECK(settings.autoSingleBoot());
+  CHECK(hkNvs.committed["ac-settings"]["autoSingle"]==std::vector<uint8_t>{1});
+ }
+ CASE("single_shape_bumps_once") {
+  CHECK(start());settings.get().autoSingleSetpoint=true;settings.save();reboot();CHECK(start());
+  CHECK(configCalls==1);CHECK(hkNvs.committed["hk-meta"]["svcShape"]==std::vector<uint8_t>{0x5F});
+  reboot();CHECK(start());CHECK(configCalls==1);
+ }
+ CASE("back_to_range_bumps_again") {
+  CHECK(start());settings.get().autoSingleSetpoint=true;settings.save();reboot();CHECK(start());
+  settings.get().autoSingleSetpoint=false;settings.save();reboot();CHECK(start());
+  CHECK(configCalls==2);CHECK(hkNvs.committed["hk-meta"]["svcShape"]==std::vector<uint8_t>{0x1F});
+ }
  CASE("factory_reset_blocks_first_start") {
   settings.beginFactoryReset();
   CHECK(settings.isFactoryResetting());

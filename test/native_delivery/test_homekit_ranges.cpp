@@ -11,6 +11,19 @@ static void validCache() {
         if (c->floating)
             CHECK(c->value.f >= c->min && c->value.f <= c->max);
 }
+static std::vector<std::string> thermostatUuids() {
+    std::vector<std::string> uuids;
+    for (auto *c : thermostat->chars)
+        uuids.push_back(c->uuid);
+    return uuids;
+}
+// A boot that finds Single in NVS, through the real settings load.
+static void bootSingle(CN105Controller &c) {
+    hkNvs.committed["ac-settings"]["autoSingle"] = {1};
+    settings = SettingsStore{};
+    settings.begin();
+    SetpointControl::begin(c);
+}
 int main(int, char **argv) {
     settings.begin();
     Pump pump;
@@ -39,6 +52,86 @@ int main(int, char **argv) {
         CHECK(s_targetTemp->min == 10 && s_targetTemp->max == 30);
         CHECK(s_heatThresh->min == 18 && s_coolThresh->max == 26);
         validCache();
+    }
+    CASE("range_thermostat_chars_match_origin_main") {
+        // Characteristic order sets the IIDs paired controllers hold.
+        homekit_create_thermostat(&acc);
+        CHECK(thermostatUuids() == (std::vector<std::string>{
+            HAP_CHAR_UUID_CURRENT_HEATING_COOLING_STATE,
+            HAP_CHAR_UUID_TARGET_HEATING_COOLING_STATE,
+            HAP_CHAR_UUID_CURRENT_TEMPERATURE,
+            HAP_CHAR_UUID_TARGET_TEMPERATURE,
+            HAP_CHAR_UUID_TEMPERATURE_DISPLAY_UNITS,
+            "fault",
+            HAP_CHAR_UUID_HEATING_THRESHOLD_TEMPERATURE,
+            HAP_CHAR_UUID_COOLING_THRESHOLD_TEMPERATURE,
+            "active", "name", "E3"}));
+    }
+    CASE("single_omits_thresholds_only") {
+        bootSingle(c);
+        homekit_create_thermostat(&acc);
+        CHECK(!s_heatThresh && !s_coolThresh);
+        CHECK(thermostatUuids() == (std::vector<std::string>{
+            HAP_CHAR_UUID_CURRENT_HEATING_COOLING_STATE,
+            HAP_CHAR_UUID_TARGET_HEATING_COOLING_STATE,
+            HAP_CHAR_UUID_CURRENT_TEMPERATURE,
+            HAP_CHAR_UUID_TARGET_TEMPERATURE,
+            HAP_CHAR_UUID_TEMPERATURE_DISPLAY_UNITS,
+            "fault", "active", "name", "E3"}));
+    }
+    CASE("single_metadata_still_publishes") {
+        bootSingle(c);
+        ranges(10, 14);
+        homekit_create_thermostat(&acc);
+        CHECK(s_targetTemp->min == 10 && s_targetTemp->max == 14);
+        validCache();
+        s_started = true;
+        homekit_reconcile_service_shape();
+        CHECK(hkNvs.committed["hk-meta"].count("tempMeta"));
+        // Limits edited while running reach Home too.
+        ranges(12, 16);
+        now_ms += 2000;
+        homekit_sync_thermostat(c);
+        drainHttp();
+        CHECK(s_targetTemp->min == 12 && s_targetTemp->max == 16);
+    }
+    CASE("single_fault_still_publishes") {
+        bootSingle(c);
+        ranges(10, 14);
+        homekit_create_thermostat(&acc);
+        s_started = true;
+        for (int i = 0; i < 18000; ++i) {
+            c.loop();
+            SetpointControl::loop();
+            pump.target = 172;
+            now_ms += 10;
+        }
+        homekit_sync_thermostat(c);
+        drainHttp();
+        int status = 0;
+        CHECK(thermostat->read_cb(s_targetTemp, &status, nullptr, nullptr) == HAP_FAIL);
+        CHECK(status == HAP_STATUS_COMM_ERR);
+        validCache();
+        CHECK(s_statusFault->value.u == 1);
+    }
+    CASE("single_target_write_in_auto_is_kept") {
+        bootSingle(c);
+        pump.mode = CN105_MODE_AUTO;
+        pump.roomRaw = 164; // 18.0: Range would steer to its heating threshold.
+        ticks(c, 300);
+        homekit_create_thermostat(&acc);
+        int st = -1;
+        hap_write_data_t w{s_targetTemp, {.f = 24}, &st};
+        CHECK(thermostat->write_cb(&w, 1, nullptr, nullptr) == HAP_SUCCESS);
+        CHECK(st == 0);
+        for (int i = 0; i < 30; ++i) {
+            now_ms += 2000;
+            homekit_sync_thermostat(c);
+            drainHttp();
+            ticks(c, 50);
+        }
+        CHECK(c.getEffectiveState().targetTemp == 24);
+        CHECK(pump.target == 176);
     }
     CASE("actual_outside_metadata_read_fails_with_valid_cache") {
         ranges(10, 14);

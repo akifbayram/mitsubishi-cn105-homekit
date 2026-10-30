@@ -717,6 +717,15 @@ void SettingsStore::begin() {
                 _settings.autoOwnerUnit = (val != 0);
         }
     }
+    // autoSingle — Auto setpoint mode. Absent (older firmware, factory
+    // reset): Range, the pre-0.2.9 behaviour.
+    {
+        uint8_t val = 0;
+        if (nvs_get_u8(_handle, "autoSingle", &val) == ESP_OK)
+            _settings.autoSingleSetpoint = (val != 0);
+        _autoSingleBoot = _settings.autoSingleSetpoint;
+    }
+
     if (missingPolicy) {
         _setpoint.band = {static_cast<int16_t>(std::lround(_settings.heatingThreshold * 2)),
                           static_cast<int16_t>(std::lround(_settings.coolingThreshold * 2))};
@@ -847,6 +856,7 @@ void SettingsStore::save() {
     nvs_set_str(_handle, "setupCode", _settings.setupCode);
     nvs_set_u8(_handle, "hkPaired", _settings.homekitPaired ? 1 : 0);
     nvs_set_u8(_handle, "remoteFed", _settings.remoteEverFed ? 1 : 0);
+    nvs_set_u8(_handle, "autoSingle", _settings.autoSingleSetpoint ? 1 : 0);
     nvs_set_u8(_handle, "wifiChgPend", _settings.wifiChangePending ? 1 : 0);
     nvs_set_u8(_handle, "vaneConfig", _settings.vaneConfig);
     nvs_set_u8(_handle, "modeMask", _settings.modeMask);

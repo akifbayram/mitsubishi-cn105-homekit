@@ -64,6 +64,12 @@ int main(int, char** argv) {
   CHECK(hkNvs.committed["serinlink"][SL2_KV_IDENTITY]==id);           // byte for byte
   CHECK(!hkNvs.init);   // closed again: nothing else lands before the restart
  }
+ CASE("factory_reset_returns_to_range") {
+  settings.get().autoSingleSetpoint=true;settings.save();
+  CHECK(hkNvs.committed["ac-settings"]["autoSingle"]==std::vector<uint8_t>{1});
+  CHECK(espnow_factory_erase_nvs());CHECK(nvs_flash_init()==ESP_OK);
+  settings=SettingsStore{};settings.begin();CHECK(!settings.get().autoSingleSetpoint);CHECK(!settings.autoSingleBoot());
+ }
  CASE("no_identity_erases_everything") {
   hkNvs.committed["serinlink"].erase(SL2_KV_IDENTITY);
   CHECK(espnow_factory_erase_nvs());CHECK(hkNvs.erases==1);CHECK(hkNvs.committed.empty());CHECK(hkNvs.inits==0);

@@ -100,6 +100,8 @@ static uint8_t deriveCurrentState(const CN105State &s) {
                 // Ambiguous (room ~= setpoint, no autoSubMode): guess by which
                 // half of the AUTO band the room sits in — near the heating
                 // threshold the unit was almost certainly heating, and vice versa.
+                // Single has no band, so the guess is against the setpoint.
+                if (settings.autoSingleBoot()) return (s.roomTemp <= s.targetTemp) ? 1 : 2;
                 {
                     const auto band = SetpointControl::settingsView().effectiveBand;
                     float bandMid = (band.heat2 + band.cool2) * 0.25f;
@@ -136,7 +138,9 @@ static void install_temperature(hap_char_t* hc, int16_t low2, int16_t high2,
 
 static void install_temperature_metadata(CN105Controller* cn105)
 {
-    if (!s_targetTemp || !s_heatThresh || !s_coolThresh) return;
+    // Single has no threshold characteristics; everything else here still applies.
+    const bool single = settings.autoSingleBoot();
+    if (!s_targetTemp || (!single && (!s_heatThresh || !s_coolThresh))) return;
     const auto view = SetpointControl::settingsView();
     const auto& ranges = view.ranges;
     const auto& automatic = ranges.mode[2];
@@ -161,8 +165,10 @@ static void install_temperature_metadata(CN105Controller* cn105)
     }
     const auto band = view.effectiveBand;
     install_temperature(s_targetTemp, metadata.min2[0], metadata.max2[0], metadata.step2[0], target);
-    install_temperature(s_heatThresh, metadata.min2[1], metadata.max2[1], metadata.step2[1], band.heat2 / 2.f);
-    install_temperature(s_coolThresh, metadata.min2[2], metadata.max2[2], metadata.step2[2], band.cool2 / 2.f);
+    if (!single) {
+        install_temperature(s_heatThresh, metadata.min2[1], metadata.max2[1], metadata.step2[1], band.heat2 / 2.f);
+        install_temperature(s_coolThresh, metadata.min2[2], metadata.max2[2], metadata.step2[2], band.cool2 / 2.f);
+    }
     if (s_statusFault) {
         const bool equipment = cn105 && cn105->getState().hasError;
         hap_val_t fault{.u = static_cast<uint32_t>(!cn105 || !cn105->isHealthy() || equipment || failed || !s_targetReadable)};
@@ -282,13 +288,18 @@ void homekit_create_thermostat(hap_acc_t *acc)
     s_statusFault = hap_char_status_fault_create(0);
     hap_serv_add_char(serv, s_statusFault);
 
-    s_heatThresh = hap_char_heating_threshold_temperature_create(settings.get().heatingThreshold);
-    hap_char_float_set_constraints(s_heatThresh, CN105_TEMP_MIN, CN105_TEMP_MAX, 0.5f);
-    hap_serv_add_char(serv, s_heatThresh);
+    // The thresholds are what make Auto a range in the Home app. Single leaves
+    // them out, so Auto edits TargetTemperature like Heat and Cool (the shape
+    // bit in homekit_setup.cpp bumps c# so paired controllers re-read this).
+    if (!settings.autoSingleBoot()) {
+        s_heatThresh = hap_char_heating_threshold_temperature_create(settings.get().heatingThreshold);
+        hap_char_float_set_constraints(s_heatThresh, CN105_TEMP_MIN, CN105_TEMP_MAX, 0.5f);
+        hap_serv_add_char(serv, s_heatThresh);
 
-    s_coolThresh = hap_char_cooling_threshold_temperature_create(settings.get().coolingThreshold);
-    hap_char_float_set_constraints(s_coolThresh, CN105_TEMP_MIN, CN105_TEMP_MAX, 0.5f);
-    hap_serv_add_char(serv, s_coolThresh);
+        s_coolThresh = hap_char_cooling_threshold_temperature_create(settings.get().coolingThreshold);
+        hap_char_float_set_constraints(s_coolThresh, CN105_TEMP_MIN, CN105_TEMP_MAX, 0.5f);
+        hap_serv_add_char(serv, s_coolThresh);
+    }
 
     s_statusActive = hap_char_status_active_create(true);
     hap_serv_add_char(serv, s_statusActive);

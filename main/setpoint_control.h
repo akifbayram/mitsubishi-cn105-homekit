@@ -31,4 +31,8 @@ bool autoDeviceOwns();
 void updateAutoOwnership();
 // Recompute and conditionally stage internal Auto steering under the coordinator lock.
 void steerAuto();
+// Save the Auto setpoint mode for the next boot. Saving Range while this boot
+// runs Single first hands Auto to the unit, so the restart cannot steer from a
+// stale band; if that handover cannot be stored the device stays Single.
+SetpointRange::Result saveAutoSingle(bool single);
 }

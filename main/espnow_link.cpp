@@ -352,15 +352,18 @@ static uint8_t mode_to_sl2(bool power, uint8_t cn) {
         case CN105_MODE_DRY:  return SL2_MODE_DRY;
         case CN105_MODE_COOL: return SL2_MODE_COOL;
         case CN105_MODE_FAN:  return SL2_MODE_FAN_ONLY;
-        case CN105_MODE_AUTO: return SL2_MODE_HEAT_COOL;
+        // Range describes Auto as the persisted dual-threshold control;
+        // Single is the vendor Auto it really is.
+        case CN105_MODE_AUTO: return settings.autoSingleBoot() ? SL2_MODE_AUTO : SL2_MODE_HEAT_COOL;
         default:              return SL2_MODE_AUTO;
     }
 }
 
 static uint8_t mode_from_sl2(uint8_t m) {
     switch (m) {
-        // Older dials can still request vendor AUTO; STATE/CAPS describe
-        // the persisted dual-threshold control as HEAT_COOL.
+        // Both are the unit's Auto. CAPS advertises one of them (Range:
+        // HEAT_COOL, Single: AUTO), but an older dial or one holding stale
+        // CAPS can still request the other.
         case SL2_MODE_HEAT_COOL:
         case SL2_MODE_AUTO:     return CN105_MODE_AUTO;
         case SL2_MODE_HEAT:     return CN105_MODE_HEAT;
@@ -473,7 +476,7 @@ static bool h_get_state(void *, sl2_hvac_state_t *out) {
     out->fault  = (st.errorCode == 0x80) ? 0 : st.errorCode;
     out->room_dc = sl2_c_to_dc(st.roomTemp);
     out->set_dc  = sl2_c_to_dc(st.targetTemp);
-    const bool autoBand = st.power && st.mode == CN105_MODE_AUTO;
+    const bool autoBand = st.power && st.mode == CN105_MODE_AUTO && !settings.autoSingleBoot();
     const auto band = SetpointControl::settingsView().effectiveBand;
     out->set_low_dc  = autoBand ? band.heat2 * 5 : SL2_DC_NA;
     out->set_high_dc = autoBand ? band.cool2 * 5 : SL2_DC_NA;
@@ -569,8 +572,9 @@ static bool h_get_state(void *, sl2_hvac_state_t *out) {
 
 static bool h_apply(void *, uint16_t mask, const struct sl2_cmd_pkt *cmd) {
     // Validate temperature semantics against the mode this batch will leave
-    // active, before staging any changes. A stale dial's single AUTO target
-    // must not appear accepted and then be overwritten by the Auto engine.
+    // active, before staging any changes. In Range, a stale dial's single AUTO
+    // target must not appear accepted and then be overwritten by the Auto
+    // engine. In Single nothing overwrites it, and submit() refuses a band.
     uint8_t effectiveMode = s_ctrl->getEffectiveState().mode;
     if ((mask & SL2_CM_MODE) && cmd->mode != SL2_MODE_OFF &&
         mode_mask_allows(settings.get().modeMask, mode_from_sl2(cmd->mode)))
@@ -580,7 +584,8 @@ static bool h_apply(void *, uint16_t mask, const struct sl2_cmd_pkt *cmd) {
                     !mode_mask_allows(settings.get().modeMask, CN105_MODE_AUTO) ||
                     cmd->set_low_dc == SL2_DC_NA || cmd->set_high_dc == SL2_DC_NA))
         return false;
-    if ((mask & SL2_CM_TEMP) && effectiveMode == CN105_MODE_AUTO && !bandEdit)
+    if ((mask & SL2_CM_TEMP) && effectiveMode == CN105_MODE_AUTO && !bandEdit &&
+        !settings.autoSingleBoot())
         return false;
 
     SetpointControl::Command batch;

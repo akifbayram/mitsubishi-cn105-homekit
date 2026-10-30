@@ -191,7 +191,7 @@ Result submit(const Command& input) {
     }
     auto next = settings.setpointSettings();
     if (bandEdit) {
-        if (!(settings.get().modeMask & MODE_CAP_AUTO)) return Result::Unavailable;
+        if (settings.autoSingleBoot() || !(settings.get().modeMask & MODE_CAP_AUTO)) return Result::Unavailable;
         const auto& range = published.mode[2];
         for (auto value : {input.heatingThreshold, input.coolingThreshold}) if (value) {
             const auto result = validateTarget(*value, range);
@@ -203,7 +203,7 @@ Result submit(const Command& input) {
     }
     const auto result = normalizeCommand(cmd, published, state);
     if (result != Result::Ok) return result;
-    const bool claim = bandEdit || (cmd.mode && *cmd.mode == CN105_MODE_AUTO);
+    const bool claim = !settings.autoSingleBoot() && (bandEdit || (cmd.mode && *cmd.mode == CN105_MODE_AUTO));
     if (claim) next.autoOwnerUnit = false;
     controller->holdCommands();
     const auto previous = controller->heldCommand();
@@ -226,6 +226,10 @@ Result applySettings(const SetpointSettings& input) {
     if (!controller || SettingsStore::isFactoryResetting()) return Result::Unavailable;
     const auto old = settings.setpointSettings();
     auto next = input;
+    // Single keeps the stored band and owner for a switch back to Range,
+    // whatever an imported file or a stale client carries.
+    const bool single = settings.autoSingleBoot();
+    if (single) { next.band = old.band; next.autoOwnerUnit = old.autoOwnerUnit; }
     if (next.lastEncoding > Encoding::Enhanced) return Result::Invalid;
     const auto state = controller->getState();
     // Only confirmed equipment history can authorize an offline edit.
@@ -243,8 +247,8 @@ Result applySettings(const SetpointSettings& input) {
     auto ranges = resolveSettings(next, state);
     const bool autoEdited = !samePreference(next.preferences.mode[2], old.preferences.mode[2]) ||
                             next.band.heat2 != old.band.heat2 || next.band.cool2 != old.band.cool2;
-    if (autoEdited && (ranges.mode[2].availability == Availability::Ready ||
-                       ranges.mode[2].availability == Availability::AwaitingBaseline))
+    if (autoEdited && !single && (ranges.mode[2].availability == Availability::Ready ||
+                                  ranges.mode[2].availability == Availability::AwaitingBaseline))
         next.band = projectBand(next.band, ranges.mode[2]);
     controller->holdCommands();
     if (!settings.saveSetpointSettings(next)) {
@@ -283,12 +287,13 @@ bool importAutoTargetLocked(float target) {
 bool autoDeviceOwns() {
     std::lock_guard<std::mutex> lock(controlMutex);
     // Suspend steering as soon as a new external observation awaits handover.
-    return controller && !settings.setpointSettings().autoOwnerUnit &&
+    return !settings.autoSingleBoot() && controller && !settings.setpointSettings().autoOwnerUnit &&
            controller->externalAutoChanges() == seenExternal;
 }
 void steerAuto() {
     std::lock_guard<std::mutex> lock(controlMutex);
-    if (!controller || SettingsStore::isFactoryResetting() || !settings.setpointSettingsAvailable() ||
+    if (settings.autoSingleBoot() ||
+        !controller || SettingsStore::isFactoryResetting() || !settings.setpointSettingsAvailable() ||
         !controller->isHealthy() || !(settings.get().modeMask & MODE_CAP_AUTO)) return;
     const auto cfg = settings.setpointSettings();
     const auto external = controller->externalAutoChanges();
@@ -314,13 +319,38 @@ void steerAuto() {
 }
 void updateAutoOwnership() {
     std::lock_guard<std::mutex> lock(controlMutex);
-    if (!controller) return;
+    if (!controller || settings.autoSingleBoot()) return;
     const auto external = controller->externalAutoChanges();
     if (external == seenExternal) return;
     const auto actual = controller->getState();
     if (!actual.connected || actual.encoding == Encoding::Unknown) return;
     if (!actual.power || actual.mode != CN105_MODE_AUTO || importAutoTargetLocked(actual.targetTemp))
         seenExternal = external;
+}
+
+namespace {
+// Single imports nothing, so a restart into Range would otherwise steer from
+// a stale band. The unit keeps Auto until someone edits the range here.
+bool handAutoToUnitLocked() {
+    const auto actual = controller->getState();
+    if (actual.connected && actual.encoding != Encoding::Unknown && actual.power &&
+        actual.mode == CN105_MODE_AUTO && importAutoTargetLocked(actual.targetTemp)) return true;
+    auto next = settings.setpointSettings();
+    next.autoOwnerUnit = true;
+    return settings.saveSetpointSettings(next);
+}
+}
+Result saveAutoSingle(bool single) {
+    std::lock_guard<std::mutex> lock(controlMutex);
+    if (!controller || SettingsStore::isFactoryResetting()) return Result::Unavailable;
+    if (settings.get().autoSingleSetpoint == single) return Result::Ok;
+    if (!single && settings.autoSingleBoot()) {
+        if (!settings.setpointSettingsAvailable()) return Result::Unavailable;
+        if (!handAutoToUnitLocked()) return Result::StorageFailure;
+    }
+    settings.get().autoSingleSetpoint = single;
+    settings.save();
+    return Result::Ok;
 }
 
 void loop() {

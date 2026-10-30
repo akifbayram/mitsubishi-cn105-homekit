@@ -119,15 +119,18 @@ static void homekit_set_setup_id(const char* setupId)
 // SDK only auto-bumps it in hap_add_bridged_accessory()/hap_remove_
 // bridged_accessory() while running — it has no idea that the database can
 // differ ACROSS BOOTS: our Dry/Fan switches and thermostat valid-values
-// change with `modeMask`, and the Remote Sensor bridged accessory is simply
-// never created when BLE is off or the sensor MAC was cleared. So we track a
-// "service shape" byte the HAP database was last built with ourselves, in a
-// dedicated NVS namespace (not DeviceSettings — this is HomeKit-internal
+// change with `modeMask`, the thermostat's threshold characteristics are left
+// out in Single Auto setpoint mode, and the Remote Sensor bridged accessory is
+// simply never created when BLE is off or the sensor MAC was cleared. So we
+// track a "service shape" byte the HAP database was last built with ourselves,
+// in a dedicated NVS namespace (not DeviceSettings — this is HomeKit-internal
 // bookkeeping, not a user setting), and bump c# by hand via
 // hap_update_config_number() when it changes.
 //
 // Shape byte: bits 0-4 = the boot-time mode capability mask (MODE_CAP_*),
+// bit 6 = Single Auto setpoint (no threshold characteristics),
 // bit 7 = Remote Sensor accessory present.
+static constexpr uint8_t SHAPE_AUTO_SINGLE    = 0x40;
 static constexpr uint8_t SHAPE_SENSOR_PRESENT = 0x80;
 
 static std::atomic<bool> s_started{false};   // hap_start() has succeeded
@@ -137,6 +140,7 @@ static uint8_t s_bootModeMask = MODE_CAP_ALL;
 static uint8_t current_service_shape(void)
 {
     uint8_t shape = s_bootModeMask;
+    if (settings.autoSingleBoot()) shape |= SHAPE_AUTO_SINGLE;
 #ifdef BLE_ENABLE
     if (homekit_sensor_is_present()) shape |= SHAPE_SENSOR_PRESENT;
 #endif
