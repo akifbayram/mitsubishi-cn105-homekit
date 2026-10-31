@@ -163,6 +163,24 @@ input[type=range].slim::-moz-range-thumb{width:22px;height:22px;}
 .temp-display{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;}
 .temp-lbl{font-size:11.5px;font-weight:500;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;display:block;}
 .temp-setting{min-width:0;}
+.temp-heading{display:flex;align-items:center;gap:4px;min-height:14px;}
+.auto-help-btn{display:flex;align-items:center;justify-content:center;flex:none;width:44px;height:44px;
+  margin:-15px -8px;padding:0;border:none;border-radius:50%;background:none;color:var(--text2);cursor:pointer;}
+.auto-help-btn svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;}
+.auto-help-btn[aria-expanded="true"]{color:var(--text);}
+.auto-help-btn:focus-visible{outline-offset:-5px;}
+/* Outside .frame so the temperature card and phone frame cannot clip help. */
+.auto-help{position:fixed;z-index:60;width:350px;max-width:calc(100vw - 24px);max-height:calc(100vh - 24px);
+  overflow:auto;overscroll-behavior:contain;padding:18px;border-radius:18px;background:var(--surface2);color:var(--text);
+  box-shadow:0 16px 48px rgba(0,0,0,.4),0 0 0 1px var(--border);}
+.auto-help-head{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:14px;}
+.auto-help-head h2{margin:0;font-size:17px;font-weight:600;line-height:1.3;letter-spacing:-.2px;}
+.auto-help-close{display:flex;align-items:center;justify-content:center;flex:none;width:44px;height:44px;
+  margin:-10px -10px -10px 0;padding:0;border:none;border-radius:50%;background:none;color:var(--text2);cursor:pointer;}
+.auto-help-close svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;}
+.auto-help h3{font-size:13px;font-weight:600;line-height:1.4;margin:16px 0 5px;}
+.auto-help-head+h3{margin-top:0;}
+.auto-help p{font-size:13px;line-height:1.55;margin:0;color:var(--text);opacity:.8;}
 /* Degrees hang from the cap height, not the baseline: align the tops of the
    boxes and nudge by the ascender/cap-height gap of each size. */
 .temp-num{display:flex;align-items:flex-start;gap:2px;margin-top:3px;}
@@ -559,6 +577,7 @@ button.wifi-row:active{background:var(--surface3);}
   .log-btn:hover{filter:brightness(1.12);}
   .seg button:not(.active):hover{color:var(--text);}
   .temp-step:hover,.theme-toggle:hover,.refresh-btn:hover{background:var(--surface3);}
+  .auto-help-btn:hover,.auto-help-close:hover{color:var(--text);}
   .net-row:hover,.ble-scan-item:hover,button.wifi-row:hover{background:var(--surface3);}
 }
 .save-btn,.btn-primary,.btn-secondary,.btn-danger,.file-btn{transition:opacity .15s,filter .15s;}
@@ -681,7 +700,12 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     <div class="temp-inner">
       <div class="temp-display">
         <div class="temp-setting">
-          <span class="temp-lbl" id="setLbl">Set</span>
+          <div class="temp-heading">
+            <span class="temp-lbl" id="setLbl">Set</span>
+            <button type="button" class="auto-help-btn hidden" id="autoHelpBtn" aria-label="About Auto mode" aria-haspopup="dialog" aria-expanded="false" aria-controls="autoHelp">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7h.01"/></svg>
+            </button>
+          </div>
           <div class="temp-num" id="targetWrap"><span class="temp-val" id="targetTemp">--</span><span class="temp-deg">°</span></div>
         </div>
         <div class="temp-reading">
@@ -713,7 +737,6 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
         </div>
         <p class="range-help hidden" id="autoOwnerNote">This range was set from the heat pump's own controller, so this device is not steering it. Move either slider to take over.</p>
       </div>
-      <p class="range-help hidden" id="autoHelp">Auto change-over is handled by the heat pump: it switches between heating and cooling once the room drifts about 4&deg;F (2&deg;C) past the set point, so a switch can lag. On a multi-zone system an idle head left in Auto can hold the outdoor unit's mode and block other zones &mdash; Mitsubishi advises against Auto there.</p>
     </div>
   </div>
 
@@ -1264,6 +1287,17 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   </div>
 </section>
 </main>
+
+<div class="auto-help hidden" id="autoHelp" role="dialog" aria-labelledby="autoHelpTitle">
+  <div class="auto-help-head">
+    <h2 id="autoHelpTitle" tabindex="-1">About Auto</h2>
+    <button type="button" class="auto-help-close" id="autoHelpClose" aria-label="Close Auto help"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  </div>
+  <h3>Changeover delay</h3>
+  <p>Auto change-over is handled by the heat pump: it switches between heating and cooling once the room drifts about 4&deg;F (2&deg;C) past the set point, so a switch can lag.</p>
+  <h3>Multi-zone systems</h3>
+  <p>On a multi-zone system an idle head left in Auto can hold the outdoor unit's mode and block other zones &mdash; Mitsubishi advises against Auto there.</p>
+</div>
 
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
@@ -1900,13 +1934,60 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     return s.modeMask!==s.modeMaskBoot||(s.autoSingle!=null&&s.autoSingleBoot!=null&&s.autoSingle!==s.autoSingleBoot);
   }
   // ── auto-view:end
+  // Nonmodal help: keep it outside the clipped card, with no extra row in
+  // either Auto layout. State updates only close it when Auto goes away.
+  var autoHelp=$('autoHelp'),autoHelpBtn=$('autoHelpBtn'),autoHelpOpen=false;
+  function positionAutoHelp(){
+    if(!autoHelpOpen)return;
+    var edge=12,width=document.documentElement.clientWidth,height=window.innerHeight;
+    var anchor=autoHelpBtn.getBoundingClientRect();
+    autoHelp.style.width=Math.min(350,width-edge*2)+'px';
+    autoHelp.style.maxHeight=Math.max(0,height-edge*2)+'px';
+    var box=autoHelp.getBoundingClientRect();
+    var top=anchor.bottom+6;
+    if(top+box.height>height-edge)top=anchor.top-box.height-6;
+    autoHelp.style.left=Math.max(edge,Math.min(anchor.left-8,width-box.width-edge))+'px';
+    autoHelp.style.top=Math.max(edge,Math.min(top,height-box.height-edge))+'px';
+  }
+  function closeAutoHelp(restoreFocus){
+    if(!autoHelpOpen)return;
+    var focusedInside=autoHelp.contains(document.activeElement);
+    autoHelpOpen=false;
+    autoHelp.classList.add('hidden');
+    autoHelpBtn.setAttribute('aria-expanded','false');
+    if(restoreFocus||focusedInside){
+      var target=autoHelpBtn.classList.contains('hidden')?document.querySelector('#modeGrp button.active'):autoHelpBtn;
+      if(target)target.focus({preventScroll:true});
+    }
+  }
+  function renderAutoHelp(view){
+    autoHelpBtn.classList.toggle('hidden',!view);
+    if(!view)closeAutoHelp(false);
+    else positionAutoHelp();
+  }
+  autoHelpBtn.addEventListener('click',function(){
+    if(autoHelpOpen){closeAutoHelp(true);return;}
+    autoHelpOpen=true;
+    autoHelp.classList.remove('hidden');
+    autoHelpBtn.setAttribute('aria-expanded','true');
+    positionAutoHelp();
+    $('autoHelpTitle').focus({preventScroll:true});
+  });
+  $('autoHelpClose').addEventListener('click',function(){closeAutoHelp(true);});
+  document.addEventListener('click',function(e){
+    if(autoHelpOpen&&!autoHelp.contains(e.target)&&!autoHelpBtn.contains(e.target))closeAutoHelp(false);
+  });
+  document.addEventListener('keydown',function(e){
+    if(autoHelpOpen&&e.key==='Escape'){e.preventDefault();closeAutoHelp(true);}
+  });
+  window.addEventListener('resize',positionAutoHelp);
+  window.addEventListener('scroll',positionAutoHelp);
   function setSingleHeadline(s,view){
     $('setLbl').textContent=singleHeadline(s,view);
     targetTemp.style.color='';
   }
   function renderDual(s){
     var view=autoView(s);
-    $('autoHelp').classList.toggle('hidden',!view);
     if(view==='range'){
       dualTemp.classList.remove('hidden');
       sliderRow.style.display='none';
@@ -1924,6 +2005,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       $('targetWrap').style.display='';
       setSingleHeadline(s,view);
     }
+    renderAutoHelp(view);
   }
 
   // ── Room Sensor card (Single / Average blend) ──────────────────────────────
