@@ -43,6 +43,7 @@ static bool stateBool(const std::string& state,const char* key) {
  return cJSON_IsTrue(value);
 }
 int main(int,char**argv){
+ hkNvs.committed["ac-settings"]["autoSingle"]={0};
  settings.begin();
  Pump pump;
  pump.mode=CN105_MODE_HEAT;

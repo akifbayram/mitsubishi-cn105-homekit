@@ -2,18 +2,77 @@
 using namespace SetpointRange;
 static void rebootSettings(){settings=SettingsStore{};hkNvs.pending.clear();settings.begin();}
 static void expectSelection(Selection s){for(auto p:settings.setpointSettings().preferences.mode)CHECK(p.selection==s);}
+static void expectAuto(bool single){CHECK(settings.get().autoSingleSetpoint==single);CHECK(settings.autoSingleBoot()==single);CHECK(hkNvs.committed["ac-settings"]["autoSingle"]==std::vector<uint8_t>{static_cast<uint8_t>(single)});}
+static void clearSettings(){bool immediate=hkNvs.immediateWrites;hkNvs=FakeSettingsNvs{};hkNvs.immediateWrites=immediate;settings=SettingsStore{};}
 static SetpointSettings extended(){auto p=settings.setpointSettings();p.preferences.mode[0]={Selection::Manual,{20,62}};p.band={20,62};p.autoOwnerUnit=true;p.lastEncoding=Encoding::Legacy;return p;}
 static void unchanged(uint32_t gen){CHECK(settings.generation()==gen);CHECK(settings.setpointSettings().band.heat2==40);CHECK(!settings.get().autoOwnerUnit);CHECK(settings.get().heatingThreshold==20);}
 int main(int argc,char**argv){
  if(!strcmp(argv[1],"schema_less_upgrade")||!strcmp(argv[1],"heat_only_edit_preserves_upgrade"))hkNvs.committed["ac-settings"]["deviceName"]={'O','l','d',0};
  if(!strcmp(argv[1],"schema_version_upgrade"))hkNvs.committed["ac-settings"]["schemaVer"]={1};
  if(!strcmp(argv[1],"migration_only_upgrade"))hkNvs.committed["ac-settings"]["bleFeed"]={0};
+ if(!strcmp(argv[1],"saved_range_wins"))hkNvs.committed["ac-settings"]["autoSingle"]={0};
+ if(!strcmp(argv[1],"saved_single_wins")){hkNvs.committed["ac-settings"]["autoSingle"]={1};hkNvs.committed["ac-settings"]["schemaVer"]={1};}
+ if(!strcmp(argv[1],"interrupted_auto_initialization_keeps_fresh_ranges"))hkNvs.committed["ac-settings"]["autoSingle"]={1};
+ if(!strcmp(argv[1],"entry_count_failure_keeps_range"))hkNvs.failEntryCount=true;
  hkNvs.immediateWrites=argc>2 && !strcmp(argv[2],"immediate");
  settings.begin();
  CASE("fresh_automatic") {CHECK(settings.setpointSettingsAvailable());expectSelection(Selection::Automatic);settings.save();rebootSettings();expectSelection(Selection::Automatic);}
- CASE("schema_less_upgrade") {expectSelection(Selection::Compatibility);settings.save();rebootSettings();expectSelection(Selection::Compatibility);}
- CASE("schema_version_upgrade") {expectSelection(Selection::Compatibility);}
- CASE("migration_only_upgrade") {expectSelection(Selection::Compatibility);}
+ CASE("schema_less_upgrade") {expectAuto(false);expectSelection(Selection::Compatibility);settings.save();rebootSettings();expectAuto(false);expectSelection(Selection::Compatibility);}
+ CASE("schema_version_upgrade") {expectAuto(false);expectSelection(Selection::Compatibility);}
+ CASE("migration_only_upgrade") {expectAuto(false);expectSelection(Selection::Compatibility);}
+ CASE("fresh_single_survives_reboot_without_save") {
+  expectAuto(true);expectSelection(Selection::Automatic);rebootSettings();expectAuto(true);expectSelection(Selection::Automatic);
+ }
+ CASE("saved_range_wins") {expectAuto(false);rebootSettings();expectAuto(false);}
+ CASE("saved_single_wins") {expectAuto(true);expectSelection(Selection::Compatibility);rebootSettings();expectAuto(true);}
+ CASE("interrupted_auto_initialization_keeps_fresh_ranges") {expectAuto(true);expectSelection(Selection::Automatic);rebootSettings();expectSelection(Selection::Automatic);}
+ CASE("entry_count_failure_keeps_range") {expectAuto(false);hkNvs.failEntryCount=false;rebootSettings();expectAuto(false);}
+ CASE("legacy_auto_upgrade_preserves_band_owner_and_pairing") {
+  clearSettings();
+  float heat=19,cool=26;auto& ns=hkNvs.committed["ac-settings"];
+  ns["heatThresh"].assign(reinterpret_cast<uint8_t*>(&heat),reinterpret_cast<uint8_t*>(&heat)+sizeof(heat));
+  ns["coolThresh"].assign(reinterpret_cast<uint8_t*>(&cool),reinterpret_cast<uint8_t*>(&cool)+sizeof(cool));
+  ns["autoOwner"]={1};ns["hkPaired"]={1};
+  settings.begin();expectAuto(false);rebootSettings();expectAuto(false);
+  CHECK(settings.get().heatingThreshold==19);CHECK(settings.get().coolingThreshold==26);
+  CHECK(settings.get().autoOwnerUnit);CHECK(settings.get().homekitPaired);
+ }
+ CASE("auto_default_write_failure_blocks_fresh_writers") {
+  clearSettings();hkNvs.failWriteKey="autoSingle";settings.begin();
+  CHECK(settings.get().autoSingleSetpoint);CHECK(settings.autoSingleBoot());
+  settings.get().deviceName[0]='X';settings.save();
+  Detection detected{{{20,62},{},{}},1,0};CHECK(!settings.saveDetectedRanges(detected));
+  CHECK(hkNvs.committed["ac-settings"].empty());
+  hkNvs.failWriteKey.clear();settings.save();rebootSettings();expectAuto(true);expectSelection(Selection::Automatic);
+ }
+ CASE("auto_default_commit_failure_keeps_fresh_identity") {
+  clearSettings();hkNvs.failCommit=true;settings.begin();
+  hkNvs.failCommit=false;rebootSettings();expectAuto(true);expectSelection(Selection::Automatic);
+ }
+ CASE("auto_default_write_before_error_keeps_fresh_identity") {
+  clearSettings();hkNvs.writeBeforeErrorKey="autoSingle";hkNvs.writeBeforeErrorCount=1;hkNvs.failWriteKey="rangeCfg";
+  settings.begin();hkNvs.failWriteKey.clear();rebootSettings();expectAuto(true);expectSelection(Selection::Automatic);
+ }
+ CASE("failed_auto_default_keeps_migration_only_upgrade") {
+  clearSettings();hkNvs.committed["ac-settings"]["bleTimeout"]={0,0};
+  hkNvs.failWriteKey="autoSingle";settings.begin();CHECK(!settings.autoSingleBoot());
+  hkNvs.failWriteKey.clear();rebootSettings();expectAuto(false);expectSelection(Selection::Compatibility);
+ }
+ CASE("power_loss_during_initial_policy_keeps_fresh_defaults") {
+  for(const char* key:{"heatThresh","coolThresh","autoOwner"}) {
+   clearSettings();decltype(hkNvs.committed) checkpoint;
+   // Capture flash between real writes, then reboot from that snapshot.
+   // Staged storage loses pending writes; immediate storage keeps each write.
+   auto snapshot=[&](){
+    const auto& visible=hkNvs.immediateWrites ? hkNvs.committed : hkNvs.pending;
+    auto ns=visible.find("ac-settings");
+    if(checkpoint.empty()&&ns!=visible.end()&&ns->second.count(key))checkpoint=hkNvs.committed;
+   };
+   hkNvs.onWrite=snapshot;hkNvs.onCommit=snapshot;settings.begin();
+   CHECK(!checkpoint.empty());hkNvs.onWrite=nullptr;hkNvs.onCommit=nullptr;
+   hkNvs.committed=checkpoint;rebootSettings();expectAuto(true);expectSelection(Selection::Automatic);
+  }
+ }
  CASE("heat_only_edit_preserves_upgrade") {
   auto p=settings.setpointSettings();p.preferences.mode[0]={Selection::Manual,{20,62}};
   CHECK(settings.saveSetpointSettings(p));rebootSettings();auto q=settings.setpointSettings();
@@ -39,7 +98,7 @@ int main(int argc,char**argv){
  CASE("failed_first_policy_does_not_create_upgrade_on_restart") {
   hkNvs=FakeSettingsNvs{};hkNvs.immediateWrites=argc>2 && !strcmp(argv[2],"immediate");
   settings=SettingsStore{};hkNvs.failWriteKey="rangeCfg";settings.begin();
-  hkNvs.failWriteKey.clear();rebootSettings();expectSelection(Selection::Automatic);
+  hkNvs.failWriteKey.clear();rebootSettings();expectAuto(true);expectSelection(Selection::Automatic);
  }
  CASE("failed_repair_preserves_unknown_record") {
   std::vector<uint8_t> bad={99,4,3,2,1,0};hkNvs.committed["ac-settings"]["rangeCfg"]=bad;rebootSettings();

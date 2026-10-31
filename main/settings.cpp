@@ -145,6 +145,9 @@ bool SettingsStore::saveSetpointSettings(const SetpointSettings& next) {
 }
 bool SettingsStore::saveSetpointSettingsLocked(const SetpointSettings& next) {
     if (isFactoryResetting() || !_handle || !validSetpoint(next)) return false;
+    // Establish the Auto default before policy/mirror keys can make a fresh
+    // device look like an upgrade after a failed first boot.
+    if (!_autoSingleStored && !saveAutoSingleLocked(_settings.autoSingleSetpoint)) return false;
     uint8_t encoded[RANGE_CFG_SIZE], current[RANGE_CFG_SIZE];
     encodeSetpoint(next, encoded); encodeSetpoint(_setpoint, current);
     if (_setpointAvailable && _setpointStored && !memcmp(encoded, current, sizeof(encoded))) {
@@ -159,19 +162,25 @@ bool SettingsStore::saveSetpointSettingsLocked(const SetpointSettings& next) {
     bool hadCool = nvs_find_key(_handle, "coolThresh", &mirrorType) == ESP_OK;
     bool hadOwner = nvs_find_key(_handle, "autoOwner", &mirrorType) == ESP_OK;
     float heat = next.band.heat2 / 2.0f, cool = next.band.cool2 / 2.0f;
-    // Mirrors precede the one authoritative write. A mirror failure cannot
-    // publish a new profile; new firmware never loads mirrors over rangeCfg.
+    // Initialize the authoritative record before mirrors: a power loss must
+    // not leave only mirror keys that look like an older installation. For
+    // updates, mirrors still precede replacement of the existing record.
     bool recordAttempted = false;
-    bool ok = nvs_set_blob(_handle, "heatThresh", &heat, sizeof(heat)) == ESP_OK &&
+    const auto writeRecord = [&]() {
+        // NVS can publish a record before returning an error, so even a failed
+        // attempt needs restoration below.
+        recordAttempted = true;
+        return nvs_set_blob(_handle, "rangeCfg", encoded, sizeof(encoded)) == ESP_OK &&
+               !isFactoryResetting();
+    };
+    bool ok = (hadRecord || writeRecord()) &&
+        nvs_set_blob(_handle, "heatThresh", &heat, sizeof(heat)) == ESP_OK &&
         nvs_set_blob(_handle, "coolThresh", &cool, sizeof(cool)) == ESP_OK &&
         nvs_set_u8(_handle, "autoOwner", next.autoOwnerUnit ? 1 : 0) == ESP_OK &&
         !isFactoryResetting();
     if (ok) {
-        // NVS may publish the replacement before deleting the old blob fails.
-        // An error result therefore still requires restoration of the old record.
-        recordAttempted = true;
-        ok = nvs_set_blob(_handle, "rangeCfg", encoded, sizeof(encoded)) == ESP_OK &&
-            !isFactoryResetting() && nvs_commit(_handle) == ESP_OK && !isFactoryResetting();
+        ok = (!hadRecord || writeRecord()) &&
+            nvs_commit(_handle) == ESP_OK && !isFactoryResetting();
     }
     if (!ok) {
         LOG_ERROR("[Settings] setpoint policy persistence failed; active policy retained");
@@ -210,6 +219,7 @@ bool SettingsStore::saveDetectedRanges(const SetpointRange::Detection& next) {
     std::lock_guard<std::mutex> lock(s_settingsWriteMutex);
     uint8_t encoded[RANGE_CACHE_SIZE], current[RANGE_CACHE_SIZE];
     if (isFactoryResetting() || !_handle || !encodeCache(next, encoded)) return false;
+    if (!_autoSingleStored && !saveAutoSingleLocked(_settings.autoSingleSetpoint)) return false;
     encodeCache(_detected, current);
     if (!memcmp(encoded, current, sizeof(encoded))) return true;
     // Cache keys must not turn an uninitialized fresh namespace into an upgrade.
@@ -235,6 +245,9 @@ bool SettingsStore::saveDetectedRanges(const SetpointRange::Detection& next) {
 }
 bool SettingsStore::saveAutoSingle(bool single) {
     std::lock_guard<std::mutex> lock(s_settingsWriteMutex);
+    return saveAutoSingleLocked(single);
+}
+bool SettingsStore::saveAutoSingleLocked(bool single) {
     if (isFactoryResetting() || !_handle) return false;
     if (nvs_set_u8(_handle, "autoSingle", single ? 1 : 0) != ESP_OK || isFactoryResetting() ||
         nvs_commit(_handle) != ESP_OK || isFactoryResetting()) {
@@ -242,6 +255,7 @@ bool SettingsStore::saveAutoSingle(bool single) {
         return false;
     }
     _settings.autoSingleSetpoint = single;
+    _autoSingleStored = true;
     ++_generation;
     return true;
 }
@@ -374,9 +388,22 @@ void SettingsStore::begin() {
         return;
     }
 
-    // Count before any migration writes keys (including schema-less installs).
+    // Snapshot before any migration writes keys (including schema-less installs).
+    // Auto may be the only committed key after an interrupted fresh boot. It
+    // carries the chosen mode, but is not evidence of an old range policy.
+    uint8_t autoSingle = 0;
+    const auto autoResult = nvs_get_u8(_handle, "autoSingle", &autoSingle);
+    _autoSingleStored = autoResult == ESP_OK;
     size_t oldEntries = 0;
-    bool hadSettings = nvs_get_used_entry_count(_handle, &oldEntries) != ESP_OK || oldEntries != 0;
+    const bool hadSettings = nvs_get_used_entry_count(_handle, &oldEntries) != ESP_OK ||
+                            oldEntries > (_autoSingleStored ? 1u : 0u);
+    _settings.autoSingleSetpoint = _autoSingleStored ? autoSingle != 0 :
+                                  autoResult == ESP_ERR_NVS_NOT_FOUND && !hadSettings;
+    _autoSingleBoot = _settings.autoSingleSetpoint;
+    // Persist the decision before any other fresh settings. Normal writers
+    // retry this first if flash is unavailable, preserving the boot's choice.
+    if (!_autoSingleStored && !saveAutoSingle(_settings.autoSingleSetpoint))
+        LOG_WARN("[Settings] Auto default persistence failed; retry pending");
     uint8_t cfg[RANGE_CFG_SIZE]; size_t cfgLen = sizeof(cfg);
     esp_err_t cfgResult = nvs_get_blob(_handle, "rangeCfg", cfg, &cfgLen);
     bool havePolicy = cfgResult == ESP_OK && cfgLen == sizeof(cfg) && decodeSetpoint(cfg, _setpoint);
@@ -399,8 +426,9 @@ void SettingsStore::begin() {
         else LOG_WARN("[Settings] invalid detected range cache ignored");
     }
 
-    // Key renames move stored values to their new names before any field load
-    runKeyMigrations();
+    // Migration can erase the last legacy key (for example an invalid timeout).
+    // Keep that upgrade evidence until the Auto choice is durable; retry on boot.
+    if (_autoSingleStored) runKeyMigrations();
 
     // Schema version — no migrations exist yet; read it so future versions
     // can branch on what layout this device last wrote (see settings.h).
@@ -729,15 +757,6 @@ void SettingsStore::begin() {
                 _settings.autoOwnerUnit = (val != 0);
         }
     }
-    // autoSingle — Auto setpoint mode. Absent (older firmware, factory
-    // reset): Range, the pre-0.2.9 behaviour.
-    {
-        uint8_t val = 0;
-        if (nvs_get_u8(_handle, "autoSingle", &val) == ESP_OK)
-            _settings.autoSingleSetpoint = (val != 0);
-        _autoSingleBoot = _settings.autoSingleSetpoint;
-    }
-
     if (missingPolicy) {
         _setpoint.band = {static_cast<int16_t>(std::lround(_settings.heatingThreshold * 2)),
                           static_cast<int16_t>(std::lround(_settings.coolingThreshold * 2))};
@@ -840,6 +859,7 @@ uint8_t room_source_derived(const DeviceSettings &s) {
 void SettingsStore::save() {
     std::lock_guard<std::mutex> lock(s_settingsWriteMutex);
     if (isFactoryResetting() || !_handle) return;
+    if (!_autoSingleStored && !saveAutoSingleLocked(_settings.autoSingleSetpoint)) return;
     uint32_t before = _generation;
     if (_setpointAvailable) {
         SetpointSettings next = _setpoint;

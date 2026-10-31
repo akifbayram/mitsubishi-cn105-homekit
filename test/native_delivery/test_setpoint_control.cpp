@@ -4,6 +4,7 @@ static void manual(int mode,int low,int high){auto s=settings.setpointSettings()
 // A boot that finds Single in NVS, through the real settings load.
 static void bootSingle(CN105Controller& c){hkNvs.committed["ac-settings"]["autoSingle"]={1};settings=SettingsStore{};settings.begin();SetpointControl::begin(c);}
 int main(int,char**argv){
+ hkNvs.committed["ac-settings"]["autoSingle"]={0};
  settings.begin();Pump pump; pump.mode=CN105_MODE_HEAT;CN105Controller c;now_ms=5000;c.begin(&pump);ticks(c);SetpointControl::begin(c);g_homekitCtrl=&c;
  CASE("single_web_band_edit_rejected") {bootSingle(c);applyWeb(R"({"heatThresh":19})");CHECK(webError);CHECK(settings.get().heatingThreshold==20);}
  CASE("single_web_target_in_auto_held") {bootSingle(c);pump.mode=CN105_MODE_AUTO;ticks(c,300);applyWeb(R"({"target":24})");CHECK(!webError);CHECK(c.getEffectiveState().targetTemp==24);}

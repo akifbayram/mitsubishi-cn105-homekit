@@ -83,8 +83,10 @@ struct DeviceSettings {
     bool     autoOwnerUnit = false;
     // Auto setpoint mode: false = Range (a heating/cooling band this device
     // steers), true = Single (the unit's native setpoint, edited directly).
-    // This is the saved choice. Behaviour follows autoSingleBoot() until the
-    // next restart: HomeKit's database is fixed once it starts.
+    // begin() defaults fresh installations to Single and upgrades to Range;
+    // an explicit saved choice wins. Range is the fallback if storage cannot
+    // be opened. Behaviour follows autoSingleBoot() until the next restart:
+    // HomeKit's database is fixed once it starts.
     bool     autoSingleSetpoint = false;
     bool     wifiChangePending = false; // True after WiFi creds changed via web UI (shorter fallback timeout)
     uint8_t  vaneConfig = 2;          // 0=no vanes, 1=vertical only, 2=vertical+horizontal
@@ -183,11 +185,13 @@ private:
     void runKeyMigrations();
     void syncSetpointViews();
     bool saveSetpointSettingsLocked(const SetpointSettings& next);
+    bool saveAutoSingleLocked(bool single);
     SetpointSettings _setpoint;
     SetpointRange::Detection _detected{};
     bool _setpointAvailable = false;
     bool _setpointStored = false;
     bool _autoSingleBoot = false;
+    bool _autoSingleStored = false;
     nvs_handle_t _handle = 0;
     DeviceSettings _settings;
     uint32_t _generation = 0;

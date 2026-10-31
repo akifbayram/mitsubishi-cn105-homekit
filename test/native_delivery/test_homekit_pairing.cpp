@@ -4,7 +4,14 @@ static bool start(){return homekit_init("Test","Serin","CN105","serial","1.0",nu
 static bool storedPaired(){auto& ns=hkNvs.committed["ac-settings"];return ns.count("hkPaired")&&ns["hkPaired"]==std::vector<uint8_t>{1};}
 static void reboot(){settings=SettingsStore{};hkNvs.pending.clear();settings.begin();controllers=0;s_started=false;s_pairingsReset=false;}
 int main(int,char**argv){
+ // Existing installations keep the old HomeKit shape. Fresh setup is separate.
+ if(strcmp(argv[1],"fresh_single_shape"))hkNvs.committed["ac-settings"]["deviceName"]={'O','l','d',0};
  settings.begin();
+ CASE("fresh_single_shape") {
+  CHECK(start());CHECK(settings.autoSingleBoot());
+  CHECK(hkNvs.committed["hk-meta"]["svcShape"]==std::vector<uint8_t>{0x5F});CHECK(configCalls==0);
+  reboot();CHECK(start());CHECK(settings.autoSingleBoot());CHECK(configCalls==0);
+ }
  CASE("remote_fed_defaults_false_on_fresh_device") {
   CHECK(!settings.get().remoteEverFed);
   settings.save();reboot();CHECK(!settings.get().remoteEverFed);
@@ -33,7 +40,7 @@ int main(int,char**argv){
   CHECK(start());reboot();CHECK(start());
   CHECK(hkNvs.committed["hk-meta"]["svcShape"]==std::vector<uint8_t>{0x1F});CHECK(configCalls==0);
  }
- CASE("auto_single_defaults_range") {
+ CASE("auto_single_upgrade_defaults_range") {
   CHECK(!settings.get().autoSingleSetpoint);CHECK(!settings.autoSingleBoot());settings.save();
   CHECK(hkNvs.committed["ac-settings"]["autoSingle"]==std::vector<uint8_t>{0});
  }

@@ -25,6 +25,8 @@ static void bootSingle(CN105Controller &c) {
     SetpointControl::begin(c);
 }
 int main(int, char **argv) {
+    // These range fixtures exercise an explicitly selected Range mode.
+    hkNvs.committed["ac-settings"]["autoSingle"] = {0};
     settings.begin();
     Pump pump;
     pump.mode = CN105_MODE_HEAT;
