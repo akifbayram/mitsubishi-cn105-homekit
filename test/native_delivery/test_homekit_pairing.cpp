@@ -4,7 +4,14 @@ static bool start(){return homekit_init("Test","Serin","CN105","serial","1.0",nu
 static bool storedPaired(){auto& ns=hkNvs.committed["ac-settings"];return ns.count("hkPaired")&&ns["hkPaired"]==std::vector<uint8_t>{1};}
 static void reboot(){settings=SettingsStore{};hkNvs.pending.clear();settings.begin();controllers=0;s_started=false;s_pairingsReset=false;}
 int main(int,char**argv){
+ // Existing installations keep the old HomeKit shape. Fresh setup is separate.
+ if(strcmp(argv[1],"fresh_single_shape"))hkNvs.committed["ac-settings"]["deviceName"]={'O','l','d',0};
  settings.begin();
+ CASE("fresh_single_shape") {
+  CHECK(start());CHECK(settings.autoSingleBoot());
+  CHECK(hkNvs.committed["hk-meta"]["svcShape"]==std::vector<uint8_t>{0x5F});CHECK(configCalls==0);
+  reboot();CHECK(start());CHECK(settings.autoSingleBoot());CHECK(configCalls==0);
+ }
  CASE("remote_fed_defaults_false_on_fresh_device") {
   CHECK(!settings.get().remoteEverFed);
   settings.save();reboot();CHECK(!settings.get().remoteEverFed);
@@ -28,6 +35,34 @@ int main(int,char**argv){
  CASE("auto_owner_unit_persists_across_reboot") {
   settings.get().autoOwnerUnit=true;settings.save();reboot();CHECK(settings.get().autoOwnerUnit);
   CHECK(hkNvs.committed["ac-settings"]["autoOwner"]==std::vector<uint8_t>{1});
+ }
+ CASE("range_shape_unchanged_no_bump") {
+  CHECK(start());reboot();CHECK(start());
+  CHECK(hkNvs.committed["hk-meta"]["svcShape"]==std::vector<uint8_t>{0x1F});CHECK(configCalls==0);
+ }
+ CASE("auto_single_upgrade_defaults_range") {
+  CHECK(!settings.get().autoSingleSetpoint);CHECK(!settings.autoSingleBoot());settings.save();
+  CHECK(hkNvs.committed["ac-settings"]["autoSingle"]==std::vector<uint8_t>{0});
+ }
+ CASE("auto_single_absent_key_is_range") {
+  // Any device upgrading from older firmware has settings but no key.
+  settings.save();hkNvs.committed["ac-settings"].erase("autoSingle");reboot();
+  CHECK(!settings.get().autoSingleSetpoint);CHECK(!settings.autoSingleBoot());
+ }
+ CASE("auto_single_latches_at_boot") {
+  settings.get().autoSingleSetpoint=true;settings.save();CHECK(!settings.autoSingleBoot());
+  reboot();CHECK(settings.get().autoSingleSetpoint);CHECK(settings.autoSingleBoot());
+  CHECK(hkNvs.committed["ac-settings"]["autoSingle"]==std::vector<uint8_t>{1});
+ }
+ CASE("single_shape_bumps_once") {
+  CHECK(start());settings.get().autoSingleSetpoint=true;settings.save();reboot();CHECK(start());
+  CHECK(configCalls==1);CHECK(hkNvs.committed["hk-meta"]["svcShape"]==std::vector<uint8_t>{0x5F});
+  reboot();CHECK(start());CHECK(configCalls==1);
+ }
+ CASE("back_to_range_bumps_again") {
+  CHECK(start());settings.get().autoSingleSetpoint=true;settings.save();reboot();CHECK(start());
+  settings.get().autoSingleSetpoint=false;settings.save();reboot();CHECK(start());
+  CHECK(configCalls==2);CHECK(hkNvs.committed["hk-meta"]["svcShape"]==std::vector<uint8_t>{0x1F});
  }
  CASE("factory_reset_blocks_first_start") {
   settings.beginFactoryReset();

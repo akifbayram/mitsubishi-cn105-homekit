@@ -163,6 +163,24 @@ input[type=range].slim::-moz-range-thumb{width:22px;height:22px;}
 .temp-display{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;}
 .temp-lbl{font-size:11.5px;font-weight:500;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;display:block;}
 .temp-setting{min-width:0;}
+.temp-heading{display:flex;align-items:center;gap:4px;min-height:14px;}
+.auto-help-btn{display:flex;align-items:center;justify-content:center;flex:none;width:44px;height:44px;
+  margin:-15px -8px;padding:0;border:none;border-radius:50%;background:none;color:var(--text2);cursor:pointer;}
+.auto-help-btn svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;}
+.auto-help-btn[aria-expanded="true"]{color:var(--text);}
+.auto-help-btn:focus-visible{outline-offset:-5px;}
+/* Outside .frame so the temperature card and phone frame cannot clip help. */
+.auto-help{position:fixed;z-index:60;width:350px;max-width:calc(100vw - 24px);max-height:calc(100vh - 24px);
+  overflow:auto;overscroll-behavior:contain;padding:18px;border-radius:18px;background:var(--surface2);color:var(--text);
+  box-shadow:0 16px 48px rgba(0,0,0,.4),0 0 0 1px var(--border);}
+.auto-help-head{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:14px;}
+.auto-help-head h2{margin:0;font-size:17px;font-weight:600;line-height:1.3;letter-spacing:-.2px;}
+.auto-help-close{display:flex;align-items:center;justify-content:center;flex:none;width:44px;height:44px;
+  margin:-10px -10px -10px 0;padding:0;border:none;border-radius:50%;background:none;color:var(--text2);cursor:pointer;}
+.auto-help-close svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;}
+.auto-help h3{font-size:13px;font-weight:600;line-height:1.4;margin:16px 0 5px;}
+.auto-help-head+h3{margin-top:0;}
+.auto-help p{font-size:13px;line-height:1.55;margin:0;color:var(--text);opacity:.8;}
 /* Degrees hang from the cap height, not the baseline: align the tops of the
    boxes and nudge by the ascender/cap-height gap of each size. */
 .temp-num{display:flex;align-items:flex-start;gap:2px;margin-top:3px;}
@@ -559,6 +577,7 @@ button.wifi-row:active{background:var(--surface3);}
   .log-btn:hover{filter:brightness(1.12);}
   .seg button:not(.active):hover{color:var(--text);}
   .temp-step:hover,.theme-toggle:hover,.refresh-btn:hover{background:var(--surface3);}
+  .auto-help-btn:hover,.auto-help-close:hover{color:var(--text);}
   .net-row:hover,.ble-scan-item:hover,button.wifi-row:hover{background:var(--surface3);}
 }
 .save-btn,.btn-primary,.btn-secondary,.btn-danger,.file-btn{transition:opacity .15s,filter .15s;}
@@ -681,7 +700,12 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     <div class="temp-inner">
       <div class="temp-display">
         <div class="temp-setting">
-          <span class="temp-lbl" id="setLbl">Set</span>
+          <div class="temp-heading">
+            <span class="temp-lbl" id="setLbl">Set</span>
+            <button type="button" class="auto-help-btn hidden" id="autoHelpBtn" aria-label="About Auto mode" aria-haspopup="dialog" aria-expanded="false" aria-controls="autoHelp">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7h.01"/></svg>
+            </button>
+          </div>
           <div class="temp-num" id="targetWrap"><span class="temp-val" id="targetTemp">--</span><span class="temp-deg">°</span></div>
         </div>
         <div class="temp-reading">
@@ -712,7 +736,6 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
           </div>
         </div>
         <p class="range-help hidden" id="autoOwnerNote">This range was set from the heat pump's own controller, so this device is not steering it. Move either slider to take over.</p>
-        <p class="range-help">Auto change-over is handled by the heat pump: it switches between heating and cooling once the room drifts about 4&deg;F (2&deg;C) past the set point, so a switch can lag. On a multi-zone system an idle head left in Auto can hold the outdoor unit's mode and block other zones &mdash; Mitsubishi advises against Auto there.</p>
       </div>
     </div>
   </div>
@@ -1240,6 +1263,13 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       <label class="ios-toggle"><input type="checkbox" id="mpAvail" onchange="toggleModeCap(this)" aria-label="Available on this unit"><span class="ios-toggle-slider"></span></label>
     </div>
   </div>
+  <div id="mpAuto" hidden>
+    <h3 class="mode-label" id="mpSpLbl">Auto Set Point</h3>
+    <div class="card flush" role="radiogroup" aria-labelledby="mpSpLbl">
+      <button type="button" class="inset-row mode-row" role="radio" id="mpSpRange" onclick="pickAutoSingle(false)"><span class="mode-main"><span class="lbl">Range</span></span><svg class="mp-check" aria-hidden="true"><use href="#icCheck"/></svg></button>
+      <button type="button" class="inset-row mode-row" role="radio" id="mpSpSingle" onclick="pickAutoSingle(true)"><span class="mode-main"><span class="lbl">Single</span><span class="sub">The heat pump's own set point</span></span><svg class="mp-check" aria-hidden="true"><use href="#icCheck"/></svg></button>
+    </div>
+  </div>
   <div id="mpRange">
     <h3 class="mode-label" id="mpRangeLbl"></h3>
     <div class="card flush" role="radiogroup" aria-labelledby="mpRangeLbl">
@@ -1257,6 +1287,17 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   </div>
 </section>
 </main>
+
+<div class="auto-help hidden" id="autoHelp" role="dialog" aria-labelledby="autoHelpTitle">
+  <div class="auto-help-head">
+    <h2 id="autoHelpTitle" tabindex="-1">About Auto</h2>
+    <button type="button" class="auto-help-close" id="autoHelpClose" aria-label="Close Auto help"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  </div>
+  <h3>Changeover delay</h3>
+  <p>Auto change-over is handled by the heat pump: it switches between heating and cooling once the room drifts about 4&deg;F (2&deg;C) past the set point, so a switch can lag.</p>
+  <h3>Multi-zone systems</h3>
+  <p>On a multi-zone system an idle head left in Auto can hold the outdoor unit's mode and block other zones &mdash; Mitsubishi advises against Auto there.</p>
+</div>
 
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
@@ -1876,15 +1917,78 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       lbl.textContent='Idle · holding'; targetTemp.textContent=fmtTemp(s.heatThresh)+'–'+fmtTemp(s.coolThresh); targetTemp.style.color='var(--text2)';
     }
   }
+  // ── auto-view:start
+  // Which Auto control the card shows: the band ('range') or the plain setpoint
+  // slider ('single'). Keyed on the mode this boot runs; a frame without the
+  // field is Range. Tested by test/web_state/.
+  function autoView(s){
+    if(!s||s.mode!=='auto'||!s.connected||!s.power) return null;
+    return s.autoSingleBoot?'single':'range';
+  }
   // Single-mode headline reacts to the active mode (Cooling to / Heating to / …).
-  function setSingleHeadline(s){
+  function singleHeadline(s,view){
     var H={heat:'Heating to',cool:'Cooling to',dry:'Drying to',fan:'Fan only'};
-    $('setLbl').textContent=(!s||!s.power)?'Off':(H[s.mode]||'Set');
+    return (!s||!s.power)?'Off':view==='single'?'Auto at':(H[s.mode]||'Set');
+  }
+  function restartPending(s){
+    return s.modeMask!==s.modeMaskBoot||(s.autoSingle!=null&&s.autoSingleBoot!=null&&s.autoSingle!==s.autoSingleBoot);
+  }
+  // ── auto-view:end
+  // Nonmodal help: keep it outside the clipped card, with no extra row in
+  // either Auto layout. State updates only close it when Auto goes away.
+  var autoHelp=$('autoHelp'),autoHelpBtn=$('autoHelpBtn'),autoHelpOpen=false;
+  function positionAutoHelp(){
+    if(!autoHelpOpen)return;
+    var edge=12,width=document.documentElement.clientWidth,height=window.innerHeight;
+    var anchor=autoHelpBtn.getBoundingClientRect();
+    autoHelp.style.width=Math.min(350,width-edge*2)+'px';
+    autoHelp.style.maxHeight=Math.max(0,height-edge*2)+'px';
+    var box=autoHelp.getBoundingClientRect();
+    var top=anchor.bottom+6;
+    if(top+box.height>height-edge)top=anchor.top-box.height-6;
+    autoHelp.style.left=Math.max(edge,Math.min(anchor.left-8,width-box.width-edge))+'px';
+    autoHelp.style.top=Math.max(edge,Math.min(top,height-box.height-edge))+'px';
+  }
+  function closeAutoHelp(restoreFocus){
+    if(!autoHelpOpen)return;
+    var focusedInside=autoHelp.contains(document.activeElement);
+    autoHelpOpen=false;
+    autoHelp.classList.add('hidden');
+    autoHelpBtn.setAttribute('aria-expanded','false');
+    if(restoreFocus||focusedInside){
+      var target=autoHelpBtn.classList.contains('hidden')?document.querySelector('#modeGrp button.active'):autoHelpBtn;
+      if(target)target.focus({preventScroll:true});
+    }
+  }
+  function renderAutoHelp(view){
+    autoHelpBtn.classList.toggle('hidden',!view);
+    if(!view)closeAutoHelp(false);
+    else positionAutoHelp();
+  }
+  autoHelpBtn.addEventListener('click',function(){
+    if(autoHelpOpen){closeAutoHelp(true);return;}
+    autoHelpOpen=true;
+    autoHelp.classList.remove('hidden');
+    autoHelpBtn.setAttribute('aria-expanded','true');
+    positionAutoHelp();
+    $('autoHelpTitle').focus({preventScroll:true});
+  });
+  $('autoHelpClose').addEventListener('click',function(){closeAutoHelp(true);});
+  document.addEventListener('click',function(e){
+    if(autoHelpOpen&&!autoHelp.contains(e.target)&&!autoHelpBtn.contains(e.target))closeAutoHelp(false);
+  });
+  document.addEventListener('keydown',function(e){
+    if(autoHelpOpen&&e.key==='Escape'){e.preventDefault();closeAutoHelp(true);}
+  });
+  window.addEventListener('resize',positionAutoHelp);
+  window.addEventListener('scroll',positionAutoHelp);
+  function setSingleHeadline(s,view){
+    $('setLbl').textContent=singleHeadline(s,view);
     targetTemp.style.color='';
   }
   function renderDual(s){
-    var auto=s&&s.mode==='auto'&&s.connected&&s.power;
-    if(auto){
+    var view=autoView(s);
+    if(view==='range'){
       dualTemp.classList.remove('hidden');
       sliderRow.style.display='none';
       $('targetWrap').style.display='none';
@@ -1899,8 +2003,9 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       dualTemp.classList.add('hidden');
       sliderRow.style.display='';
       $('targetWrap').style.display='';
-      setSingleHeadline(s);
+      setSingleHeadline(s,view);
     }
+    renderAutoHelp(view);
   }
 
   // ── Room Sensor card (Single / Average blend) ──────────────────────────────
@@ -2516,7 +2621,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     if(s.modeMask!=null){
       applyModeVisibility(s.modeMask, s.power?s.mode:null);
       if(s.modeMaskBoot!=null){
-        $('capBanner').style.display=(s.modeMask!==s.modeMaskBoot)?'flex':'none';
+        $('capBanner').style.display=restartPending(s)?'flex':'none';
       }
     }
 
@@ -3479,6 +3584,8 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   var CAP_HEAT_COOL=CAP_BITS.heat|CAP_BITS.cool,CAP_REAL=CAP_HEAT_COOL|CAP_BITS.dry|CAP_BITS.fan;
   // capSaved is the mask the device holds; capMask the edited copy (null until the first push).
   var capMask=null,capSaved=null,lastCapMask=null,deviceEdited=false;
+  // The Auto setpoint mode the device holds and its edited copy (null until a push reports it).
+  var autoSingleDraft=null,autoSingleSaved=null;
   // The range each mode uses (Dry shares Cool's, Fan has none) and the modes keeping each range in use.
   var MODE_RANGE={heat:'Heat',cool:'Cool',auto:'Auto',dry:'Cool',fan:null};
   var RANGE_CAPS={Heat:CAP_BITS.heat,Cool:CAP_BITS.cool|CAP_BITS.dry,Auto:CAP_BITS.auto};
@@ -3487,7 +3594,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   // Device card fields keep no saved copy to compare against, so any edit counts.
   function markDeviceEdited(){deviceEdited=true;markSettingsEdited();}
   function hasUnsavedChanges(){
-    return deviceEdited||capMask!==capSaved||RANGE_NAMES.some(function(name){return rangeDraft[name]&&rangeDraft[name].dirty;});
+    return deviceEdited||capMask!==capSaved||autoSingleDraft!==autoSingleSaved||RANGE_NAMES.some(function(name){return rangeDraft[name]&&rangeDraft[name].dirty;});
   }
   // Save lights up only while something differs from the device, and rests while a save is in flight.
   function renderSaveState(){
@@ -3519,6 +3626,8 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       ['Source','Min','Max'].forEach(function(suffix){var key='range'+name+suffix;if(Object.prototype.hasOwnProperty.call(from,key))to[key]=from[key];});
     });
     ['heatThresh','coolThresh'].forEach(function(key){if(Object.prototype.hasOwnProperty.call(from,key))to[key]=from[key];});
+    // Absent in files from before the setting: the device keeps its mode.
+    if(typeof from.autoSingle==='boolean') to.autoSingle=from.autoSingle;
   }
   function submitCheckedConfig(cfg,success){
     validRangeSettings(cfg);
@@ -3540,7 +3649,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     renderSaveState();
     if(!msg.ok){saveFailed(msg.msg||'Could not save settings');return;}
     if(pending.version!==rangeEditVersion){rangeStatus('Earlier changes saved. Save your latest edits.',false);return;}
-    settingsDirty=false;deviceEdited=false;capSaved=capMask;
+    settingsDirty=false;deviceEdited=false;capSaved=capMask;autoSingleSaved=autoSingleDraft;
     RANGE_NAMES.forEach(function(name){if(rangeDraft[name])rangeDraft[name].dirty=false;});
     renderSaveState();
     rangeStatus(pending.success||'Settings saved',false);
@@ -3554,6 +3663,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       if(r&&(!draft||!draft.dirty))
         rangeDraft[name]={source:r.selection,min:r.manualMin>=10?r.manualMin:r.min,max:r.manualMax>=10?r.manualMax:r.max,dirty:false};
     });
+    if(st.autoSingle!=null&&autoSingleDraft===autoSingleSaved) autoSingleDraft=autoSingleSaved=st.autoSingle;
     renderModes();
   }
   function rangeOf(name){return rangeState&&rangeState[name.toLowerCase()];}
@@ -3616,6 +3726,12 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       d.max=r.selection==='manual'?r.manualMax:from.max;
     }
     d.dirty=d.source!==r.selection||d.source==='manual'&&(d.min!==r.manualMin||d.max!==r.manualMax);
+    markSettingsEdited();renderModes();
+  }
+  // Before a push reports the mode there is nothing to edit, only one to invent.
+  function pickAutoSingle(on){
+    if(autoSingleDraft==null) return;
+    autoSingleDraft=on;
     markSettingsEdited();renderModes();
   }
   function capOn(key){return capMask!=null&&!!(capMask&CAP_BITS[key]);}
@@ -3686,6 +3802,9 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     $('mpAvail').disabled=blocked||capMask==null;
     $('mpAvailRow').classList.toggle('cap-disabled',blocked);
     $('mpAvailSub').hidden=!blocked;
+    $('mpAuto').hidden=!(key==='auto'&&on);
+    $('mpSpRange').setAttribute('aria-checked',String(autoSingleDraft!==true));
+    $('mpSpSingle').setAttribute('aria-checked',String(autoSingleDraft===true));
     $('mpTrack').hidden=$('mpRange').hidden=!v;
     if(!v) return;
     var ref=v.reference,out=v.custom&&ref&&(v.min<ref.min||v.max>ref.max);
@@ -3710,9 +3829,12 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       cfg['range'+name+'Source']=draft.source;
       if(draft.source==='manual'){cfg['range'+name+'Min']=draft.min;cfg['range'+name+'Max']=draft.max;}
     });
+    // Only an edit is sent: an unknown mode must never read as Range.
+    if(autoSingleDraft!==autoSingleSaved) cfg.autoSingle=autoSingleDraft;
     return cfg;
   }
   function exportRangeSettings(st,out){
+    if(st.autoSingle!=null) out.autoSingle=st.autoSingle;
     if(!st.setpointRanges) return;
     RANGE_NAMES.forEach(function(name){
       var r=st.setpointRanges[name.toLowerCase()];if(!r)return;
@@ -3765,6 +3887,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   document.addEventListener('keydown',function(e){if(e.key==='Escape'&&openMode)leaveModePage();});
   window.toggleModeCap=function(input){if(!setCap(openMode,input.checked))input.checked=capOn(openMode);};
   window.pickModeRange=function(custom){pickRange(MODE_RANGE[openMode],custom);};
+  window.pickAutoSingle=pickAutoSingle;
   window.nudgeModeRange=function(which,dir){nudgeRange(MODE_RANGE[openMode],which,dir);};
 
   window.saveConfig=function(){

@@ -167,6 +167,22 @@ int main(int,char** argv) {
   linkTick();
   CHECK(hkNvs.writes==writes);
  }
+ CASE("single_boot_announces_changed_caps_once") {
+  // Bonded dials learn the new mode from CAPS; no dial firmware change.
+  announceInitial();
+  const auto sequence=persistentSequence();
+  hkNvs.committed["ac-settings"]["autoSingle"]={1};
+  settings=SettingsStore{};
+  settings.begin();
+  SetpointControl::begin(controller);
+  caps_announce_if_changed();
+  linkTick();
+  CHECK(persistentSequence()==uint8_t(sequence+1));
+  CHECK(caps().modes&(1u<<SL2_MODE_AUTO));
+  caps_announce_if_changed();
+  linkTick();
+  CHECK(persistentSequence()==uint8_t(sequence+1));
+ }
  CASE("per_mode_bounds_reject_entire_batch_inside_common_envelope") {
   manual(0,{36,48});
   manual(1,{20,62});

@@ -1,8 +1,13 @@
 using namespace SetpointRange;
 #define CASE(name) if (!strcmp(argv[1], name))
 static void manual(int mode,int low,int high){auto s=settings.setpointSettings();s.preferences.mode[mode]={Selection::Manual,{(int16_t)(low*2),(int16_t)(high*2)}};CHECK(SetpointControl::applySettings(s)==Result::Ok);}
+// A boot that finds Single in NVS, through the real settings load.
+static void bootSingle(CN105Controller& c){hkNvs.committed["ac-settings"]["autoSingle"]={1};settings=SettingsStore{};settings.begin();SetpointControl::begin(c);}
 int main(int,char**argv){
+ hkNvs.committed["ac-settings"]["autoSingle"]={0};
  settings.begin();Pump pump; pump.mode=CN105_MODE_HEAT;CN105Controller c;now_ms=5000;c.begin(&pump);ticks(c);SetpointControl::begin(c);g_homekitCtrl=&c;
+ CASE("single_web_band_edit_rejected") {bootSingle(c);applyWeb(R"({"heatThresh":19})");CHECK(webError);CHECK(settings.get().heatingThreshold==20);}
+ CASE("single_web_target_in_auto_held") {bootSingle(c);pump.mode=CN105_MODE_AUTO;ticks(c,300);applyWeb(R"({"target":24})");CHECK(!webError);CHECK(c.getEffectiveState().targetTemp==24);}
  CASE("batch_invalid_target_leaves_mailbox_unchanged") {manual(0,18,24);SetpointControl::Command cmd;cmd.unit.power=true;cmd.unit.targetTemp=29;CHECK(SetpointControl::submit(cmd)==Result::OutsideRange);CHECK(!c._staged.flags1);CHECK(!c._wanted.hasPower);}
  CASE("mode_and_target_order_independent") {manual(0,10,16);manual(1,20,30);SetpointControl::Command cmd;cmd.unit.targetTemp=26;cmd.unit.mode=CN105_MODE_COOL;CHECK(SetpointControl::submit(cmd)==Result::Ok);CHECK(c.getEffectiveState().targetTemp==26);CHECK(c.getEffectiveState().mode==CN105_MODE_COOL);}
  CASE("mode_only_normalizes_retained_target") {manual(1,24,30);SetpointControl::Command cmd;cmd.unit.mode=CN105_MODE_COOL;CHECK(SetpointControl::submit(cmd)==Result::Ok);CHECK(c.getEffectiveState().targetTemp==24);}

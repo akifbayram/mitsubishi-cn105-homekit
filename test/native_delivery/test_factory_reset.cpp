@@ -1,6 +1,7 @@
 #define CASE(name) if (!strcmp(argv[1], name))
 static std::vector<uint8_t> bytes(size_t n,uint8_t seed){std::vector<uint8_t> v(n);for(size_t i=0;i<n;i++)v[i]=(uint8_t)(seed+i*7);return v;}
 int main(int, char** argv) {
+ hkNvs.committed["ac-settings"]["autoSingle"]={0};
  settings.begin();
  CHECK(nvs_open("ac-events",NVS_READWRITE,&Events::s_nvs)==ESP_OK);
  s_started=true;
@@ -63,6 +64,14 @@ int main(int, char** argv) {
   CHECK(hkNvs.committed["serinlink"].size()==1);                      // bonds are gone
   CHECK(hkNvs.committed["serinlink"][SL2_KV_IDENTITY]==id);           // byte for byte
   CHECK(!hkNvs.init);   // closed again: nothing else lands before the restart
+ }
+ CASE("factory_reset_defaults_to_single") {
+  CHECK(!settings.autoSingleBoot());
+  CHECK(espnow_factory_erase_nvs());CHECK(nvs_flash_init()==ESP_OK);
+  s_factoryResetting.store(false);settings=SettingsStore{};settings.begin();
+  CHECK(settings.get().autoSingleSetpoint);CHECK(settings.autoSingleBoot());
+  CHECK(hkNvs.committed["ac-settings"]["autoSingle"]==std::vector<uint8_t>{1});
+  settings=SettingsStore{};settings.begin();CHECK(settings.autoSingleBoot());
  }
  CASE("no_identity_erases_everything") {
   hkNvs.committed["serinlink"].erase(SL2_KV_IDENTITY);

@@ -81,6 +81,13 @@ struct DeviceSettings {
     // this device writes the band again (auto_band.h). Persisted so a reboot
     // neither re-imposes a band on a wall user nor silences a HomeKit one.
     bool     autoOwnerUnit = false;
+    // Auto setpoint mode: false = Range (a heating/cooling band this device
+    // steers), true = Single (the unit's native setpoint, edited directly).
+    // begin() defaults fresh installations to Single and upgrades to Range;
+    // an explicit saved choice wins. Range is the fallback if storage cannot
+    // be opened. Behaviour follows autoSingleBoot() until the next restart:
+    // HomeKit's database is fixed once it starts.
+    bool     autoSingleSetpoint = false;
     bool     wifiChangePending = false; // True after WiFi creds changed via web UI (shorter fallback timeout)
     uint8_t  vaneConfig = 2;          // 0=no vanes, 1=vertical only, 2=vertical+horizontal
     uint8_t  modeMask = MODE_CAP_ALL; // MODE_CAP_* bits — operating modes this unit supports (mode_caps.h)
@@ -160,11 +167,17 @@ public:
     bool saveSetpointSettings(const SetpointSettings& next);
     SetpointRange::Detection detectedRanges() const;
     bool saveDetectedRanges(const SetpointRange::Detection& next);
+    // Checked save of the Auto setpoint mode: on failure the saved choice stays
+    // as it was, so the caller can report it and the user can retry.
+    bool saveAutoSingle(bool single);
     // Boot-latched before factory erase; all normal NVS writers must stop.
     static void beginFactoryReset();
     static bool isFactoryResetting();
     DeviceSettings& get() { return _settings; }
     const DeviceSettings& get() const { return _settings; }
+    // The Auto setpoint mode this boot runs. Written once by begin(), before
+    // any other task starts, so every surface agrees until the next restart.
+    bool autoSingleBoot() const { return _autoSingleBoot; }
     // Bumped on every save() — lets consumers poll "did settings change?"
     // with one integer compare instead of per-field compares each loop tick.
     uint32_t generation() const { return _generation; }
@@ -172,10 +185,13 @@ private:
     void runKeyMigrations();
     void syncSetpointViews();
     bool saveSetpointSettingsLocked(const SetpointSettings& next);
+    bool saveAutoSingleLocked(bool single);
     SetpointSettings _setpoint;
     SetpointRange::Detection _detected{};
     bool _setpointAvailable = false;
     bool _setpointStored = false;
+    bool _autoSingleBoot = false;
+    bool _autoSingleStored = false;
     nvs_handle_t _handle = 0;
     DeviceSettings _settings;
     uint32_t _generation = 0;

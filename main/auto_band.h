@@ -19,6 +19,11 @@
 //                  a range consistent with what the wall shows.
 //
 // Persisted (DeviceSettings::autoOwnerUnit) so a power cycle changes nothing.
+//
+// Single setpoint mode (settings.autoSingleBoot()) drops the range: every
+// surface edits the unit's one Auto setpoint, as in Heat and Cool, so the
+// engine never steers and ownership never changes. Saving Range again hands
+// Auto to the unit (SetpointControl::saveAutoSingle).
 // ════════════════════════════════════════════════════════════════════════════
 
 // Minimum heating→cooling threshold gap. One rule for the web UI's clamp,
@@ -27,7 +32,8 @@ constexpr float AUTO_BAND_MIN_GAP_C = 2.0f;
 
 namespace AutoBand {
 
-/// True while this device last wrote the Auto operating point.
+/// True while the band engine may steer: Range mode, and this device last
+/// wrote the Auto operating point.
 bool deviceOwns();
 
 /// Main-loop poll. Hands over on each external Auto change the controller

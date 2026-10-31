@@ -15,7 +15,7 @@ struct FakeSettingsNvs {
  bool init=true;int commits=0,writes=0,erases=0,inits=0,deinits=0;
  std::function<void()> onErase,onInit,onWrite,onCommit;
  std::string failWriteKey,writeBeforeErrorKey;int writeBeforeErrorCount=0;
- bool failCommit=false,immediateWrites=false;
+ bool failCommit=false,immediateWrites=false,failEntryCount=false;
 } hkNvs;
 static const char* esp_err_to_name(int){return "host error";}
 static int nvs_open(const char* ns,int,nvs_handle_t* h){if(!hkNvs.init)return ESP_ERR_NVS_NOT_INITIALIZED;hkNvs.handles.push_back(ns);*h=hkNvs.handles.size();return ESP_OK;}
@@ -39,7 +39,7 @@ NVS_NUM(uint8_t,u8) NVS_NUM(uint16_t,u16) NVS_NUM(uint32_t,u32) NVS_NUM(uint64_t
 static int nvs_get_str(nvs_handle_t h,const char*k,char*v,size_t*n){return nvs_get_blob(h,k,v,n);}
 static int nvs_set_str(nvs_handle_t h,const char*k,const char*v){return nvs_set_blob(h,k,v,strlen(v)+1);}
 static int nvs_find_key(nvs_handle_t h,const char* k,nvs_type_t* t){if(!hkNvs.committed[hkNvs.handles[h-1]].count(k))return ESP_ERR_NVS_NOT_FOUND;*t=NVS_TYPE_BLOB;return ESP_OK;}
-static int nvs_get_used_entry_count(nvs_handle_t h,size_t* n){*n=hkNvs.committed[hkNvs.handles[h-1]].size();return ESP_OK;}
+static int nvs_get_used_entry_count(nvs_handle_t h,size_t* n){if(hkNvs.failEntryCount)return ESP_FAIL;*n=hkNvs.committed[hkNvs.handles[h-1]].size();return ESP_OK;}
 static int nvs_erase_key(nvs_handle_t h,const char*k){++hkNvs.writes;if(!hkNvs.init)return ESP_ERR_NVS_NOT_INITIALIZED;hkNvs.committed[hkNvs.handles[h-1]].erase(k);hkNvs.pending[hkNvs.handles[h-1]].erase(k);return ESP_OK;}
 static int nvs_commit(nvs_handle_t){if(hkNvs.onCommit){auto callback=hkNvs.onCommit;callback();}if(hkNvs.failCommit)return ESP_FAIL;if(!hkNvs.init)return ESP_ERR_NVS_NOT_INITIALIZED;for(auto& ns:hkNvs.pending)for(auto& kv:ns.second)hkNvs.committed[ns.first][kv.first]=kv.second;hkNvs.pending.clear();++hkNvs.commits;return ESP_OK;}
 static int nvs_erase_all(nvs_handle_t h){++hkNvs.writes;if(!hkNvs.init)return ESP_ERR_NVS_NOT_INITIALIZED;hkNvs.committed[hkNvs.handles[h-1]].clear();return ESP_OK;}

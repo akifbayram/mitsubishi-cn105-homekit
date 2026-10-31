@@ -810,6 +810,69 @@ const limits=(v)=>({custom:v.custom,min:v.min,max:v.max});
   checks += 10;
 }
 
+// ── Auto set point ─────────────────────────────────────────────────────────
+// Only the mode this boot runs picks the control, and a frame without the
+// field (a rolled-back section) is the default Range.
+{
+  const {autoView,singleHeadline,restartPending}=require('./extract.js');
+  const on={mode:'auto',power:true,connected:true};
+  same(autoView(on),'range','a frame without the field is Range');
+  same(autoView({...on,autoSingleBoot:false}),'range','Range boot shows the band');
+  same(autoView({...on,autoSingleBoot:true}),'single','Single boot shows the slider');
+  same(autoView({...on,autoSingle:true,autoSingleBoot:false}),'range','a saved switch waits for the restart');
+  same(autoView({...on,mode:'heat'}),null,'not Auto: no Auto view');
+  same(autoView({...on,power:false}),null,'off: no Auto view');
+  same(autoView({...on,connected:false}),null,'link down: no Auto view');
+  same(autoView(null),null,'no state yet: no Auto view');
+  same(singleHeadline({power:true,mode:'auto'},null),'Set','Range Auto with the link down keeps its label');
+  same(singleHeadline({power:true,mode:'auto'},'single'),'Auto at','Single names the setpoint, never an idle state');
+  same(singleHeadline({power:true,mode:'heat'},null),'Heating to','Heat is unchanged');
+  same(singleHeadline({power:false,mode:'auto'},'single'),'Off','off wins');
+  same(restartPending({modeMask:31,modeMaskBoot:31}),false,'nothing pending');
+  same(restartPending({modeMask:15,modeMaskBoot:31}),true,'a mask change still asks for a restart');
+  same(restartPending({modeMask:31,modeMaskBoot:31,autoSingle:true,autoSingleBoot:false}),true,'a saved Single asks for a restart');
+  same(restartPending({modeMask:31,modeMaskBoot:31,autoSingle:false,autoSingleBoot:true}),true,'a saved Range asks for a restart');
+  same(restartPending({modeMask:31,modeMaskBoot:31,autoSingle:true,autoSingleBoot:true}),false,'Single in force asks for nothing');
+}
+{
+  const {newRanges}=require('./extract.js');
+  const unknown=newRanges();
+  unknown.pickAutoSingle(true);
+  same(unknown.addEdits({cmd:'config'}),{cmd:'config'},'no mode reported yet: nothing to edit or send');
+  const ui=newRanges();
+  ui.render({setpointRanges:{},autoSingle:true});
+  same(ui.addEdits({cmd:'config'}),{cmd:'config'},'an unchanged mode stays off the wire');
+  same(saveIdle(ui),[true,true],'a reported mode leaves Save resting');
+  ui.pickAutoSingle(false);
+  same(ui.addEdits({cmd:'config'}),{cmd:'config',autoSingle:false},'a changed mode is sent');
+  same(saveIdle(ui),[false,false],'a changed mode lights Save');
+  ui.render({setpointRanges:{},autoSingle:true});
+  same(ui.addEdits({cmd:'config'}),{cmd:'config',autoSingle:false},'a state push keeps the unsaved pick');
+  ui.pickAutoSingle(true);
+  same(ui.addEdits({cmd:'config'}),{cmd:'config'},'picking the saved mode again leaves nothing to send');
+  same(saveIdle(ui),[true,true],'and Save rests');
+  ui.pickAutoSingle(false);
+  ui.submit(ui.addEdits({cmd:'config'}),'Settings saved');
+  ui.ack({requestId:1,ok:true});
+  same(ui.addEdits({cmd:'config'}),{cmd:'config'},'an acknowledged save leaves nothing to send');
+  ui.render({setpointRanges:{},autoSingle:false});
+  same(saveIdle(ui),[true,true],'and the next push agrees');
+  same(ui.exportFile({autoSingle:true}).settings.autoSingle,true,'backup carries the saved mode');
+  assert.strictEqual('autoSingle' in ui.exportFile({setpointRanges:{}}).settings,false,'a state without the field exports no key');
+  checks++;
+  const page=newRanges();
+  page.render({setpointRanges:{},autoSingle:true});
+  page.applyCaps(31);
+  page.openPage('auto');
+  same(page.els.mpAuto.hidden,false,'the Auto page offers the setting');
+  same([page.els.mpSpRange['aria-checked'],page.els.mpSpSingle['aria-checked']],['false','true'],'and shows the saved mode');
+  page.openPage('heat');
+  same(page.els.mpAuto.hidden,true,'no other mode page does');
+  page.applyCaps(15);
+  page.openPage('auto');
+  same(page.els.mpAuto.hidden,true,'nor the Auto page while Auto is off');
+}
+
 (async function(){
   const {newRanges}=require('./extract.js');
   async function importFile(ui,settings){
@@ -836,5 +899,14 @@ const limits=(v)=>({custom:v.custom,min:v.min,max:v.max});
   const old=newRanges();
   await importFile(old,{deviceName:'Old backup',heatThresh:20,coolThresh:25});
   same(old.sent,[{cmd:'config',deviceName:'Old backup',heatThresh:20,coolThresh:25,requestId:1}],'old backup leaves range choices untouched');
+  const single=newRanges();
+  await importFile(single,{autoSingle:true});
+  same(single.sent,[{cmd:'config',autoSingle:true,requestId:1}],'a backup restores the Auto setpoint mode');
+  const range=newRanges();
+  await importFile(range,{autoSingle:false});
+  same(range.sent,[{cmd:'config',autoSingle:false,requestId:1}],'including Range');
+  const handEdited=newRanges();
+  await importFile(handEdited,{autoSingle:'yes'});
+  same(handEdited.sent,[{cmd:'config',requestId:1}],'only a boolean is forwarded');
   console.log('PASS: web state handling ('+checks+' checks plus range transactions)');
 })().catch(function(e){console.error(e);process.exitCode=1});

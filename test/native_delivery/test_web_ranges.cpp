@@ -28,7 +28,22 @@ static void checkAutoPolicy(const cJSON* root,bool high) {
  CHECK(cJSON_IsBool(owner));
  CHECK(cJSON_IsTrue(owner)==high);
 }
+// A boot that finds Single in NVS, through the real settings load.
+static void bootSingle(CN105Controller& c) {
+ hkNvs.committed["ac-settings"]["autoSingle"]={1};
+ settings=SettingsStore{};
+ settings.begin();
+ SetpointControl::begin(c);
+}
+static bool stateBool(const std::string& state,const char* key) {
+ auto root=webParseObject(state.c_str());
+ CHECK(root);
+ const auto* value=cJSON_GetObjectItemCaseSensitive(root.get(),key);
+ CHECK(cJSON_IsBool(value));
+ return cJSON_IsTrue(value);
+}
 int main(int,char**argv){
+ hkNvs.committed["ac-settings"]["autoSingle"]={0};
  settings.begin();
  Pump pump;
  pump.mode=CN105_MODE_HEAT;
@@ -186,6 +201,117 @@ int main(int,char**argv){
   CHECK(cJSON_IsNumber(actual));
   CHECK(actual->valuedouble==10);
   CHECK(cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(root.get(),"targetReadable")));
+ }
+ CASE("auto_single_defaults_in_state") {
+  const auto state=webRangeState(8192);
+  CHECK(!stateBool(state,"autoSingle"));
+  CHECK(!stateBool(state,"autoSingleBoot"));
+ }
+ CASE("auto_single_saves_and_waits_for_restart") {
+  CHECK(apply(R"({"autoSingle":true})")==Result::Ok);
+  CHECK(hkNvs.committed["ac-settings"]["autoSingle"]==std::vector<uint8_t>{1});
+  const auto state=webRangeState(8192);
+  CHECK(stateBool(state,"autoSingle"));
+  CHECK(!stateBool(state,"autoSingleBoot"));
+ }
+ CASE("auto_single_non_boolean_rejected") {
+  for(const char* text:{R"({"autoSingle":1,"rangeHeatSource":"manual","rangeHeatMin":10,"rangeHeatMax":31})",
+                        R"({"autoSingle":"single","rangeHeatSource":"manual","rangeHeatMin":10,"rangeHeatMax":31})"}) {
+   CHECK(apply(text)==Result::Invalid);
+   CHECK(settings.setpointSettings().preferences.mode[0].selection!=Selection::Manual);
+   CHECK(!settings.get().autoSingleSetpoint);
+  }
+ }
+ CASE("older_file_leaves_auto_single_alone") {
+  bootSingle(c);
+  CHECK(apply(R"({"deviceName":"Old file","rangeHeatSource":"automatic"})")==Result::Ok);
+  CHECK(settings.get().autoSingleSetpoint);
+  CHECK(settings.autoSingleBoot());
+  CHECK(hkNvs.committed["ac-settings"]["autoSingle"]==std::vector<uint8_t>{1});
+ }
+ CASE("single_import_keeps_band_and_owner") {
+  bootSingle(c);
+  auto owned=settings.setpointSettings();
+  owned.autoOwnerUnit=true;
+  CHECK(settings.saveSetpointSettings(owned));
+  CHECK(apply(R"({"heatThresh":19,"coolThresh":23,"rangeAutoSource":"manual","rangeAutoMin":16,"rangeAutoMax":28})")==Result::Ok);
+  const auto saved=settings.setpointSettings();
+  CHECK(saved.band.heat2==40&&saved.band.cool2==50);
+  CHECK(saved.autoOwnerUnit);
+  CHECK(saved.preferences.mode[2].selection==Selection::Manual);
+ }
+ CASE("saving_range_in_auto_hands_over") {
+  bootSingle(c);
+  pump.mode=CN105_MODE_AUTO;
+  ticks(c,300);
+  CHECK(apply(R"({"autoSingle":false})")==Result::Ok);
+  const auto saved=settings.setpointSettings();
+  CHECK(saved.band.heat2==42&&saved.band.cool2==46);
+  CHECK(saved.autoOwnerUnit);
+  CHECK(hkNvs.committed["ac-settings"]["autoSingle"]==std::vector<uint8_t>{0});
+  CHECK(settings.autoSingleBoot());
+  settings=SettingsStore{};
+  settings.begin();
+  CHECK(!settings.autoSingleBoot());
+  CHECK(settings.setpointSettings().autoOwnerUnit);
+ }
+ CASE("saving_range_outside_auto_hands_over") {
+  bootSingle(c);
+  CHECK(apply(R"({"autoSingle":false})")==Result::Ok);
+  const auto saved=settings.setpointSettings();
+  CHECK(saved.band.heat2==40&&saved.band.cool2==50);
+  CHECK(saved.autoOwnerUnit);
+  CHECK(hkNvs.committed["ac-settings"]["autoSingle"]==std::vector<uint8_t>{0});
+ }
+ CASE("failed_handover_stays_single") {
+  bootSingle(c);
+  hkNvs.failWriteKey="rangeCfg";
+  CHECK(apply(R"({"autoSingle":false})")==Result::StorageFailure);
+  CHECK(settings.get().autoSingleSetpoint);
+  CHECK(hkNvs.committed["ac-settings"]["autoSingle"]==std::vector<uint8_t>{1});
+  CHECK(strstr(reply,"storage_failed"));
+ }
+ CASE("failed_mode_write_stays_single") {
+  // The handover succeeds, then the mode itself cannot be stored.
+  bootSingle(c);
+  pump.mode=CN105_MODE_AUTO;
+  ticks(c,300);
+  hkNvs.failWriteKey="autoSingle";
+  CHECK(apply(R"({"autoSingle":false})")==Result::StorageFailure);
+  CHECK(strstr(reply,"storage_failed"));
+  CHECK(settings.get().autoSingleSetpoint);
+  CHECK(hkNvs.committed["ac-settings"]["autoSingle"]==std::vector<uint8_t>{1});
+  const auto kept=settings.setpointSettings();
+  CHECK(kept.band.heat2==40&&kept.band.cool2==50);
+  CHECK(!kept.autoOwnerUnit);
+  // Storage recovers: the same Save now works rather than reading as no change.
+  hkNvs.failWriteKey.clear();
+  CHECK(apply(R"({"autoSingle":false})")==Result::Ok);
+  CHECK(hkNvs.committed["ac-settings"]["autoSingle"]==std::vector<uint8_t>{0});
+  CHECK(settings.setpointSettings().autoOwnerUnit);
+ }
+ CASE("failed_commit_stays_range") {
+  hkNvs.failCommit=true;
+  CHECK(apply(R"({"autoSingle":true})")==Result::StorageFailure);
+  CHECK(!settings.get().autoSingleSetpoint);
+  CHECK(!stateBool(webRangeState(8192),"autoSingle"));
+ }
+ CASE("unavailable_policy_refuses_range") {
+  bootSingle(c);
+  settings._setpointAvailable=false;
+  CHECK(apply(R"({"autoSingle":false})")==Result::Unavailable);
+  CHECK(settings.get().autoSingleSetpoint);
+ }
+ CASE("rollback_keeps_auto_single_with_profile") {
+  const auto full=webRangeState(8192);
+  for(const size_t cap : {size_t{200},full.size()-20,full.size()+16}) {
+   const auto state=webRangeState(cap);
+   auto root=webParseObject(state.c_str());
+   CHECK(root);
+   const bool hasProfile=cJSON_HasObjectItem(root.get(),"setpointRanges");
+   CHECK(cJSON_HasObjectItem(root.get(),"autoSingle")==hasProfile);
+   CHECK(cJSON_HasObjectItem(root.get(),"autoSingleBoot")==hasProfile);
+  }
  }
  puts("PASS");
  CASE("discovery_and_encoding_use_effective_auto_band") {

@@ -14,6 +14,8 @@ static void drive(CN105Controller& c,Pump& p,uint32_t ms,uint8_t floor=0,uint8_t
  }
 }
 static void untilSent(CN105Controller& c,Pump& p,uint8_t floor){int s=p.sets;while(p.sets==s)drive(c,p,10,floor);}
+// A boot that latched Single: the saved field and the latch agree.
+static void single(){settings.singleBoot=settings.get().autoSingleSetpoint=true;}
 #define CASE(name) if (!strcmp(argv[1], name))
 int main(int, char** argv) {
  Pump pump;CN105Controller c;s_ctrl=&c;now_ms=5000;c.begin(&pump);ticks(c);CHECK(c.isHealthy());SetpointControl::begin(c);
@@ -23,6 +25,12 @@ int main(int, char** argv) {
   CHECK(caps.band_min_gap_dc==20);CHECK(caps.set_step_dc==5);
   h_get_state(nullptr,&state);CHECK(state.mode==SL2_MODE_HEAT_COOL);CHECK(state.set_low_dc==200&&state.set_high_dc==250);
   settings.get().modeMask &= ~MODE_CAP_AUTO;h_get_caps(nullptr,&caps);CHECK(!(caps.modes&(1u<<SL2_MODE_HEAT_COOL)));
+ }
+ CASE("range_caps_bytes_match_origin_main") {
+  // Captured from origin/main 1605855. A Range device announces these exact bytes.
+  static const uint8_t golden[sizeof(sl2_caps_pkt)]={0x00,0x00,0x00,0x00,0x6F,0x00,0x00,0x00,0x05,0x01,0x35,0x66,
+   0xA0,0x00,0x31,0x01,0x05,0x01,0x14,0x00,0xEF,0x36,'T','e','s','t'};
+  memset(&caps,0,sizeof caps);CHECK(h_get_caps(nullptr,&caps));CHECK(!memcmp(&caps,golden,sizeof caps));
  }
  CASE("extended_auto_band_advertises_and_accepts_endpoints") {
   auto cfg=settings.setpointSettings();
@@ -299,6 +307,113 @@ int main(int, char** argv) {
   c.restartHandshake();pump.responding=false;pump.packet(CN105_PKT_CONNECT_OK,0);c.loop();
   CHECK(c.isHealthy());CHECK(c.getState().encoding==SetpointRange::Encoding::Unknown);
   run_auto_sync(c);CHECK(!c._sendRequested);CHECK(!c._wanted.hasTemp);
+ }
+
+ // Single: nothing steers, claims or imports. Same fixture: pump in Auto at
+ // 22.0, room 21.0, band 20–25.
+ CASE("single_engine_silent_below_band") {
+  single();pump.roomRaw=164;ticks(c,300,10);int sets0=pump.sets;drive(c,pump,60000);
+  CHECK(pump.sets==sets0);CHECK(c.getEffectiveState().targetTemp==22);CHECK(!AutoBand::deviceOwns());
+ }
+ CASE("single_wall_change_not_imported") {
+  single();pump.target=166;drive(c,pump,5000);
+  CHECK(settings.get().heatingThreshold==20&&settings.get().coolingThreshold==25);
+  CHECK(!settings.get().autoOwnerUnit);CHECK(settings.saves==0);CHECK(c.getEffectiveState().targetTemp==19);
+ }
+ CASE("single_auto_selection_does_not_claim") {
+  single();settings.get().autoOwnerUnit=true;
+  SetpointControl::Command user;user.unit.mode=CN105_MODE_AUTO;
+  CHECK(SetpointControl::submit(user)==SetpointRange::Result::Ok);CHECK(settings.get().autoOwnerUnit);CHECK(settings.saves==0);
+ }
+ CASE("single_band_submit_rejected") {
+  single();SetpointControl::Command user;user.heatingThreshold=23;user.coolingThreshold=25;
+  CHECK(SetpointControl::submit(user)==SetpointRange::Result::Unavailable);
+  CHECK(settings.get().heatingThreshold==20&&settings.get().coolingThreshold==25);
+  CHECK(!settings.get().autoOwnerUnit);CHECK(settings.saves==0);
+ }
+ CASE("single_apply_settings_keeps_band_and_owner") {
+  single();settings.get().autoOwnerUnit=true;
+  auto cfg=settings.setpointSettings();
+  cfg.band={38,46};cfg.autoOwnerUnit=false;cfg.preferences.mode[2]={SetpointRange::Selection::Manual,{52,60}};
+  CHECK(SetpointControl::applySettings(cfg)==SetpointRange::Result::Ok);
+  CHECK(settings.get().heatingThreshold==20&&settings.get().coolingThreshold==25);CHECK(settings.get().autoOwnerUnit);
+  CHECK(settings.setpointSettings().preferences.mode[2].selection==SetpointRange::Selection::Manual);
+ }
+ CASE("latch_ignores_runtime_flip") {
+  settings.get().autoSingleSetpoint=true;pump.roomRaw=164;ticks(c,300,10);drive(c,pump,5000);
+  CHECK(AutoBand::deviceOwns());CHECK(c.getEffectiveState().targetTemp==20);
+ }
+ CASE("single_custom_limits_still_correct_a_wall_edit") {
+  auto cfg=settings.setpointSettings();cfg.preferences.mode[2]={SetpointRange::Selection::Manual,{40,48}};
+  CHECK(SetpointControl::applySettings(cfg)==SetpointRange::Result::Ok);
+  single();pump.target=188;ticks(c,300);SetpointControl::loop();ticks(c,300);SetpointControl::loop();
+  CHECK(pump.target==176);
+ }
+ CASE("single_advertises_native_auto") {
+  single();h_get_caps(nullptr,&caps);
+  CHECK(caps.modes&(1u<<SL2_MODE_AUTO));CHECK(!(caps.modes&(1u<<SL2_MODE_HEAT_COOL)));CHECK(caps.band_min_gap_dc==20);
+  h_get_state(nullptr,&state);CHECK(state.mode==SL2_MODE_AUTO);
+  CHECK(state.set_low_dc==SL2_DC_NA&&state.set_high_dc==SL2_DC_NA);CHECK(state.set_dc==220);
+ }
+ CASE("single_dial_temp_in_auto_held") {
+  single();pump.roomRaw=164;ticks(c,300,10);int sets0=pump.sets;
+  cmd.set_dc=240;CHECK(h_apply(nullptr,SL2_CM_TEMP,&cmd));drive(c,pump,60000);
+  CHECK(pump.target==176);CHECK(pump.sets==sets0+1);
+ }
+ CASE("single_dial_band_rejected") {
+  single();cmd.set_low_dc=230;cmd.set_high_dc=250;CHECK(!h_apply(nullptr,SL2_CM_TEMP_BAND,&cmd));
+  CHECK(settings.get().heatingThreshold==20&&settings.get().coolingThreshold==25);CHECK(settings.saves==0);
+ }
+ CASE("single_dial_auto_selection_keeps_owner") {
+  single();settings.get().autoOwnerUnit=true;cmd.mode=SL2_MODE_AUTO;CHECK(h_apply(nullptr,SL2_CM_MODE,&cmd));
+  CHECK(settings.get().autoOwnerUnit);CHECK(settings.saves==0);
+ }
+ CASE("single_stale_dial_heat_cool_enters_auto") {
+  single();pump.mode=CN105_MODE_HEAT;ticks(c,300,10);CHECK(c.getEffectiveState().mode==CN105_MODE_HEAT);
+  cmd.mode=SL2_MODE_HEAT_COOL;CHECK(h_apply(nullptr,SL2_CM_MODE,&cmd));CHECK(c.getEffectiveState().mode==CN105_MODE_AUTO);
+ }
+ CASE("current_state_ambiguous_auto_by_mode") {
+  // Room within 0.5 of the setpoint and no sub-mode: Range guesses from the
+  // band's midpoint (22.5), Single from the setpoint itself.
+  CN105State s{};s.power=true;s.operating=true;s.mode=CN105_MODE_AUTO;s.autoSubMode=CN105_AUTOSUB_OFF;s.roomTemp=22.2f;s.targetTemp=22;
+  CHECK(deriveCurrentState(s)==1);single();CHECK(deriveCurrentState(s)==2);
+ }
+ // Saving Range while Single runs: the unit keeps Auto across the restart.
+ CASE("switch_to_range_in_auto_imports") {
+  single();CHECK(SetpointControl::saveAutoSingle(false)==SetpointRange::Result::Ok);
+  CHECK(!settings.get().autoSingleSetpoint);CHECK(settings.autoSingleBoot());
+  CHECK(settings.get().heatingThreshold==21&&settings.get().coolingThreshold==23);CHECK(settings.get().autoOwnerUnit);
+  settings.singleBoot=false;pump.roomRaw=164;ticks(c,300,10);int sets0=pump.sets;drive(c,pump,60000);
+  CHECK(pump.sets==sets0);
+ }
+ CASE("switch_to_range_outside_auto_keeps_band") {
+  single();pump.mode=CN105_MODE_HEAT;ticks(c,300,10);
+  CHECK(SetpointControl::saveAutoSingle(false)==SetpointRange::Result::Ok);
+  CHECK(settings.get().heatingThreshold==20&&settings.get().coolingThreshold==25);CHECK(settings.get().autoOwnerUnit);
+ }
+ CASE("switch_to_range_while_off_keeps_band") {
+  single();pump.power=false;ticks(c,300,10);
+  CHECK(SetpointControl::saveAutoSingle(false)==SetpointRange::Result::Ok);
+  CHECK(settings.get().heatingThreshold==20&&settings.get().coolingThreshold==25);CHECK(settings.get().autoOwnerUnit);
+ }
+ CASE("switch_to_range_before_baseline_keeps_band") {
+  // No SETTINGS answer on this connection: the reported setpoint is not the unit's yet.
+  single();c.restartHandshake();pump.responding=false;pump.packet(CN105_PKT_CONNECT_OK,0);c.loop();
+  CHECK(c.getState().encoding==SetpointRange::Encoding::Unknown);
+  CHECK(SetpointControl::saveAutoSingle(false)==SetpointRange::Result::Ok);
+  CHECK(settings.get().heatingThreshold==20&&settings.get().coolingThreshold==25);CHECK(settings.get().autoOwnerUnit);
+ }
+ CASE("range_round_trip_no_handover") {
+  CHECK(SetpointControl::saveAutoSingle(true)==SetpointRange::Result::Ok);CHECK(settings.get().autoSingleSetpoint);
+  CHECK(SetpointControl::saveAutoSingle(false)==SetpointRange::Result::Ok);CHECK(!settings.get().autoSingleSetpoint);
+  CHECK(!settings.get().autoOwnerUnit);CHECK(settings.get().heatingThreshold==20&&settings.get().coolingThreshold==25);
+  CHECK(settings.saves==2);
+ }
+ CASE("repeat_range_save_does_not_reimport") {
+  single();CHECK(SetpointControl::saveAutoSingle(false)==SetpointRange::Result::Ok);
+  pump.target=166;ticks(c,300,10);int saves=settings.saves;
+  CHECK(SetpointControl::saveAutoSingle(false)==SetpointRange::Result::Ok);
+  CHECK(settings.saves==saves);CHECK(settings.get().heatingThreshold==21&&settings.get().coolingThreshold==23);
  }
 
 }
