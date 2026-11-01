@@ -20,7 +20,7 @@ namespace LinkSensor {
         bool     hasSensor;    /* this dial's latest SL2_DSF_HAS_SENSOR */
         float    temperature;  /* NAN until the dial sends a valid reading */
         float    humidity;     /* NAN if never reported */
-        uint32_t ageMs;        /* since the last valid temperature; UINT32_MAX if none */
+        uint32_t ageMs;        /* since valid temperature; saturates at UINT32_MAX, also none */
         bool     fresh;        /* a reading younger than the stale timeout */
     };
 
@@ -52,6 +52,6 @@ namespace LinkSensor {
     bool  isStale();
     float temperature();   /* NAN if none */
     float humidity();      /* NAN if none */
-    uint32_t lastUpdateAge(); /* ms since last valid reading; UINT32_MAX if none */
+    uint32_t lastUpdateAge(); /* ms since valid reading; saturates at UINT32_MAX, also none */
     uint8_t status();      /* enum sl2_room_status, for the INFO TLV */
 }

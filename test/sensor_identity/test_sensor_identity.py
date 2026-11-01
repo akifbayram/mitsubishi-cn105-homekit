@@ -28,6 +28,7 @@ def clean(name):
 
 with tempfile.TemporaryDirectory(prefix="cn105-sensor-identity-") as directory:
     build = Path(directory)
+    (build / "clock.inc").write_text(clean("esp_utils.h").split("// Human-readable")[0])
     ble = (MAIN / "ble_sensor.cpp").read_text()
     (build / "ble_state.inc").write_text(ble[ble.index("struct SlotState"):ble.index("// ── Discovery state")])
     (build / "ble_functions.inc").write_text("\n".join(function(ble, name) for name in

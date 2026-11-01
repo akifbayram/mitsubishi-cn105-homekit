@@ -16,6 +16,7 @@ using portMUX_TYPE = int;
 #define LOG_DEBUG(...) ((void)0)
 #define CHECK(cond) do { if (!(cond)) { fprintf(stderr, "line %d: %s\n", __LINE__, #cond); exit(1); } } while (0)
 #define CASE(name) if (!strcmp(argv[1], name))
-static uint32_t now_ms = 1000;
-static uint32_t uptime_ms() { return now_ms; }
+static uint64_t now_ms = 1000;
+static int64_t esp_timer_get_time() { return (int64_t)now_ms * 1000; }
+#include "clock.inc"
 constexpr int ROOM_MAX_BLE_SENSORS = 4, ROOM_MEMBER_LINK = 1, ROOM_MEMBER_BLE0 = 2, ROOM_MEMBER_INTERNAL = 0;

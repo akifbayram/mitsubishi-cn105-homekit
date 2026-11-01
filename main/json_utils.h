@@ -204,7 +204,10 @@ inline size_t utf8SeqLen(const unsigned char *s) {
 // be hostile (e.g. BLE-advertised device names): control chars are \u-escaped
 // and invalid UTF-8 is replaced with '?' so neither JSON.parse nor the
 // WebSocket UTF-8 check can be broken by a nearby advertiser.
-inline size_t jsonEscape(const char *src, char *dst, size_t dstLen) {
+// SSIDs need their literal control bytes preserved; existing display/log
+// callers keep the historical carriage-return filtering by default.
+inline size_t jsonEscape(const char *src, char *dst, size_t dstLen,
+                         bool preserveCarriageReturns = false) {
     size_t j = 0;
     for (size_t i = 0; src[i] && j < dstLen - 2; i++) {
         unsigned char c = (unsigned char)src[i];
@@ -213,7 +216,9 @@ inline size_t jsonEscape(const char *src, char *dst, size_t dstLen) {
         } else if (c == '\n') {
             if (j < dstLen - 3) { dst[j++] = '\\'; dst[j++] = 'n'; }
         } else if (c == '\r') {
-            // skip carriage returns
+            if (preserveCarriageReturns && j < dstLen - 3) {
+                dst[j++] = '\\'; dst[j++] = 'r';
+            }
         } else if (c < 0x20) {
             if (j + 6 < dstLen - 1) {
                 static const char hex[] = "0123456789abcdef";

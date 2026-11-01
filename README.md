@@ -289,7 +289,7 @@ These sources can supply that reading, all managed from the **Room Sensor** card
 Only sources the unit can actually serve are listed. The card runs in one of two modes:
 
 - **Single** — one source feeds the heat pump. Tap a row to switch.
-- **Average** — check any number of remote sources and the firmware feeds their equal-weight mean, with each sensor's offset applied before the average is taken.
+- **Average** — check any number of remote sources and the firmware feeds their equal-weight mean, with each sensor's offset applied before the average is taken. Each sensing Link dial counts separately, so two dials can supply an average without a BLE sensor.
 
 Whichever mode is active, the resulting value is forwarded to the heat pump every 20 seconds. A source that goes quiet past the stale timeout (default 10 minutes, adjustable from 30 seconds to 1 hour) is dropped: in Average mode it leaves the blend until it returns, and when no remote source is left the heat pump goes back to its own thermistor. The selection is kept either way, so it recovers when readings resume.
 
@@ -385,6 +385,15 @@ The page is organised into cards:
 - **Firmware** — installed version, the version menu, manual `.bin` upload, **Flash LED** to identify the device, and Restart (see [OTA Updates](#ota-updates))
 - **About** — board, firmware, IP, mDNS name, MAC, last reset reason, boot and crash counts, free and lowest-ever heap, WiFi and heat-pump drop counters, a persistent device event log, one-tap **Copy Diagnostics** for support, and the safe-mode banner
 - **Diagnostics · Logs** — real-time log streaming over WebSocket
+
+Settings export/import includes the room mode, BLE sensor identities and
+names, source selections and offsets, night settings, and update channel.
+Older version-one backups remain importable. Wi-Fi credentials, HomeKit
+pairings and Link bonds are not copied. Choosing a particular Link among
+multiple paired dials still requires that dial; the web commands cannot
+restore a per-dial pin on a different device. Import applies settings in
+order and stops if the connection is lost; reconnect and import again to
+complete a partial restore.
 
 <img src="media/heatpump.png" width=300>
 

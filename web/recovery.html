@@ -467,7 +467,7 @@ a:focus-visible,button:focus-visible,input:focus-visible{outline:2px solid var(-
      matches a scan row known to be secured; a hand-typed SSID needs just a
      name (open hidden networks exist). ─────────────────────────────────────── */
   function checkFields(){
-    var ssid=ssidInput.value.trim();
+    var ssid=ssidInput.value;
     var needPass=selSSID&&ssid===selSSID&&selSecure;
     joinBtn.disabled=!ssid||(needPass&&!passInput.value);
   }
@@ -555,7 +555,7 @@ a:focus-visible,button:focus-visible,input:focus-visible{outline:2px solid var(-
 
   /* ── Join ────────────────────────────────────────────────────────────────── */
   joinBtn.onclick=function(){
-    var ssid=ssidInput.value.trim();
+    var ssid=ssidInput.value;
     var pass=passInput.value;
     if(!ssid)return;
 

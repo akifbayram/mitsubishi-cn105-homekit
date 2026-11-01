@@ -108,6 +108,10 @@ constexpr float CN105_TEMP_MAX         = 30.5f;
 // ── Timing ──────────────────────────────────────────────────────────────────
 // Follows MitsubishiCN105ESPHome reference project timing
 constexpr uint32_t CN105_RESPONSE_TIMEOUT  = 1000;   // ms
+// Per-request reply deadline for loop(): longer than any observed unit
+// latency, well under the comms timeout. A reply of the expected type that
+// lands inside the quiet period after this deadline still resumes the cycle.
+constexpr uint32_t CN105_REPLY_DEADLINE_MS = 2500;   // ms
 constexpr uint32_t CN105_UPDATE_INTERVAL   = 2000;    // ms — matches reference default (2s)
 constexpr uint32_t CN105_CONNECT_INTERVAL  = 3000;    // ms between connect retries
 constexpr uint32_t CN105_DEFER_DELAY       = 750;     // ms — defer next cycle after set command
@@ -120,8 +124,8 @@ constexpr uint8_t  CN105_MAX_CONNECT_RETRIES = 5;
 constexpr uint32_t CN105_COMMS_TIMEOUT     = CN105_UPDATE_INTERVAL * 6;  // 12000 ms
 
 // How long a commanded ("wanted") value masks the unit's reported one while
-// we wait for the SETTINGS confirmation, and for how long a change the unit
-// reports is still attributed to a SET of ours that it may have clamped.
+// we wait for the SETTINGS confirmation. A transmitted field has its own
+// attribution window, independent of commands staged later.
 constexpr uint32_t CN105_GRACE_SAFETY_MS   = 10000;
 
 // Number of info request types polled per cycle
@@ -191,8 +195,8 @@ struct WantedSettings {
     bool hasBeenSent = false;   // Set packet was transmitted to heat pump
     // CN105_FLAG_* of the fields whose latest wanted value has been
     // transmitted. hasBeenSent is shared by every field — a fan command
-    // staged after our setpoint went out clears it — so change attribution
-    // (externalAutoChanges) asks per field instead.
+    // staged after our setpoint went out clears it — so setpoint confirmation
+    // asks per field instead. Ownership also retains the transmitted snapshot.
     uint8_t  sentFlags = 0;
     float    tempAtSend = 0;    // setpoint the unit reported when the latest temp SET went out
     uint32_t lastChange = 0;    // uptime_ms() of most recent user command
@@ -328,10 +332,11 @@ public:
 
     /// Count of SETTINGS responses in which the unit was running in Auto with
     /// a setpoint, or an entry into Auto, that this controller did not command
-    /// — a wall controller or IR remote at work. A change is "ours" while the
-    /// matching wanted field has been sent and is inside the grace window, so
-    /// a unit clamping our value never counts. The first response after each
-    /// connect is a baseline, never a change. Consumers compare successive
+    /// — a wall controller or IR remote at work. Attribution follows the
+    /// actual transmitted fields, including a clamped first answer during
+    /// their grace window or a delayed exact answer. A later change is
+    /// external even if the wanted value remains unconfirmed. The first
+    /// response after each connect is a baseline. Consumers compare successive
     /// reads; the AutoBand engine yields on movement.
     uint32_t externalAutoChanges() const {
         taskENTER_CRITICAL(&_mux);
@@ -390,6 +395,11 @@ private:
     uint32_t _lastWriteMs     = 0;   // completed SET/remote-temp transmission
     bool     _writeDeferred   = false; // wait for the post-write quiet period
     uint32_t _cycleStartMs    = 0;   // uptime_ms() when current cycle started
+    uint32_t _requestSentMs   = 0;   // response deadline independent of idle poll interval
+    uint32_t _lastTimeoutMs   = 0;
+    bool     _replyDeferred   = false; // drain late replies before another transaction
+    bool     _confirmSettings = false;
+    uint32_t _lastConfirmMs   = 0;
     bool     _cycleRunning    = false;
     uint8_t  _pollPhase       = 0;   // index into pollTypes[] within a cycle
     bool     _awaitingResponse = false; // waiting for response to current request
@@ -409,6 +419,11 @@ private:
         uint8_t wideVane = 0;
     };
     PendingCommand _staged;
+    // Transmitted ownership fields survive a newer value being staged while
+    // the old reply is on the wire. Cleared on confirmation/movement/expiry.
+    // The timestamps also prevent unrelated writes extending their grace.
+    PendingCommand _sent;
+    uint32_t _tempSentMs = 0, _modeSentMs = 0, _powerSentMs = 0;
     bool           _sendRequested = false;  // set by sendPendingChanges(), cleared by loop()
     // Watchdog for a producer that stages fields but never commits them
     // (a caller bug — see the contract above). CN105 task only, no lock.

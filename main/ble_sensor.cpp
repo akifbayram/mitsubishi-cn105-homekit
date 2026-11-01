@@ -43,7 +43,7 @@ struct SlotState {
     float       hum;
     int8_t      batt;
     int         rssi;
-    uint32_t    lastUpdate;
+    uint64_t    lastUpdate;
     const char* type;         // detected decoder type (string literal, nullptr = unknown)
 };
 static portMUX_TYPE s_mux = portMUX_INITIALIZER_UNLOCKED;
@@ -81,8 +81,12 @@ static std::atomic<bool> s_scanning{false};
 static std::atomic<bool> s_staleReverted{false};
 
 static std::atomic<bool> s_nimbleInitialized{false};
+static std::atomic<bool> s_nimbleReady{false};
 static std::atomic<bool> s_pendingSync{false};    // Enable toggle changed — (re)sync NimBLE state
-static std::atomic<bool> s_pendingClear{false};   // Deferred clearRemoteTemperature
+// A sampled generation may be acknowledged, but a newer setter's clear must
+// remain queued. Setters publish it with their state change under s_mux.
+static std::atomic<uint32_t> s_clearRequested{0};
+static uint32_t s_clearHandled = 0;              // main task only
 // Deferred scan stop+restart, drained in loop(). Set from the httpd task instead
 // of calling stopScan()/startScan() directly: ble_gap_disc_cancel() can block on
 // an HCI response and permanently stall the web server.
@@ -93,6 +97,31 @@ static std::atomic<bool> s_bleEnabled{false};      // Mirror of settings.bleEnab
 static uint32_t s_lastKeepalive = 0;
 static float    s_lastSentTemp  = NAN;   // last value sent to the HP
 static int      s_prevFeedSlot  = -1;    // feed edge detection (-1 = not feeding)
+static bool     s_ownsRemoteTemperature = false;
+static constexpr uint32_t RADIO_RETRY_MS = 1000;
+static constexpr uint32_t RADIO_RETRY_MAX_MS = 60000;
+static uint32_t s_lastScanAttempt = 0;
+static bool s_scanRetry = false;
+// Stack init/teardown that keeps failing (controller out of memory, host
+// never started) retries with geometric backoff so a heap-starved unit is
+// not churning the controller and logging every second. A user toggle
+// resets the gate. Main task only.
+struct RetryGate {
+    uint32_t lastMs = 0, delayMs = RADIO_RETRY_MS;
+    bool pending = false;
+    bool blocked(uint32_t now) const { return pending && now - lastMs < delayMs; }
+    void failed(uint32_t now) {
+        if (pending) delayMs = delayMs >= RADIO_RETRY_MAX_MS / 2 ? RADIO_RETRY_MAX_MS : delayMs * 2;
+        pending = true;
+        lastMs = now;
+    }
+    void reset() { pending = false; delayMs = RADIO_RETRY_MS; }
+};
+static RetryGate s_initGate, s_stopGate;
+
+static void requestClear() {
+    s_clearRequested.fetch_add(1);
+}
 
 // ── Discovery state ─────────────────────────────────────────────────────────
 // Results are written from the NimBLE host task, cleared from the httpd task
@@ -152,8 +181,8 @@ int BleSensor::primarySlot() {
 }
 
 // One home for the freshness rule shared by loop()/isActive()/isStale().
-static bool freshAt(uint32_t lastUpdate, uint32_t now, uint32_t staleMs) {
-    return lastUpdate > 0 && (now - lastUpdate) < staleMs;
+static bool freshAt(uint64_t lastUpdate, uint64_t now, uint32_t staleMs) {
+    return lastUpdate > 0 && elapsed_ms32(lastUpdate, now) < staleMs;
 }
 
 // A scan should be running whenever there's a target to track or a discovery
@@ -252,8 +281,6 @@ static void extractDeviceName(const uint8_t* data, uint8_t dataLen, char* out, s
     }
 }
 
-static void startScan();
-
 static int gap_event_cb(struct ble_gap_event *event, void *arg) {
     if (event->type == BLE_GAP_EVENT_DISC) {
         const struct ble_gap_disc_desc *disc = &event->disc;
@@ -306,7 +333,7 @@ static int gap_event_cb(struct ble_gap_event *event, void *arg) {
                 // Freshness follows the temperature: battery-only frames from
                 // split-field sensors (SwitchBot Pro family) must not keep the
                 // stale-revert watchdog from firing
-                sl.lastUpdate = uptime_ms();
+                sl.lastUpdate = uptime_ms64();
             }
             if (!std::isnan(reading.hum))  sl.hum  = reading.hum;
             if (reading.batt >= 0)         sl.batt = reading.batt;
@@ -327,12 +354,9 @@ static int gap_event_cb(struct ble_gap_event *event, void *arg) {
     }
 
     if (event->type == BLE_GAP_EVENT_DISC_COMPLETE) {
-        // Scan ended (duration expired or was cancelled) — restart if needed
+        // The host callback only reports completion. Main owns scan retries,
+        // including cancellation/profile changes, so it cannot recurse here.
         s_scanning.store(false);
-        if (s_nimbleInitialized.load() && s_bleEnabled.load() && wantScan()) {
-            startScan();
-            LOG_DEBUG("Scan restarted");
-        }
         return 0;
     }
 
@@ -344,8 +368,12 @@ static int gap_event_cb(struct ble_gap_event *event, void *arg) {
 // ══════════════════════════════════════════════════════════════════════════════
 
 static void startScan() {
-    if (!s_nimbleInitialized.load()) return;
+    if (!s_nimbleInitialized.load() || !s_nimbleReady.load() || !ble_hs_synced()) return;
+    if (!s_bleEnabled.load()) return;
     if (s_scanning.load()) return;
+    const uint32_t now = uptime_ms();
+    if (s_scanRetry && now - s_lastScanAttempt < RADIO_RETRY_MS) return;
+    s_lastScanAttempt = now;
 
     struct ble_gap_disc_params params;
     memset(&params, 0, sizeof(params));
@@ -356,8 +384,10 @@ static void startScan() {
 
     int rc = ble_gap_disc(BLE_OWN_ADDR_PUBLIC, BLE_HS_FOREVER, &params, gap_event_cb, NULL);
     if (rc == 0) {
+        s_scanRetry = false;
         s_scanning.store(true);
     } else {
+        s_scanRetry = true;
         LOG_WARN("ble_gap_disc failed: %d", rc);
     }
 }
@@ -365,7 +395,22 @@ static void startScan() {
 static void stopScan() {
     if (!s_nimbleInitialized.load()) return;
     if (!s_scanning.load()) return;
-    ble_gap_disc_cancel();
+    const uint32_t now = uptime_ms();
+    if (s_scanRetry && now - s_lastScanAttempt < RADIO_RETRY_MS) {
+        s_pendingRestart.store(true);
+        return;
+    }
+    const int rc = ble_gap_disc_cancel();
+    if (rc != 0 && ble_gap_disc_active()) {
+        // The old scan still owns the radio. Retain its state and retry the
+        // cancellation; repeated starts would only return EALREADY forever.
+        s_scanRetry = true;
+        s_lastScanAttempt = now;
+        s_pendingRestart.store(true);
+        LOG_WARN("ble_gap_disc_cancel failed: %d", rc);
+        return;
+    }
+    s_scanRetry = false;
     s_scanning.store(false);
 }
 
@@ -375,22 +420,36 @@ static void stopScan() {
 
 static bool initNimble() {
     if (s_nimbleInitialized.load()) return true;
+    const uint32_t now = uptime_ms();
+    if (s_initGate.blocked(now)) return false;
 
     uint32_t heapBefore = esp_get_free_heap_size();
 
     esp_err_t ret = nimble_port_init();
     if (ret != ESP_OK) {
-        LOG_ERROR("nimble_port_init failed: %d", ret);
+        s_initGate.failed(now);
+        LOG_ERROR("nimble_port_init failed: %d (retry in %lus)", ret,
+                  (unsigned long)(s_initGate.delayMs / 1000));
         return false;
     }
 
+    s_initGate.reset();
+    s_nimbleReady.store(false);
+    ble_hs_cfg.sync_cb = [] {
+        s_nimbleReady.store(true);
+        s_pendingRestart.store(true);
+    };
+    ble_hs_cfg.reset_cb = [](int reason) {
+        s_nimbleReady.store(false);
+        s_scanning.store(false);
+        s_pendingRestart.store(true);
+        LOG_WARN("NimBLE host reset: %d", reason);
+    };
+    s_nimbleInitialized.store(true);
     nimble_port_freertos_init([](void *param) {
         nimble_port_run();
         nimble_port_freertos_deinit();
     });
-
-    vTaskDelay(pdMS_TO_TICKS(200));
-    s_nimbleInitialized.store(true);
 
     uint32_t heapAfter = esp_get_free_heap_size();
     LOG_INFO("NimBLE initialized. Heap: %u -> %u (-%u bytes)",
@@ -407,12 +466,19 @@ static bool initNimble() {
 // controller RAM (~40-60 KB). Main task only.
 static void deinitNimble() {
     if (!s_nimbleInitialized.load()) return;
+    const uint32_t now = uptime_ms();
+    if (s_stopGate.blocked(now)) return;
     stopScan();
     if (nimble_port_stop() != 0) {
-        LOG_WARN("nimble_port_stop failed — keeping BLE stack resident");
+        s_stopGate.failed(now);
+        LOG_WARN("nimble_port_stop failed — keeping BLE stack resident (retry in %lus)",
+                 (unsigned long)(s_stopGate.delayMs / 1000));
         return;
     }
+    s_stopGate.reset();
     nimble_port_deinit();
+    s_scanning.store(false);
+    s_nimbleReady.store(false);
     s_nimbleInitialized.store(false);
     LOG_INFO("NimBLE deinitialized. Heap: %u free", esp_get_free_heap_size());
 }
@@ -451,12 +517,15 @@ void BleSensor::begin() {
 
     if (targetConfigured()) {
         startScan();
-        LOG_INFO("Scanning started (auto-detect all sensor types)");
+        LOG_INFO("Scanning requested (auto-detect all sensor types)");
     }
 }
 
 void BleSensor::setBleEnabled(bool on) {
+    taskENTER_CRITICAL(&s_mux);
     s_bleEnabled.store(on);
+    if (!on) requestClear();
+    taskEXIT_CRITICAL(&s_mux);
     settings.get().bleEnabled = on;
     settings.save();
 
@@ -464,7 +533,6 @@ void BleSensor::setBleEnabled(bool on) {
     // httpd task. Disabling also hands the HP back to its internal sensor.
     s_pendingSync.store(true);
     if (!on) {
-        s_pendingClear.store(true);
         s_staleReverted.store(false);
         stopDiscovery();   // an open Add Sensor session must not outlive the radio
     }
@@ -483,7 +551,15 @@ static void drainPendingClear(CN105Controller &cn105) {
     // (have_sent starts false), so firing this stale clear could land after
     // that send and stomp it, leaving the pump on internal for up to
     // LinkSensor's 20s keepalive before its next resend notices and corrects.
-    if (s_pendingClear.load() && cn105.isConnected()) {
+    const uint32_t requested = s_clearRequested.load();
+    if (requested == s_clearHandled) return;
+    // A configured/observed sensor is not ownership: only our actual send
+    // permits clearing a register that may belong to a wall controller.
+    if (!s_ownsRemoteTemperature) {
+        s_clearHandled = requested;
+        return;
+    }
+    if (cn105.isConnected()) {
         bool handedToLink = (settings.get().roomMode == 0) &&
                             (settings.get().roomSingle == ROOM_MEMBER_LINK) &&
                              LinkSensor::isActive();
@@ -494,7 +570,8 @@ static void drainPendingClear(CN105Controller &cn105) {
             cn105.clearRemoteTemperature();
             s_lastSentTemp = NAN;
         }
-        s_pendingClear.store(false);
+        s_ownsRemoteTemperature = false;
+        s_clearHandled = requested;
     }
 }
 
@@ -504,6 +581,11 @@ void BleSensor::loop(CN105Controller &cn105) {
     // scan start. Reading s_bleEnabled at drain time makes a rapid toggle
     // converge on the final state.
     if (s_pendingSync.exchange(false)) {
+        // A user toggle retries at once; only steady-state failures back off.
+        s_initGate.reset();
+        s_stopGate.reset();
+    }
+    if (s_bleEnabled.load() != s_nimbleInitialized.load()) {
         if (s_bleEnabled.load()) {
             if (initNimble()) s_pendingRestart.store(true);
         } else {
@@ -516,28 +598,34 @@ void BleSensor::loop(CN105Controller &cn105) {
         return;
     }
 
-    uint32_t now = uptime_ms();
+    const uint64_t now = uptime_ms64();
     int  slot = feedSlot();
     uint32_t staleMs = (uint32_t)settings.get().roomStaleTimeoutS * 1000;
 
     float temp = NAN;
-    uint32_t lastUpd = 0;
+    uint64_t lastUpd = 0;
+    uint32_t clearSnapshot;
+    bool enabled;
     taskENTER_CRITICAL(&s_mux);
+    clearSnapshot = s_clearRequested.load();
+    enabled = s_bleEnabled.load();
     if (slot >= 0) {
         temp    = s_slots[slot].temp;
         lastUpd = s_slots[slot].lastUpdate;
     }
     taskEXIT_CRITICAL(&s_mux);
 
-    bool active = lastUpd > 0 && (now - lastUpd) < staleMs;
+    bool active = enabled && freshAt(lastUpd, now, staleMs);
     bool stale  = lastUpd > 0 && !active;
     bool feed   = (slot >= 0);
 
     // Deferred scan stop+restart (enable, address change, discovery start)
     if (s_pendingRestart.exchange(false)) {
         stopScan();
-        if (wantScan()) startScan();
     }
+    // A failed first attempt or a host reset must not require another setting
+    // change to recover. startScan gates readiness and the retry interval.
+    if (wantScan()) startScan();
 
     // Feed toggled from the web UI (httpd task), or moved to a different
     // sensor slot: a falling edge hands the HP back to its internal sensor, a
@@ -549,10 +637,11 @@ void BleSensor::loop(CN105Controller &cn105) {
         s_staleReverted.store(false);
         // A configured replacement with no usable sample cannot inherit the
         // old slot's remote-temperature override indefinitely.
-        if (!feed || !active || std::isnan(temp)) s_pendingClear.store(true);
+        if (!feed || !active || std::isnan(temp)) requestClear();
     }
 
-    if (feed && active && cn105.isConnected() && !std::isnan(temp)) {
+    if (feed && active && cn105.isConnected() && !std::isnan(temp) &&
+        s_bleEnabled.load() && s_clearRequested.load() == clearSnapshot && slot == feedSlot()) {
         // Calibration offset applies here, not just in the Average blend — a
         // user who corrects a sensor that reads high expects the heat pump to
         // see the corrected value in either mode. Applied before the change
@@ -567,23 +656,25 @@ void BleSensor::loop(CN105Controller &cn105) {
                        CN105Controller::quantizeRemoteTemp(feedTemp) !=
                        CN105Controller::quantizeRemoteTemp(s_lastSentTemp);
         uint32_t interval = changed ? BLE_RESEND_MIN_MS : BLE_KEEPALIVE_MS;
-        if (std::isnan(s_lastSentTemp) || now - s_lastKeepalive >= interval) {
+        if (clearSnapshot != s_clearHandled || std::isnan(s_lastSentTemp) ||
+            (uint32_t)now - s_lastKeepalive >= interval) {
             // Recovery supersedes a clear queued while CN105 was down.
-            s_pendingClear.store(false);
+            s_clearHandled = clearSnapshot;
             s_staleReverted.store(false);
             cn105.sendRemoteTemperature(feedTemp);
-            s_lastKeepalive = now;
+            s_ownsRemoteTemperature = true;
+            s_lastKeepalive = (uint32_t)now;
             s_lastSentTemp  = feedTemp;
         }
     }
 
-    // Stale watchdog — routes the revert through the s_pendingClear mailbox
+    // Stale watchdog — routes the revert through the clear-generation mailbox
     // drained below, which owns the send, the retry-until-connected, and the
     // s_lastSentTemp reset
     if (feed && stale && !s_staleReverted.exchange(true)) {
-        s_pendingClear.store(true);
+        requestClear();
         LOG_WARN("Sensor stale (%lus no data) — reverting to internal thermistor",
-                 (unsigned long)((now - lastUpd) / 1000));
+                 (unsigned long)(elapsed_ms32(lastUpd, now) / 1000));
     }
     // Decide replacement/recovery first so a pending clear cannot overwrite
     // the fresh sample sent in this pass.
@@ -606,14 +697,14 @@ bool     BleSensor::isConfigured(int idx) { return slotIdxOk(idx) && readLocked(
 bool BleSensor::isActive(int idx) {
     if (!s_bleEnabled.load() || !slotIdxOk(idx)) return false;
     uint32_t staleMs = (uint32_t)settings.get().roomStaleTimeoutS * 1000;
-    return freshAt(readLocked(s_slots[idx].lastUpdate), uptime_ms(), staleMs);
+    return freshAt(readLocked(s_slots[idx].lastUpdate), uptime_ms64(), staleMs);
 }
 
 bool BleSensor::isStale(int idx) {
     if (!s_bleEnabled.load() || !slotIdxOk(idx)) return false;
-    uint32_t lu = readLocked(s_slots[idx].lastUpdate);
+    uint64_t lu = readLocked(s_slots[idx].lastUpdate);
     uint32_t staleMs = (uint32_t)settings.get().roomStaleTimeoutS * 1000;
-    return lu > 0 && !freshAt(lu, uptime_ms(), staleMs);
+    return lu > 0 && !freshAt(lu, uptime_ms64(), staleMs);
 }
 
 bool BleSensor::isReverted() {
@@ -622,9 +713,9 @@ bool BleSensor::isReverted() {
 
 uint32_t BleSensor::lastUpdateAge(int idx) {
     if (!slotIdxOk(idx)) return UINT32_MAX;
-    uint32_t lu = readLocked(s_slots[idx].lastUpdate);
+    uint64_t lu = readLocked(s_slots[idx].lastUpdate);
     if (lu == 0) return UINT32_MAX;
-    return uptime_ms() - lu;
+    return elapsed_ms32(lu, uptime_ms64());
 }
 
 bool BleSensor::isEnabled() {
@@ -656,12 +747,9 @@ void BleSensor::setSensor(int idx, const char* mac, const char* name) {
         sl.valid = valid;
         bool hadReading = sl.lastUpdate != 0;
         resetSlotReadings(sl);
+        if (hadReading && idx == feedSlot()) requestClear();
         taskEXIT_CRITICAL(&s_mux);
         if (idx == feedSlot()) s_staleReverted.store(false);
-
-        // If the old reading may be live in the HP, hand it back to its
-        // internal thermistor now rather than after the stale timeout
-        if (hadReading && idx == feedSlot()) s_pendingClear.store(true);
 
         strncpy(cfg.addr, mac, sizeof(cfg.addr) - 1);
         cfg.addr[sizeof(cfg.addr) - 1] = '\0';

@@ -25,6 +25,22 @@ The CN105 connector uses a serial protocol at 2400 baud with 8E1 (even parity). 
 | 0x06 | Status | Operating state, compressor frequency |
 | 0x09 | Standby | Sub mode, stage, auto sub mode |
 
+The configured interval is the idle delay between cycles. A settings SET
+starts a confirmation cycle after a 750 ms quiet period, even when the idle
+interval is 15 or 30 seconds. Unconfirmed settings are checked at a short
+cadence until the existing 10-second confirmation/refusal window expires.
+Continuous writes yield to a due poll so they cannot starve status updates.
+
+Each request allows 2.5 seconds for its response. A missing reply ends that
+cycle and starts a 750 ms quiet period before another transaction; it does
+not hold queued commands for the full idle interval. A reply of the expected
+type that arrives inside the quiet period resumes the cycle from that phase;
+replies arriving later are ignored. A cycle older than one deadline yields
+to a queued command at the next phase boundary, so a slow unit cannot hold a
+SET for all five phases. Only the response type currently requested advances
+the cycle or updates state. Three consecutive error-query timeouts disable
+the optional `0x04` phase; a later `0x04` answer re-enables it.
+
 ## Remote Temperature (0x07)
 
 A SET command (type `0x41`) that overrides the heat pump's internal thermistor with an external temperature reading. Sending `0x00` disables the override and reverts to the internal sensor.

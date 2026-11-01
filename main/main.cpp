@@ -69,7 +69,8 @@ uint32_t appCrashCount(void) { return s_crashCount; }
 
 // ── State flags ─────────────────────────────────────────────────────────────
 // (HomeKit started-ness lives in homekit_is_started() — no parallel flag here)
-static bool webUIStarted      = false;
+static bool webUIStarted      = false;   // HTTP server + WS delivery are up
+static bool networkReady      = false;   // first web-startup attempt made: sensors and OTA validation may run
 static bool espnowConsoleInit = false;   // ESP-NOW REPL one-shot attempted
 static bool firmwareValidated = false;
 static bool lastAPState       = false;
@@ -484,16 +485,27 @@ extern "C" void app_main(void)
                      (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT));
         }
 
-        // ── Web server deferred init (one-shot after WiFi or AP active) ──
-        if (!webUIStarted && (WifiManager::isConnected() || wifiRecovery.isAPActive())) {
-            webUI.begin(&cn105);
-            webUIStarted = true;
-            webUIStartTime = uptime_ms();
-            LOG_INFO("Web UI started (port 80)");
-
+        // ── Web server deferred init; retry transient allocation failures ──
+        static bool webUIAttempted = false;
+        static uint32_t lastWebAttempt = 0;
+        if (!webUIStarted && (WifiManager::isConnected() || wifiRecovery.isAPActive()) &&
+            (!webUIAttempted || (uint32_t)(now - lastWebAttempt) >= 5000)) {
+            const bool firstAttempt = !webUIAttempted;
+            webUIAttempted = true;
+            lastWebAttempt = now;
+            webUIStarted = webUI.begin(&cn105);
+            if (webUIStarted) LOG_INFO("Web UI started (port 80)");
+            else LOG_WARN("Web UI startup failed; retrying in 5s");
+            // The room-sensor feeds and OTA validation need the network, not
+            // the web server: a unit whose HTTPD cannot start must still feed
+            // the pump and keep its firmware image valid.
+            if (firstAttempt) {
+                networkReady = true;
+                webUIStartTime = uptime_ms();
 #ifdef BLE_ENABLE
-            if (!safeMode) BleSensor::begin();
+                if (!safeMode) BleSensor::begin();
 #endif
+            }
         }
 
         // ── WebSocket state push + AP tracking — 10 Hz ──────────────────
@@ -512,7 +524,7 @@ extern "C" void app_main(void)
 
         // ── BLE keepalive — 1 Hz ────────────────────────────────────────
 #ifdef BLE_ENABLE
-        if (webUIStarted && now - lastBleLoop >= 1000) {
+        if (networkReady && now - lastBleLoop >= 1000) {
             BleSensor::loop(cn105);
             lastBleLoop = now;
         }
@@ -520,7 +532,7 @@ extern "C" void app_main(void)
 
         // ── Link-sensor keepalive — 1 Hz (not BLE-gated: a build without BLE
         //    still supports a dial-sourced room temperature) ────────────────
-        if (webUIStarted && now - lastLinkSensorLoop >= 1000) {
+        if (networkReady && now - lastLinkSensorLoop >= 1000) {
             LinkSensor::loop(cn105);
             // Average-mode blend, after both source loops so it sees this
             // tick's readings.
@@ -603,7 +615,7 @@ extern "C" void app_main(void)
         // ── OTA rollback validation (one-shot, skipped in safe mode) ────
         // In safe mode, don't validate — let bootloader rollback to previous firmware.
         // Validate firmware after WiFi + CN105 confirmed working, or 60s timeout.
-        if (!safeMode && !firmwareValidated && webUIStarted) {
+        if (!safeMode && !firmwareValidated && networkReady) {
             if (cn105.isConnected() || (uptime_ms() - webUIStartTime > 60000)) {
                 esp_ota_mark_app_valid_cancel_rollback();
                 firmwareValidated = true;

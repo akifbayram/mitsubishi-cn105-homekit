@@ -30,7 +30,8 @@ void logging_init();
 // Convert our LogLevel enum to the ESP-IDF esp_log_level_t.
 esp_log_level_t log_level_to_esp(LogLevel level);
 
-// Apply the current LogLevel globally (sets ESP-IDF log level for all tags).
+// Apply the LogLevel to every ESP-IDF tag, except that the tags carrying the
+// log stream (HTTPD, lwIP netif, NVS) never go above INFO.
 void logging_set_level(LogLevel level);
 
 // ── Log Macros ────────────────────────────────────────────────────────────────

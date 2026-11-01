@@ -165,7 +165,13 @@ bool RoomAvg::averageSelectable() {
     const uint8_t members = settings.get().roomMembers &
                             (uint8_t)~(1u << ROOM_MEMBER_INTERNAL);
     int n = 0;
-    for (int bit = ROOM_MEMBER_LINK; bit < ROOM_MEMBER_COUNT; bit++)
+    if (members & (1u << ROOM_MEMBER_LINK)) {
+        LinkSensor::Reading rd[SL2_MAX_DIALS];
+        const int nr = LinkSensor::readings(rd);
+        for (int i = 0; i < nr; i++)
+            if (rd[i].hasSensor && ++n >= 2) return true;
+    }
+    for (int bit = ROOM_MEMBER_BLE0; bit < ROOM_MEMBER_COUNT; bit++)
         if ((members & (1u << bit)) && memberAvailable(bit) && ++n >= 2) return true;
     return false;
 }

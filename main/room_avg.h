@@ -49,8 +49,8 @@ namespace RoomAvg {
      * configured; room_single_from_legacy() then picks which one. */
     bool legacySrcSelectable(uint8_t src);
 
-    /* Is Average worth offering at all? It is a policy over remote members,
-     * so it needs at least two of them available; with fewer, the blend is
+    /* Is Average worth offering at all? It needs at least two available
+     * remote sensors (each capable Link dial counts); with fewer, the blend is
      * just that one source (or internal) wearing a different name. The dial's
      * writer gates on this. The web editor does not — its members can only be
      * ticked from inside Average — so an Average short of members is a state

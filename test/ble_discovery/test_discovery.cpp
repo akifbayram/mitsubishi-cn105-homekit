@@ -18,8 +18,9 @@ using portMUX_TYPE = int;
 #define LOG_INFO(...) ((void)0)
 #define LOG_DEBUG(...) ((void)0)
 
-static uint32_t now_ms = 1000;
-static uint32_t uptime_ms() { return now_ms; }
+static uint64_t now_ms = 1000;
+static int64_t esp_timer_get_time() { return (int64_t)now_ms * 1000; }
+#include "clock.inc"
 
 constexpr int ROOM_MAX_BLE_SENSORS = 4;
 constexpr int ROOM_MEMBER_INTERNAL = 0, ROOM_MEMBER_LINK = 1, ROOM_MEMBER_BLE0 = 2;
@@ -51,17 +52,20 @@ struct ble_gap_event;
 struct ble_gap_disc_params { uint8_t passive, filter_duplicates; uint16_t itvl, window; };
 static ble_gap_disc_params last_params;
 static int disc_starts = 0;
+static bool disc_active = false;
 static int ble_gap_disc(int, int, const ble_gap_disc_params* p, int (*)(ble_gap_event*, void*), void*) {
-    last_params = *p; ++disc_starts; return 0;
+    last_params = *p; ++disc_starts; disc_active = true; return 0;
 }
-static int ble_gap_disc_cancel() { return 0; }
+static int ble_gap_disc_cancel() { disc_active = false; return 0; }
+static int ble_gap_disc_active() { return disc_active; }
+static int ble_hs_synced() { return 1; }
 static int gap_event_cb(ble_gap_event*, void*) { return 0; }
 
 #include "ble_header.inc"
 #include "ble_state.inc"
 
-static bool initNimble() { s_nimbleInitialized.store(true); return true; }
-static void deinitNimble() { s_nimbleInitialized.store(false); }
+static bool initNimble() { s_nimbleInitialized.store(true); s_nimbleReady.store(true); return true; }
+static void deinitNimble() { s_nimbleInitialized.store(false); s_nimbleReady.store(false); }
 
 namespace BleSensor {
 int feedSlot();
@@ -89,6 +93,7 @@ int main(int, char** argv) {
     CN105Controller cn105;
     s_bleEnabled.store(true);
     s_nimbleInitialized.store(true);
+    s_nimbleReady.store(true);
 
     // Sensors broadcast every ~10 s to several minutes. A 30 % listening
     // window lost two thirds of their readings on the bench, so the scan must

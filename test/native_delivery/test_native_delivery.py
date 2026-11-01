@@ -74,7 +74,7 @@ using portMUX_TYPE=int;
 static int currentLogLevel=0;
 static constexpr int LOG_LEVEL_DEBUG=3;
 static uint32_t now_ms=1000;
-static uint32_t uptime_ms() {return now_ms;}
+static int64_t esp_timer_get_time() {return (int64_t)now_ms * 1000;}
 static const char* modeToLogStr(uint8_t){return "";}
 static const char* fanToLogStr(uint8_t){return "";}
 static const char* vaneToLogStr(uint8_t){return "";}
@@ -83,6 +83,7 @@ static const char* subModeToLogStr(uint8_t){return "";}
 static const char* stageToLogStr(uint8_t){return "";}
 static const char* autoSubModeToLogStr(uint8_t){return "";}
 '''
+HOST += clean("esp_utils.h").split("// Human-readable")[0]
 HOST += "\n" + function((MAIN / "esp_utils.h").read_text(), "fnv1a32") + "\n"
 CN105 = HOST + clean("setpoint_range.h") + clean("cn105_protocol.h") + clean("cn105_protocol.cpp")
 PUMP = r'''
@@ -93,26 +94,34 @@ public:
  std::vector<std::vector<uint8_t>> sent;
  std::vector<uint8_t> identifyReply;
  bool responding=true;
+ uint8_t missingInfo=0;
+ std::vector<uint8_t> infoTypes;
  uint32_t readCostMs=0;
+ // Reply latency on the wire: a packet becomes readable latencyMs after it
+ // was produced. Zero keeps the historical immediate delivery.
+ uint32_t latencyMs=0;
+ std::deque<std::pair<uint32_t,std::vector<uint8_t>>> late;
  uint8_t mode=CN105_MODE_AUTO;bool power=true;
  uint8_t target=172,roomRaw=170;
  bool legacy=false;int legacyC=22;
- int read(uint8_t* b,size_t n) override {size_t i=0;while(i<n&&!rx.empty()){b[i++]=rx.front();rx.pop_front();}if(i)now_ms+=readCostMs;return i;}
- size_t available() override {return rx.size();}
- void flush() override {rx.clear();}
+ void release(){while(!late.empty()&&(int32_t)(now_ms-late.front().first)>=0){for(uint8_t b:late.front().second)rx.push_back(b);late.pop_front();}}
+ int read(uint8_t* b,size_t n) override {release();size_t i=0;while(i<n&&!rx.empty()){b[i++]=rx.front();rx.pop_front();}if(i)now_ms+=readCostMs;return i;}
+ size_t available() override {release();return rx.size();}
+ void flush() override {rx.clear();late.clear();}
  void packet(uint8_t type,uint8_t subtype) {
   uint8_t p[22]={};CN105Controller::buildHeader(p,type,16);p[5]=subtype;
   if(subtype==CN105_INFO_SETTINGS){p[8]=power?1:0;p[9]=mode;if(legacy)p[10]=31-legacyC;else p[16]=target;}
   if(subtype==CN105_INFO_ROOMTEMP)p[11]=roomRaw;
   if(subtype==CN105_INFO_ERRORCODE)p[9]=0x80;
   p[21]=CN105Controller::calcChecksum(p,21);
+  if(latencyMs){late.push_back({now_ms+latencyMs,std::vector<uint8_t>(p,p+22)});return;}
   for(uint8_t b:p)rx.push_back(b);
  }
  void write(const uint8_t* b,size_t n) override {
   sent.emplace_back(b,b+n);
   if(b[1]==0x5b){++identifies;if(responding)for(uint8_t v:identifyReply)rx.push_back(v);}
   if(b[1]==0x5a){++connects;if(responding)packet(CN105_PKT_CONNECT_OK,0);}
-  if(b[1]==CN105_PKT_INFO_REQ){++infos;if(responding)packet(CN105_PKT_INFO_RESP,b[5]);}
+  if(b[1]==CN105_PKT_INFO_REQ){++infos;infoTypes.push_back(b[5]);if(responding&&b[5]!=missingInfo)packet(CN105_PKT_INFO_RESP,b[5]);}
   if(b[1]==CN105_PKT_SET){
    ++sets;
    if(b[5]==1&&(b[6]&CN105_FLAG_TEMP)&&dropTemp>0){--dropTemp;return;}   // lost: not applied, not ACKed
@@ -289,6 +298,21 @@ static void run_main_control_tick(CN105Controller& cn105){
 '''
 AUTO += app[app.index("        // ── Correct manual-range violations"):app.index("        // ── ESP-NOW remote")]
 AUTO += "\n}\n" + PUMP
+
+# HAP values are the boundary; both fan synchronization functions and the
+# controller health calculation are compiled from the current production files.
+fan = (MAIN / "homekit_fan.cpp").read_text()
+FAN = CN105 + r'''
+union hap_val_t {uint32_t u;float f;bool b;};
+struct hap_char_t {hap_val_t val{};int updates=0;};
+static const hap_val_t* hap_char_get_val(hap_char_t* c){return &c->val;}
+static void hap_char_update_val(hap_char_t* c,const hap_val_t* v){c->val=*v;++c->updates;}
+'''
+FAN += fan[fan.index("static hap_char_t *s_fanActive"):fan.index("// ── Mapping helpers")]
+FAN += fan[fan.index("static hap_char_t *s_fanAutoOn"):fan.index("static int fan_auto_write_cb")]
+FAN += "\n" + function(fan, "cn105FanToPercent")
+FAN += "\n" + function(fan[fan.rindex("static void sync_fan_auto"):], "sync_fan_auto")
+FAN += "\n" + function(fan, "homekit_sync_fan") + "\n" + PUMP
 
 # H2 compiles SettingsStore and HomeKit setup intact against NVS/HAP boundaries.
 # The reset stub queues work: storage completion is delivered separately.
@@ -473,7 +497,7 @@ static json_gen_str_t sdk_characteristic(hap_char_t*hc){
 SOURCES = {"link_ranges": LINK_RANGES,"web_ranges": WEB,"homekit_ranges": RANGES,"setpoint_control": CONTROL, "cn105_polling": CN105 + PUMP, "cn105_float_setters": CN105 + PUMP,
            "cn105_capabilities": CN105 + PUMP,
            "link_source": LINK, "ble_handoff": BLE, "auto_band": AUTO,
-           "factory_reset": FACTORY, "homekit_pairing": HOMEKIT, "setpoint_settings": HOMEKIT}
+           "homekit_fan": FAN, "factory_reset": FACTORY, "homekit_pairing": HOMEKIT, "setpoint_settings": HOMEKIT}
 failed = False
 with tempfile.TemporaryDirectory(prefix="cn105-native-delivery-") as directory:
     build = Path(directory)
@@ -484,7 +508,7 @@ with tempfile.TemporaryDirectory(prefix="cn105-native-delivery-") as directory:
         path.write_text(source + "\n" + (HERE / ("test_" + name + ".cpp")).read_text())
         exe = build / name
         subprocess.run(["g++", "-std=c++17", "-DUNIT_TEST", "-I" + str(MAIN), str(path), *([str(MAIN / "solar.cpp")] if name in ("auto_band", "link_ranges") else []),
-                        *([str(MAIN / "setpoint_range.cpp")] if name.startswith("cn105_") or name in ("link_ranges", "auto_band", "homekit_pairing", "factory_reset", "setpoint_settings", "setpoint_control", "homekit_ranges", "web_ranges") else []), *(shlex.split(subprocess.check_output(["pkg-config", "--cflags", "--libs", "libcjson"], text=True)) if name in ("web_ranges", "setpoint_control") else []), "-o", str(exe)], check=True)
+                        *([str(MAIN / "setpoint_range.cpp")] if name.startswith("cn105_") or name in ("link_ranges", "auto_band", "homekit_fan", "homekit_pairing", "factory_reset", "setpoint_settings", "setpoint_control", "homekit_ranges", "web_ranges") else []), *(shlex.split(subprocess.check_output(["pkg-config", "--cflags", "--libs", "libcjson"], text=True)) if name in ("web_ranges", "setpoint_control") else []), "-o", str(exe)], check=True)
         cases = re.findall(r'CASE\("([^"]+)"\)', (HERE / ("test_" + name + ".cpp")).read_text())
         for case in cases:
             for storage_mode in (["staged", "immediate"] if name == "setpoint_settings" else [None]):
