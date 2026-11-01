@@ -39,8 +39,8 @@ struct Entry {
     bool     hasSensor;   // this dial's latest SL2_DSF_HAS_SENSOR
     int16_t  tempCc;      // centi-C; SL2_CC_NA = no reading yet
     uint16_t humCc;       // SL2_HUM_CC_NA = never reported
-    uint32_t lastUpdate;  // uptime_ms of the last VALID temp_cc; 0 = none
-    uint32_t lastHeard;   // uptime_ms of the last frame of any kind
+    uint64_t lastUpdate;  // uptime_ms64 of the last VALID temp_cc; 0 = none
+    uint64_t lastHeard;   // uptime_ms64 of the last frame of any kind
 };
 static portMUX_TYPE s_mux = portMUX_INITIALIZER_UNLOCKED;
 static Entry s_dials[SL2_MAX_DIALS];
@@ -80,7 +80,7 @@ static Entry *claimLocked(const uint8_t mac[6]) {
     Entry *victim = &s_dials[0];
     for (Entry &e : s_dials) {
         if (!e.used) { victim = &e; break; }
-        if ((int32_t)(e.lastHeard - victim->lastHeard) < 0) victim = &e;
+        if (e.lastHeard < victim->lastHeard) victim = &e;
     }
     *victim = Entry{};
     victim->used = true;
@@ -98,13 +98,13 @@ static int32_t meanRounded(int32_t sum, int32_t n) {
 struct View {
     int16_t  tempCc;      // SL2_CC_NA if none
     uint16_t humCc;       // SL2_HUM_CC_NA if none
-    uint32_t lastUpdate;  // 0 if none
+    uint64_t lastUpdate;  // 0 if none
 };
 
 // A pinned selection (pin != nullptr) sees its own dial only; anything else
 // sees the summary documented in link_sensor.h. Call while holding s_mux so
 // each reading and the MAC it belongs to stay together.
-static View viewLocked(const uint8_t *pin, uint32_t now, uint32_t stale) {
+static View viewLocked(const uint8_t *pin, uint64_t now, uint32_t stale) {
     View v = {SL2_CC_NA, SL2_HUM_CC_NA, 0};
     if (pin) {
         if (const Entry *e = findLocked(pin)) v = {e->tempCc, e->humCc, e->lastUpdate};
@@ -114,8 +114,8 @@ static View viewLocked(const uint8_t *pin, uint32_t now, uint32_t stale) {
     int32_t tSum = 0, hSum = 0, tN = 0, hN = 0;
     for (const Entry &e : s_dials) {
         if (!e.used || e.lastUpdate == 0) continue;
-        if (!newest || (int32_t)(e.lastUpdate - newest->lastUpdate) > 0) newest = &e;
-        if (now - e.lastUpdate >= stale) continue;
+        if (!newest || e.lastUpdate > newest->lastUpdate) newest = &e;
+        if (elapsed_ms32(e.lastUpdate, now) >= stale) continue;
         tSum += e.tempCc;
         tN++;
         if (e.humCc != SL2_HUM_CC_NA) { hSum += e.humCc; hN++; }
@@ -136,7 +136,8 @@ static View selectedView(uint8_t *pinOut = nullptr) {
     const bool pinned = pinnedMac(pin);
     if (!pinned) memset(pin, 0, sizeof pin);
     if (pinOut) memcpy(pinOut, pin, sizeof pin);
-    const uint32_t now = uptime_ms(), stale = staleMs();
+    const uint64_t now = uptime_ms64();
+    const uint32_t stale = staleMs();
     taskENTER_CRITICAL(&s_mux);
     const View v = viewLocked(pinned ? pin : nullptr, now, stale);
     taskEXIT_CRITICAL(&s_mux);
@@ -154,7 +155,7 @@ void LinkSensor::feed(const uint8_t mac[6], const struct sl2_dial_sensor_pkt *p)
     // start. Freshness follows the temperature, not the flags — a dial that
     // has sensing hardware but no reading yet (or a battery/hum-only frame,
     // if one ever exists) must not keep the stale watchdog from firing.
-    const uint32_t now = uptime_ms();
+    const uint64_t now = uptime_ms64();
     taskENTER_CRITICAL(&s_mux);
     Entry *e = claimLocked(mac);
     e->lastHeard = now;
@@ -199,9 +200,9 @@ void LinkSensor::loop(CN105Controller &cn105) {
 
     uint8_t owner[6];   // the pinned dial; all-zero when the summary feeds
     const View v = selectedView(owner);
-    const uint32_t now = uptime_ms();
+    const uint64_t now = uptime_ms64();
     const int16_t  tempCc  = v.tempCc;
-    const uint32_t lastUpd = v.lastUpdate;
+    const uint64_t lastUpd = v.lastUpdate;
     if (memcmp(s_feedMac, owner, sizeof s_feedMac) != 0) {
         memcpy(s_feedMac, owner, sizeof s_feedMac);
         // A fresh replacement owns a new feeding episode, even if its
@@ -222,9 +223,9 @@ void LinkSensor::loop(CN105Controller &cn105) {
     bool     selected    = (settings.get().roomMode == 0) &&
                            (settings.get().roomSingle == ROOM_MEMBER_LINK);
     bool     haveReading = (lastUpd != 0);
-    uint32_t age         = haveReading ? (now - lastUpd) : 0;
+    uint32_t age         = haveReading ? elapsed_ms32(lastUpd, now) : 0;
     room_feed_action_t action = room_feed_step(&s_feed, selected, haveReading,
-                                                tempDc, age, now, staleMs());
+                                                tempDc, age, (uint32_t)now, staleMs());
     switch (action) {
     case ROOM_FEED_SEND:
         // A fresh send supersedes any clear still waiting for the link to
@@ -247,7 +248,8 @@ void LinkSensor::loop(CN105Controller &cn105) {
 
 int LinkSensor::readings(Reading out[SL2_MAX_DIALS]) {
     Entry copy[SL2_MAX_DIALS];
-    const uint32_t now = uptime_ms(), stale = staleMs();
+    const uint64_t now = uptime_ms64();
+    const uint32_t stale = staleMs();
     taskENTER_CRITICAL(&s_mux);
     memcpy(copy, s_dials, sizeof copy);
     taskEXIT_CRITICAL(&s_mux);
@@ -260,7 +262,7 @@ int LinkSensor::readings(Reading out[SL2_MAX_DIALS]) {
         r.hasSensor   = e.hasSensor;
         r.temperature = have ? e.tempCc / 100.0f : NAN;
         r.humidity    = e.humCc == SL2_HUM_CC_NA ? NAN : e.humCc / 100.0f;
-        r.ageMs       = have ? now - e.lastUpdate : UINT32_MAX;
+        r.ageMs       = have ? elapsed_ms32(e.lastUpdate, now) : UINT32_MAX;
         r.fresh       = have && r.ageMs < stale;
     }
     return n;
@@ -278,13 +280,13 @@ bool LinkSensor::hasSensor() {
 }
 
 bool LinkSensor::isActive() {
-    uint32_t lu = selectedView().lastUpdate;
-    return lu > 0 && (uptime_ms() - lu) < staleMs();
+    uint64_t lu = selectedView().lastUpdate;
+    return lu > 0 && elapsed_ms32(lu, uptime_ms64()) < staleMs();
 }
 
 bool LinkSensor::isStale() {
-    uint32_t lu = selectedView().lastUpdate;
-    return lu > 0 && (uptime_ms() - lu) >= staleMs();
+    uint64_t lu = selectedView().lastUpdate;
+    return lu > 0 && elapsed_ms32(lu, uptime_ms64()) >= staleMs();
 }
 
 float LinkSensor::temperature() {
@@ -298,12 +300,12 @@ float LinkSensor::humidity() {
 }
 
 uint32_t LinkSensor::lastUpdateAge() {
-    uint32_t lu = selectedView().lastUpdate;
-    return lu == 0 ? UINT32_MAX : (uptime_ms() - lu);
+    uint64_t lu = selectedView().lastUpdate;
+    return lu == 0 ? UINT32_MAX : elapsed_ms32(lu, uptime_ms64());
 }
 
 uint8_t LinkSensor::status() {
-    uint32_t lu = selectedView().lastUpdate;
+    uint64_t lu = selectedView().lastUpdate;
     if (lu == 0) return SL2_ROOMST_UNAVAILABLE;
-    return (uptime_ms() - lu) < staleMs() ? SL2_ROOMST_OK : SL2_ROOMST_STALE;
+    return elapsed_ms32(lu, uptime_ms64()) < staleMs() ? SL2_ROOMST_OK : SL2_ROOMST_STALE;
 }

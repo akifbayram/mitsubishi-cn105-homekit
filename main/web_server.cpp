@@ -264,15 +264,21 @@ esp_err_t WebUI::handleWifiScan(httpd_req_t *req) {
     int pos = 0;
     jsonAppend(buf, sizeof(buf), &pos, "[");
     for (int i = 0; i < count; i++) {
-        char escSSID[67];
-        jsonEscape(networks[i].ssid, escSSID, sizeof(escSSID));
-        jsonAppend(buf, sizeof(buf), &pos,
+        // A control byte can expand to six JSON bytes. Build each complete
+        // entry separately so truncation always leaves a valid JSON array.
+        char escSSID[sizeof(networks[i].ssid) * 6 + 1];
+        jsonEscape(networks[i].ssid, escSSID, sizeof(escSSID), true);
+        char entry[256];
+        int len = snprintf(entry, sizeof(entry),
             "%s{\"ssid\":\"%s\",\"rssi\":%d,\"secure\":%s}",
             i > 0 ? "," : "",
             escSSID,
             (int)networks[i].rssi,
             networks[i].secure ? "true" : "false");
-        if (pos >= (int)sizeof(buf) - 80) break;
+        if (len < 0 || len >= (int)sizeof(entry) ||
+            (size_t)pos + (size_t)len + 2 > sizeof(buf)) break;
+        memcpy(buf + pos, entry, (size_t)len);
+        pos += len;
     }
     jsonAppend(buf, sizeof(buf), &pos, "]");
 
@@ -494,10 +500,17 @@ esp_err_t WebUI::handleFavicon(httpd_req_t *req) {
 // begin() — start HTTP server on port 80
 // ══════════════════════════════════════════════════════════════════════════════
 
-void WebUI::begin(CN105Controller *ctrl) {
+bool WebUI::begin(CN105Controller *ctrl) {
     _ctrl = ctrl;
 
-    if (_server) return;
+    if (_server) {
+        if (_wsReady.load()) return true;
+        // A previous startup failed and its HTTPD stop failed too. Finish
+        // cleanup before allocating another server or delivery worker.
+        if (httpd_stop(_server) != ESP_OK) return false;
+        _server = nullptr;
+        _ws.release();
+    }
 
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port      = 80;
@@ -517,17 +530,31 @@ void WebUI::begin(CN105Controller *ctrl) {
     esp_err_t ret = httpd_start(&_server, &config);
     if (ret != ESP_OK) {
         LOG_ERROR("Failed to start HTTP server: %d", ret);
-        return;
+        return false;
     }
 
     if (!_ws.start(_server)) {
         LOG_ERROR("WS delivery worker allocation failed");
         if (httpd_stop(_server) == ESP_OK) _server = nullptr;
         else LOG_ERROR("HTTP server stop failed after WS allocation failure");
-        return;
+        return false;
     }
 
     _wsReady.store(true);
+
+    auto registerUri = [&](const httpd_uri_t *uri) {
+        esp_err_t err = httpd_register_uri_handler(_server, uri);
+        if (err == ESP_OK) return true;
+        LOG_ERROR("Failed to register %s: %d", uri->uri, err);
+        _ws.stop();
+        // release() is safe only after HTTPD has finished every callback.
+        if (httpd_stop(_server) == ESP_OK) {
+            _server = nullptr;
+            _ws.release();
+        }
+        _wsReady.store(false);
+        return false;
+    };
 
     // Register GET / handler (serve HTML)
     const httpd_uri_t rootUri = {
@@ -539,7 +566,7 @@ void WebUI::begin(CN105Controller *ctrl) {
         .handle_ws_control_frames = false,
         .supported_subprotocol = NULL
     };
-    httpd_register_uri_handler(_server, &rootUri);
+    if (!registerUri(&rootUri)) return false;
 
     // Register POST /upload handler (OTA firmware upload)
     const httpd_uri_t otaUri = {
@@ -551,7 +578,7 @@ void WebUI::begin(CN105Controller *ctrl) {
         .handle_ws_control_frames = false,
         .supported_subprotocol = NULL
     };
-    httpd_register_uri_handler(_server, &otaUri);
+    if (!registerUri(&otaUri)) return false;
 
     // Register GET /ws handler (WebSocket)
     const httpd_uri_t wsUri = {
@@ -564,7 +591,7 @@ void WebUI::begin(CN105Controller *ctrl) {
         .supported_subprotocol = NULL,
         .ws_pre_handshake_cb = wsPreHandshake
     };
-    httpd_register_uri_handler(_server, &wsUri);
+    if (!registerUri(&wsUri)) return false;
 
     // Register GET /wifi-status handler
     const httpd_uri_t wifiStatusUri = {
@@ -576,7 +603,7 @@ void WebUI::begin(CN105Controller *ctrl) {
         .handle_ws_control_frames = false,
         .supported_subprotocol = NULL
     };
-    httpd_register_uri_handler(_server, &wifiStatusUri);
+    if (!registerUri(&wifiStatusUri)) return false;
 
     // Register POST /wifi-setup handler
     const httpd_uri_t wifiSetupUri = {
@@ -588,7 +615,7 @@ void WebUI::begin(CN105Controller *ctrl) {
         .handle_ws_control_frames = false,
         .supported_subprotocol = NULL
     };
-    httpd_register_uri_handler(_server, &wifiSetupUri);
+    if (!registerUri(&wifiSetupUri)) return false;
 
     // Register GET /wifi-scan handler
     const httpd_uri_t wifiScanUri = {
@@ -600,7 +627,7 @@ void WebUI::begin(CN105Controller *ctrl) {
         .handle_ws_control_frames = false,
         .supported_subprotocol = NULL
     };
-    httpd_register_uri_handler(_server, &wifiScanUri);
+    if (!registerUri(&wifiScanUri)) return false;
 
     // Register POST /identify handler (flash the status LED)
     const httpd_uri_t identifyUri = {
@@ -612,7 +639,7 @@ void WebUI::begin(CN105Controller *ctrl) {
         .handle_ws_control_frames = false,
         .supported_subprotocol = NULL
     };
-    httpd_register_uri_handler(_server, &identifyUri);
+    if (!registerUri(&identifyUri)) return false;
 
     // Register PWA manifest and icon handlers
     const httpd_uri_t manifestUri = {
@@ -620,34 +647,35 @@ void WebUI::begin(CN105Controller *ctrl) {
         .user_ctx = this, .is_websocket = false,
         .handle_ws_control_frames = false, .supported_subprotocol = NULL
     };
-    httpd_register_uri_handler(_server, &manifestUri);
+    if (!registerUri(&manifestUri)) return false;
 
     const httpd_uri_t icon192Uri = {
         .uri = "/icon-192.png", .method = HTTP_GET, .handler = handleIcon192,
         .user_ctx = this, .is_websocket = false,
         .handle_ws_control_frames = false, .supported_subprotocol = NULL
     };
-    httpd_register_uri_handler(_server, &icon192Uri);
+    if (!registerUri(&icon192Uri)) return false;
 
     const httpd_uri_t icon512Uri = {
         .uri = "/icon-512.png", .method = HTTP_GET, .handler = handleIcon512,
         .user_ctx = this, .is_websocket = false,
         .handle_ws_control_frames = false, .supported_subprotocol = NULL
     };
-    httpd_register_uri_handler(_server, &icon512Uri);
+    if (!registerUri(&icon512Uri)) return false;
 
     const httpd_uri_t faviconUri = {
         .uri = "/favicon.png", .method = HTTP_GET, .handler = handleFavicon,
         .user_ctx = this, .is_websocket = false,
         .handle_ws_control_frames = false, .supported_subprotocol = NULL
     };
-    httpd_register_uri_handler(_server, &faviconUri);
+    if (!registerUri(&faviconUri)) return false;
 
     // If the fallback AP was already active before the server came up, install
     // the captive portal handler now (setAPMode() may have run pre-begin()).
     applyCaptivePortalHandler();
 
     LOG_INFO("HTTP server started, WebSocket endpoint at /ws");
+    return true;
 }
 
 void WebUI::closeClient(httpd_handle_t server, int fd) {

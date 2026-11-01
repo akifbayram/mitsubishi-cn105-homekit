@@ -32,49 +32,105 @@ static constexpr uint16_t DNS_RCODE_OK     = 0x0000;
 static size_t build_response(const uint8_t *query, size_t queryLen,
                              uint8_t *resp, size_t respCap, uint32_t ip)
 {
-    if (queryLen < DNS_HEADER_SIZE) return 0;
+    if (queryLen < DNS_HEADER_SIZE || queryLen > DNS_MAX_PACKET) return 0;
+    // One ordinary question, with at most one EDNS OPT additional record.
+    // Never echo unparsed answer/authority sections or interpret a response
+    // as another query. Compression in this first name has no prior name to
+    // reference, so reject pointers (including loops) without following them.
+    if ((query[2] & 0xF8) || query[4] || query[5] != 1 ||
+        query[6] || query[7] || query[8] || query[9] ||
+        query[10] || query[11] > 1) return 0;
+    size_t end = DNS_HEADER_SIZE;
+    while (true) {
+        if (end >= queryLen) return 0;
+        const uint8_t len = query[end++];
+        if (len > 63 || len > queryLen - end) return 0;
+        end += len;
+        if (end - DNS_HEADER_SIZE > 255) return 0;
+        if (!len) break;
+    }
+    if (queryLen - end < 4) return 0;
+    const uint16_t type = ((uint16_t)query[end] << 8) | query[end + 1];
+    const uint16_t cls = ((uint16_t)query[end + 2] << 8) | query[end + 3];
+    end += 4;
+    const size_t questionEnd = end;
+    const bool edns = query[11] != 0;
+    uint8_t ednsFlags = 0;
+    if (edns) {
+        // OPT has a root owner, TYPE 41, zero extended RCODE and version 0.
+        if (queryLen - end < 11 || query[end] || query[end + 1] ||
+            query[end + 2] != 41 || query[end + 5] || query[end + 6]) return 0;
+        const size_t dataLen = ((size_t)query[end + 9] << 8) | query[end + 10];
+        ednsFlags = query[end + 7] & 0x80;  // DNSSEC OK, no reserved flags
+        end += 11;
+        if (dataLen != queryLen - end) return 0;
+        // Unknown EDNS options are ignored, but their framing must be valid.
+        while (end < queryLen) {
+            if (queryLen - end < 4) return 0;
+            const size_t len = ((size_t)query[end + 2] << 8) | query[end + 3];
+            end += 4;
+            if (len > queryLen - end) return 0;
+            end += len;
+        }
+    }
+    if (end != queryLen) return 0;
 
-    // Copy the entire query (header + question section) into the response
-    if (queryLen > respCap - 16) return 0;  // ensure room for answer RR
-    memcpy(resp, query, queryLen);
+    const bool answer = cls == 1 && (type == 1 || type == 255);
+    const size_t responseLen = questionEnd + (answer ? 16 : 0) + (edns ? 11 : 0);
+    if (responseLen > respCap) return 0;
+    memcpy(resp, query, questionEnd);
 
     // Set response flags: QR=1, AA=1, RCODE=0
-    uint16_t flags = DNS_QR_RESPONSE | DNS_OPCODE_QUERY | DNS_AA_FLAG | DNS_RCODE_OK;
+    uint16_t flags = DNS_QR_RESPONSE | DNS_OPCODE_QUERY | DNS_AA_FLAG | DNS_RCODE_OK |
+                     ((uint16_t)(query[2] & 1) << 8);  // echo recursion desired
     resp[2] = (uint8_t)(flags >> 8);
     resp[3] = (uint8_t)(flags & 0xFF);
 
-    // ANCOUNT = 1
+    // Explicit section counts: the OPT record belongs after the answer.
     resp[6] = 0;
-    resp[7] = 1;
+    resp[7] = answer ? 1 : 0;
+    resp[8] = resp[9] = resp[10] = 0;
+    resp[11] = edns ? 1 : 0;
 
     // Append answer resource record after the question section
-    size_t offset = queryLen;
+    size_t offset = questionEnd;
 
-    // NAME — pointer to QNAME in the question section (offset 12)
-    resp[offset++] = 0xC0;
-    resp[offset++] = 0x0C;
+    if (answer) {
+        // NAME — pointer to QNAME in the question section (offset 12)
+        resp[offset++] = 0xC0;
+        resp[offset++] = 0x0C;
 
-    // TYPE = A (1)
-    resp[offset++] = 0x00;
-    resp[offset++] = 0x01;
+        // TYPE = A (1)
+        resp[offset++] = 0x00;
+        resp[offset++] = 0x01;
 
-    // CLASS = IN (1)
-    resp[offset++] = 0x00;
-    resp[offset++] = 0x01;
+        // CLASS = IN (1)
+        resp[offset++] = 0x00;
+        resp[offset++] = 0x01;
 
-    // TTL = 60 seconds
-    resp[offset++] = 0x00;
-    resp[offset++] = 0x00;
-    resp[offset++] = 0x00;
-    resp[offset++] = 0x3C;
+        // TTL = 60 seconds
+        resp[offset++] = 0x00;
+        resp[offset++] = 0x00;
+        resp[offset++] = 0x00;
+        resp[offset++] = 0x3C;
 
-    // RDLENGTH = 4
-    resp[offset++] = 0x00;
-    resp[offset++] = 0x04;
+        // RDLENGTH = 4
+        resp[offset++] = 0x00;
+        resp[offset++] = 0x04;
 
-    // RDATA = IP address (already in network byte order)
-    memcpy(&resp[offset], &ip, 4);
-    offset += 4;
+        // RDATA = IP address (already in network byte order)
+        memcpy(&resp[offset], &ip, 4);
+        offset += 4;
+    }
+
+    if (edns) {
+        // Advertise only the packet size this server actually receives.
+        const uint8_t opt[] = {0, 0, 41,
+            (uint8_t)(DNS_MAX_PACKET >> 8), (uint8_t)DNS_MAX_PACKET,
+            0, 0, ednsFlags, 0, 0, 0};
+        memcpy(resp + offset, opt, sizeof(opt));
+        offset += sizeof(opt);
+    }
 
     return offset;
 }

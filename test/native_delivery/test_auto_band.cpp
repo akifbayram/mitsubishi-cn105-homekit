@@ -416,4 +416,38 @@ int main(int, char** argv) {
   CHECK(settings.saves==saves);CHECK(settings.get().heatingThreshold==21&&settings.get().coolingThreshold==23);
  }
 
+ CASE("auto_band_survives_15_second_idle_polling") {
+  c.setUpdateInterval(15000);settings.get().heatingThreshold=27;settings.get().coolingThreshold=29;
+  drive(c,pump,70000);
+  CHECK(AutoBand::deviceOwns());CHECK(c.externalAutoChanges()==0);
+  CHECK(settings.get().heatingThreshold==27&&settings.get().coolingThreshold==29);
+  CHECK(pump.sets==1);CHECK(c.getState().targetTemp==27);
+ }
+ CASE("auto_band_survives_30_second_idle_polling") {
+  c.setUpdateInterval(30000);settings.get().heatingThreshold=27;settings.get().coolingThreshold=29;
+  drive(c,pump,70000);
+  CHECK(AutoBand::deviceOwns());CHECK(c.externalAutoChanges()==0);
+  CHECK(settings.get().heatingThreshold==27&&settings.get().coolingThreshold==29);
+  CHECK(pump.sets==1);CHECK(c.getState().targetTemp==27);
+ }
+ CASE("clamped_auto_target_keeps_band_at_long_poll_interval") {
+  c.setUpdateInterval(30000);settings.get().heatingThreshold=16;settings.get().coolingThreshold=18;pump.roomRaw=169;
+  drive(c,pump,70000,166);
+  CHECK(AutoBand::deviceOwns());CHECK(c.externalAutoChanges()==0);
+  CHECK(settings.get().heatingThreshold==16&&settings.get().coolingThreshold==18);
+  CHECK(pump.sets==1);CHECK(c.getEffectiveState().targetTemp==19);
+ }
+ CASE("lost_auto_target_retries_at_long_poll_interval") {
+  c.setUpdateInterval(30000);settings.get().heatingThreshold=27;settings.get().coolingThreshold=29;pump.dropTemp=1;
+  drive(c,pump,70000);
+  CHECK(AutoBand::deviceOwns());CHECK(c.externalAutoChanges()==0);CHECK(pump.sets==2);
+  CHECK(c.getState().targetTemp==27);
+ }
+ CASE("real_wall_change_after_confirmation_yields_at_long_poll_interval") {
+  c.setUpdateInterval(30000);settings.get().heatingThreshold=27;settings.get().coolingThreshold=29;
+  drive(c,pump,4000);pump.target=166;drive(c,pump,35000);
+  CHECK(!AutoBand::deviceOwns());CHECK(c.externalAutoChanges()==1);
+  CHECK(settings.get().heatingThreshold==18&&settings.get().coolingThreshold==20);
+  CHECK(pump.sets==1);CHECK(c.getState().targetTemp==19);
+ }
 }

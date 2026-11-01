@@ -180,7 +180,31 @@ void CN105Controller::loop() {
         _discovery = Discovery::Done;
     }
 
-    // ── Send committed changes (priority over polling, only outside a cycle) ──
+    // A missing response must not hold commands for the configured idle poll
+    // interval. End the failed transaction, then leave a bounded quiet period
+    // to drain late packets before starting another one.
+    if (_cycleRunning && _awaitingResponse && now - _requestSentMs >= CN105_REPLY_DEADLINE_MS) {
+        LOG_WARN("Poll response TIMEOUT (phase %d/%d)", _pollPhase + 1, CN105_POLL_PHASE_COUNT);
+        if (_pollPhase < CN105_POLL_PHASE_COUNT && POLL_TYPES[_pollPhase] == CN105_INFO_ERRORCODE) {
+            if (++_errorPollFailures >= 3) {
+                LOG_WARN("Disabling 0x04 error code polling (3 consecutive timeouts)");
+                _errorPollDisabled = true;
+            }
+        }
+        _cycleRunning = false;
+        _awaitingResponse = false;
+        _lastCycleEnd = _lastTimeoutMs = now;
+        _replyDeferred = true;
+    }
+    if (_replyDeferred && now - _lastTimeoutMs >= CN105_DEFER_DELAY) _replyDeferred = false;
+
+    // Once a write needs confirmation (or normal polling is due), let its
+    // quiet period finish and poll before accepting another write. Otherwise
+    // a stream of commands/remote feeds can postpone polling indefinitely.
+    const bool pollDue = _confirmSettings || now - _lastCycleEnd >= _updateInterval;
+    const bool canWrite = !_cycleRunning && !_replyDeferred && !(_writeDeferred && pollDue);
+
+    // ── Send committed changes (priority over idle polling) ──
     // Snapshot-and-clear under the lock, then transmit from the snapshot so a
     // producer staging a new batch mid-TX can neither tear this packet nor
     // lose its own (its flags accumulate in the freshly cleared _staged).
@@ -189,14 +213,21 @@ void CN105Controller::loop() {
     if (_rangeAwareCommand && (_staged.flags1 & CN105_FLAG_TEMP) &&
         (_commandConnection != _state.connectionRevision || _commandEncoding != _state.encoding))
         _commandsHeld = true;
-    const bool sendNow = _sendRequested && !_cycleRunning && !_commandsHeld;
+    const bool sendNow = _sendRequested && canWrite && !_commandsHeld;
     const PendingCommand cmd = _staged;
     if (sendNow) {
         _staged = PendingCommand{};
         _sendRequested = false;
         _wanted.hasBeenSent = true;
         _wanted.sentFlags |= cmd.flags1;
-        if (cmd.flags1 & CN105_FLAG_TEMP) _wanted.tempAtSend = _state.targetTemp;
+        if (cmd.flags1 & CN105_FLAG_TEMP) {
+            _wanted.tempAtSend = _state.targetTemp;
+            _sent.temp = quantizeSetpointFor(cmd.temp, _state.encoding);
+            _tempSentMs = now;
+        }
+        if (cmd.flags1 & CN105_FLAG_MODE) { _sent.mode = cmd.mode; _modeSentMs = now; }
+        if (cmd.flags1 & CN105_FLAG_POWER) { _sent.power = cmd.power; _powerSentMs = now; }
+        _sent.flags1 |= cmd.flags1 & (CN105_FLAG_TEMP | CN105_FLAG_MODE | CN105_FLAG_POWER);
     }
     taskEXIT_CRITICAL(&_mux);
     if (sendNow) {
@@ -204,6 +235,8 @@ void CN105Controller::loop() {
         sendSetPacket(cmd);
         _lastWriteMs = uptime_ms();
         _writeDeferred = true;
+        _confirmSettings = true;
+        _lastConfirmMs = _lastWriteMs - CN105_UPDATE_INTERVAL;
         return;
     }
 
@@ -227,7 +260,7 @@ void CN105Controller::loop() {
     }
 
     // ── Send pending remote temperature (same deferred pattern) ──────────
-    if (_pendingRemoteTemp && !_cycleRunning) {
+    if (_pendingRemoteTemp && canWrite) {
         taskENTER_CRITICAL(&_mux);
         const float remoteTempC = _pendingRemoteTempC;
         _pendingRemoteTemp = false;
@@ -267,24 +300,7 @@ void CN105Controller::loop() {
     }
 
     // ── Cycle-based polling ─────────────────────────────────────────────────
-    if (_cycleRunning) {
-        if (now - _cycleStartMs > (2 * _updateInterval) + 1000) {
-            LOG_WARN("Poll cycle TIMEOUT after %lums (phase %d/%d)",
-                     (unsigned long)(now - _cycleStartMs), _pollPhase, CN105_POLL_PHASE_COUNT);
-            _cycleRunning = false;
-            _awaitingResponse = false;
-            _lastCycleEnd = now;
-            // Track 0x04 failures for soft disable
-            if (_pollPhase < CN105_POLL_PHASE_COUNT &&
-                POLL_TYPES[_pollPhase] == CN105_INFO_ERRORCODE) {
-                _errorPollFailures++;
-                if (_errorPollFailures >= 3) {
-                    LOG_WARN("Disabling 0x04 error code polling (3 consecutive timeouts)");
-                    _errorPollDisabled = true;
-                }
-            }
-        }
-    } else {
+    if (!_cycleRunning && !_replyDeferred) {
         // Writes require a quiet period, but must not restart the poll clock:
         // a 20s sensor keepalive would otherwise starve a 30s poll forever.
         // Both elapsed-time checks remain valid across uptime rollover.
@@ -298,11 +314,13 @@ void CN105Controller::loop() {
             _uart->write(request, sizeof(request));
         }
         if (!_writeDeferred && _discovery != Discovery::Waiting &&
-            (uint32_t)(now - _lastCycleEnd) >= _updateInterval) {
+            ((uint32_t)(now - _lastCycleEnd) >= _updateInterval ||
+             (_confirmSettings && (uint32_t)(now - _lastConfirmMs) >= CN105_UPDATE_INTERVAL))) {
             LOG_DEBUG("Starting new poll cycle");
             if (_bootClear == BOOT_CLEAR_ARMED) _bootClear = BOOT_CLEAR_POLLING;
             _cycleRunning = true;
             _cycleStartMs = now;
+            _lastConfirmMs = now;
             _pollPhase = 0;
             _awaitingResponse = false;
             // Skip disabled error code phase
@@ -356,6 +374,8 @@ void CN105Controller::restartHandshake() {
     _connectRetries = 0;
     _cycleRunning = false;
     _awaitingResponse = false;
+    _confirmSettings = false;
+    _replyDeferred = false;
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -721,6 +741,7 @@ void CN105Controller::sendInfoRequest(uint8_t infoType) {
                   typeStr, _pollPhase + 1, CN105_POLL_PHASE_COUNT, 22, hex);
     }
     _uart->write(pkt, 22);
+    _requestSentMs = uptime_ms();
 }
 
 void CN105Controller::sendSetPacket(const PendingCommand &cmd) {
@@ -888,6 +909,8 @@ void CN105Controller::processPacket(const uint8_t *pkt, uint8_t len) {
             _cycleRunning = false;
             _awaitingResponse = false;
             _writeDeferred = false;
+            _replyDeferred = false;
+            _confirmSettings = false;
             // A new handshake always starts a fresh poll immediately. Do not
             // retain a pre-disconnect cycle timestamp or SET deferral.
             _lastCycleEnd = uptime_ms() - _updateInterval;
@@ -896,6 +919,7 @@ void CN105Controller::processPacket(const uint8_t *pkt, uint8_t len) {
             // first SETTINGS of this connection is a baseline.
             taskENTER_CRITICAL(&_mux);
             _settingsBaselined = false;
+            _sent = PendingCommand{};
             // A refusal was the answer of the unit as it was then; after a
             // reconnect it may answer differently.
             _refusedTemp = _refusedAnswer = _unconfirmedTemp = NAN;
@@ -923,19 +947,33 @@ void CN105Controller::processPacket(const uint8_t *pkt, uint8_t len) {
             // data[0] (== pkt[5]) echoes the info type the unit is responding to.
             uint8_t respType = (len >= 6) ? pkt[5] : 0xFF;
 
-            if (len >= 7) {
-                handleInfoResponse(&pkt[5], pkt[4]);
-            }
+            // Every well-formed reply updates state and keeps the link alive;
+            // only the cycle bookkeeping below is keyed to the expected type.
+            if (len >= 7) handleInfoResponse(&pkt[5], pkt[4]);
 
             // Only advance the poll cycle when the response matches the request
             // we're actually waiting on. echavet's RequestScheduler matches
             // responses to requests by code; advancing on any INFO_RESP lets a
             // stale/duplicate/out-of-order packet desync the phase sequence. A
-            // genuinely missing response is still handled by the cycle timeout
-            // in loop() (which also drives the 0x04 soft-disable).
+            // missing response is handled by the request timeout in loop().
             bool awaitingExpected = _cycleRunning && _awaitingResponse &&
                                     _pollPhase < CN105_POLL_PHASE_COUNT &&
                                     respType == POLL_TYPES[_pollPhase];
+            // A slow unit's reply that lands inside the post-deadline quiet
+            // period is still the answer to the request that timed out: no
+            // SET can have gone out since. Resume the cycle from that phase
+            // rather than discarding it, or a unit answering just past the
+            // deadline would never deliver state and would be declared lost.
+            const bool lateExpected = !_cycleRunning && _replyDeferred &&
+                                      _pollPhase < CN105_POLL_PHASE_COUNT &&
+                                      respType == POLL_TYPES[_pollPhase];
+            if (lateExpected) {
+                LOG_DEBUG("Late reply type 0x%02X inside quiet period, resuming cycle", respType);
+                _cycleRunning = true;
+                _awaitingResponse = true;
+                _replyDeferred = false;
+                awaitingExpected = true;
+            }
             if (awaitingExpected) {
                 _awaitingResponse = false;
                 _pollPhase++;
@@ -946,11 +984,21 @@ void CN105Controller::processPacket(const uint8_t *pkt, uint8_t len) {
                     _pollPhase++;
                 }
 
-                if (_pollPhase < CN105_POLL_PHASE_COUNT) {
+                // A unit answering slowly still completes its cycles, but a
+                // queued command must not wait for every slow phase: past
+                // the UI grace window the old value would show through.
+                // Yield at this phase boundary once the cycle is older than
+                // one reply deadline; the next cycle polls from phase 0.
+                const bool slowCycle = _sendRequested &&
+                    (uint32_t)(uptime_ms() - _cycleStartMs) >= CN105_REPLY_DEADLINE_MS;
+                if (_pollPhase < CN105_POLL_PHASE_COUNT && !slowCycle) {
                     sendInfoRequest(POLL_TYPES[_pollPhase]);
                     _awaitingResponse = true;
                 } else {
-                    LOG_DEBUG("Poll cycle complete (%lums)", (unsigned long)(uptime_ms() - _cycleStartMs));
+                    if (_pollPhase < CN105_POLL_PHASE_COUNT)
+                        LOG_DEBUG("Slow poll cycle yielding to queued command at phase %d", _pollPhase + 1);
+                    else
+                        LOG_DEBUG("Poll cycle complete (%lums)", (unsigned long)(uptime_ms() - _cycleStartMs));
                     _cycleRunning = false;
                     _lastCycleEnd = uptime_ms();
                 }
@@ -1077,6 +1125,9 @@ void CN105Controller::handleInfoResponse(const uint8_t *data, uint8_t dataLen) {
                 next.errorCode = data[4];
                 next.hasError = (data[4] != 0x80);
                 _errorPollFailures = 0;  // Reset failure counter on success
+                // A late answer that resumed the cycle proves the unit does
+                // serve 0x04; a soft-disable raised by its slow replies ends.
+                _errorPollDisabled = false;
                 if (next.hasError) {
                     LOG_WARN("ERROR CODE: 0x%02X", data[4]);
                 } else {
@@ -1091,11 +1142,9 @@ void CN105Controller::handleInfoResponse(const uint8_t *data, uint8_t dataLen) {
     }
 
     taskENTER_CRITICAL(&_mux);
-    // External Auto change detection runs before the confirmation below
-    // clears the wanted flags: those flags are what tells our own SET's
-    // echo (or the unit's clamped version of it) apart from a wall
-    // controller's write. A field is ours while its latest value has been
-    // sent (per field: sentFlags) and is still inside the grace window.
+    // Attribute against the transmitted fields, not the newest staged intent.
+    // Consume that evidence on the first change/confirmation so a subsequent
+    // wall-controller change is visible even during the remaining UI grace.
     const bool wasBaselined = _settingsBaselined;
     if (settingsDecoded && (next.targetTemp != _state.targetTemp || next.mode != _state.mode)) {
         _refusedTemp = _refusedAnswer = _unconfirmedTemp = NAN;
@@ -1105,15 +1154,30 @@ void CN105Controller::handleInfoResponse(const uint8_t *data, uint8_t dataLen) {
             const bool autoNow    = next.power && next.mode == CN105_MODE_AUTO;
             const bool autoBefore = _state.power && _state.mode == CN105_MODE_AUTO;
             const bool tempMoved  = fabsf(next.targetTemp - _state.targetTemp) > 0.01f;
-            const bool inGrace    = (now - _wanted.lastChange) < CN105_GRACE_SAFETY_MS;
-            const uint8_t sent    = _wanted.sentFlags;
-            const bool ourTemp    = (_wanted.hasTemp && (sent & CN105_FLAG_TEMP) && inGrace) ||
+            // A transmitted field is ours while its reply is on the wire; a
+            // value superseded after transmission can still be echoed too.
+            const bool ourTemp    = ((_sent.flags1 & CN105_FLAG_TEMP) &&
+                (now - _tempSentMs < CN105_GRACE_SAFETY_MS || fabsf(next.targetTemp - _sent.temp) < 0.3f)) ||
                 (next.targetTemp == _supersededTemp && (now - _supersededAt) < CN105_GRACE_SAFETY_MS);
-            const bool ourEntry   = ((_wanted.hasMode && (sent & CN105_FLAG_MODE)) ||
-                                     (_wanted.hasPower && (sent & CN105_FLAG_POWER))) && inGrace;
+            const bool ourMode    = (_sent.flags1 & CN105_FLAG_MODE) && next.mode == _sent.mode;
+            const bool ourPower   = (_sent.flags1 & CN105_FLAG_POWER) && next.power == _sent.power;
+            // Every part of entering Auto must be ours. An unrelated power
+            // command cannot claim a wall controller's simultaneous mode edit.
+            const bool ourEntry   = (_state.power || ourPower) &&
+                                    (_state.mode == CN105_MODE_AUTO || ourMode);
             if (autoNow && ((!autoBefore && !ourEntry) || (autoBefore && tempMoved && !ourTemp)))
                 _externalAutoChanges++;
         }
+        if ((_sent.flags1 & CN105_FLAG_TEMP) &&
+                (fabsf(next.targetTemp - _state.targetTemp) > 0.01f ||
+                 fabsf(next.targetTemp - _sent.temp) < 0.3f || now - _tempSentMs >= CN105_GRACE_SAFETY_MS))
+            _sent.flags1 &= ~CN105_FLAG_TEMP;
+        if ((_sent.flags1 & CN105_FLAG_MODE) &&
+                (next.mode == _sent.mode || now - _modeSentMs >= CN105_GRACE_SAFETY_MS))
+            _sent.flags1 &= ~CN105_FLAG_MODE;
+        if ((_sent.flags1 & CN105_FLAG_POWER) &&
+                (next.power == _sent.power || now - _powerSentMs >= CN105_GRACE_SAFETY_MS))
+            _sent.flags1 &= ~CN105_FLAG_POWER;
         _settingsBaselined = true;
     }
     _state = next;
@@ -1150,7 +1214,7 @@ void CN105Controller::handleInfoResponse(const uint8_t *data, uint8_t dataLen) {
     // it is latched. Either way the declined value stops masking the real
     // one. The first answer of a connection has nothing to compare against.
     if (settingsDecoded && _wanted.hasTemp && (_wanted.sentFlags & CN105_FLAG_TEMP) &&
-        (now - _wanted.lastChange) >= CN105_GRACE_SAFETY_MS) {
+        (now - _tempSentMs) >= CN105_GRACE_SAFETY_MS) {
         const float q = quantizeSetpointFor(_wanted.targetTemp, next.encoding);
         const bool moved = fabsf(next.targetTemp - _wanted.tempAtSend) > 0.01f;
         if (wasBaselined) {
@@ -1164,6 +1228,12 @@ void CN105Controller::handleInfoResponse(const uint8_t *data, uint8_t dataLen) {
             }
         }
         _wanted.hasTemp = false;
+    }
+    if (settingsDecoded) {
+        // Retry unanswered/refused settings at a short cadence, independently
+        // of the idle interval, until the bounded refusal decision is made.
+        _confirmSettings = _sent.flags1 != 0 ||
+                           (_wanted.hasTemp && (_wanted.sentFlags & CN105_FLAG_TEMP));
     }
     taskEXIT_CRITICAL(&_mux);
 }

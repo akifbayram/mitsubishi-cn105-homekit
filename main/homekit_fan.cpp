@@ -145,6 +145,9 @@ void homekit_sync_fan(CN105Controller &cn105)
     if (now - s_fanLastSync < 2000) return;
     s_fanLastSync = now;
 
+    // Health must reach both services, including the disconnected path.
+    sync_fan_auto(cn105);
+
     if (!cn105.isHealthy()) {
         s_fanWasDisconnected = true;
         if (s_fanStatusActive) {
@@ -194,9 +197,6 @@ void homekit_sync_fan(CN105Controller &cn105)
             hap_char_update_val(s_fanSpeed, &v);
         }
     }
-
-    // Also sync the Fan Auto switch (same timing group)
-    sync_fan_auto(cn105);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

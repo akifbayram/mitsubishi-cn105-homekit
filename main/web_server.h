@@ -10,7 +10,7 @@
 
 class WebUI {
 public:
-    void begin(CN105Controller *ctrl);
+    bool begin(CN105Controller *ctrl);   // True only after all handlers and WS delivery are ready
     void loop();                        // Called from main loop to push state updates
     void broadcastLog(const char *msg, size_t len); // Send log line to WS client
     void setAPMode(bool active);        // Toggle AP mode flag (controls page routing)

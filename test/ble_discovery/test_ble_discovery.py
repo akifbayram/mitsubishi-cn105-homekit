@@ -39,6 +39,8 @@ def function(source, name):
 with tempfile.TemporaryDirectory(prefix="cn105-ble-discovery-") as directory:
     build = Path(directory)
     ble = (MAIN / "ble_sensor.cpp").read_text()
+    utils = (MAIN / "esp_utils.h").read_text()
+    (build / "clock.inc").write_text(re.sub(r"^#(?:include[^\n]*|pragma once)\n", "", utils, flags=re.M).split("// Human-readable")[0])
     header = (MAIN / "ble_sensor.h").read_text()
     constants = "\n".join(l for l in header.splitlines() if l.startswith("constexpr "))
     device = header[header.index("struct BleDiscoveredDevice"):header.index("\nnamespace BleSensor")]

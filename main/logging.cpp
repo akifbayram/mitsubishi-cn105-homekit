@@ -77,15 +77,28 @@ esp_log_level_t log_level_to_esp(LogLevel level) {
     }
 }
 
+// IDF tags that carry the log stream itself stay at INFO under DEBUG. HTTPD
+// logs several lines per WebSocket frame and every log line is pushed over
+// that WebSocket, so a wildcard DEBUG feeds on its own output: the log ring
+// overflows, the state push starves and the socket closes (bench, 2026-11-01).
+static const char *const kTransportTags[] = {
+    "httpd", "httpd_txrx", "httpd_ws", "httpd_uri", "httpd_sess", "httpd_parse",
+    "esp_netif_lwip", "nvs",
+};
+
 void logging_set_level(LogLevel level) {
     currentLogLevel = level;
-    esp_log_level_set("*", log_level_to_esp(level));
+    const esp_log_level_t esp = log_level_to_esp(level);
+    // "*" discards every per-tag entry, so the transport pins come after it.
+    esp_log_level_set("*", esp);
+    if (esp > ESP_LOG_INFO)
+        for (const char *tag : kTransportTags) esp_log_level_set(tag, ESP_LOG_INFO);
 }
 
 // ── Init ─────────────────────────────────────────────────────────────────────
 void logging_init() {
     // Set global log level from our stored preference
-    esp_log_level_set("*", log_level_to_esp(currentLogLevel));
+    logging_set_level(currentLogLevel);
 
     if (!s_fmtMux) s_fmtMux = xSemaphoreCreateMutex();
 

@@ -173,4 +173,129 @@ int main(int, char** argv) {
   }
   CHECK(pump.infos>=before+15);CHECK(c.getState().targetTemp==24);CHECK(c.isHealthy());
  }
+ CASE("long_interval_confirms_own_set_promptly") {
+  now_ms=5000;c.setUpdateInterval(30000);c.begin(&pump);ticks(c);
+  c.setTargetTemp(24);c.sendPendingChanges();ticks(c,200,10);
+  CHECK(c.getState().targetTemp==24);CHECK(c.externalAutoChanges()==0);
+ }
+ CASE("superseded_set_echo_still_belongs_to_transmitted_command") {
+  now_ms=5000;c.begin(&pump);ticks(c);
+  c.setTargetTemp(24);c.sendPendingChanges();c.loop();
+  int infos=pump.infos;while(pump.infos==infos){now_ms+=10;c.loop();}
+  c.setTargetTemp(25);c.sendPendingChanges();c.loop();
+  CHECK(c.externalAutoChanges()==0);CHECK(c.getEffectiveState().targetTemp==25);
+  ticks(c,300,10);CHECK(c.getState().targetTemp==25);CHECK(c.externalAutoChanges()==0);
+ }
+ CASE("superseded_mode_echo_still_belongs_to_transmitted_command") {
+  pump.mode=CN105_MODE_HEAT;now_ms=5000;c.begin(&pump);ticks(c);
+  c.setMode(CN105_MODE_AUTO);c.sendPendingChanges();c.loop();
+  int infos=pump.infos;while(pump.infos==infos){now_ms+=10;c.loop();}
+  c.setMode(CN105_MODE_COOL);c.sendPendingChanges();c.loop();
+  CHECK(c.externalAutoChanges()==0);CHECK(c.getEffectiveState().mode==CN105_MODE_COOL);
+ }
+ CASE("late_exact_confirmation_is_not_an_external_auto_change") {
+  now_ms=5000;c.setUpdateInterval(30000);c.begin(&pump);ticks(c);
+  c.setTargetTemp(24);c.sendPendingChanges();c.loop();
+  int infos=pump.infos;while(pump.infos==infos){now_ms+=10;c.loop();}
+  now_ms+=12000;c.loop();
+  CHECK(c.getState().targetTemp==24);CHECK(c.externalAutoChanges()==0);
+ }
+ CASE("wall_change_after_clamped_answer_is_external_during_grace") {
+  now_ms=5000;c.begin(&pump);ticks(c);
+  c.setTargetTemp(24);c.sendPendingChanges();c.loop();pump.target=170;
+  ticks(c,300,10);CHECK(c.getState().targetTemp==21);CHECK(c.externalAutoChanges()==0);
+  c.setFanSpeed(CN105_FAN_2);c.sendPendingChanges();pump.target=166;ticks(c,300,10);
+  CHECK(c.getState().targetTemp==19);CHECK(c.externalAutoChanges()==1);
+ }
+ CASE("own_power_does_not_hide_external_auto_mode_entry") {
+  pump.mode=CN105_MODE_HEAT;pump.power=false;now_ms=5000;c.begin(&pump);ticks(c);
+  c.setPower(true);c.sendPendingChanges();c.loop();pump.mode=CN105_MODE_AUTO;
+  ticks(c,300,10);CHECK(c.externalAutoChanges()==1);
+ }
+ CASE("missing_diagnostic_bounds_power_off_at_long_poll_intervals") {
+  for(uint32_t interval:{2000u,15000u,30000u})for(uint8_t missing:{CN105_INFO_SETTINGS,CN105_INFO_ROOMTEMP,CN105_INFO_ERRORCODE,CN105_INFO_STATUS,CN105_INFO_STANDBY}){
+   Pump p;CN105Controller controller;now_ms=5000;p.missingInfo=missing;
+   controller.setUpdateInterval(interval);controller.begin(&p);ticks(controller);
+   CHECK(controller.isHealthy());controller.setPower(false);controller.sendPendingChanges();
+   ticks(controller,400,10);CHECK(p.sets==1);CHECK(!p.power);
+  }
+ }
+ CASE("slow_replies_within_deadline_keep_state_and_link") {
+  for(uint32_t latency:{1200u,2000u}){Pump p;p.latencyMs=latency;CN105Controller k;now_ms=5000;k.begin(&p);
+   ticks(k,4000,10);CHECK(p.connects==1);CHECK(k.isHealthy());CHECK(k.getState().roomTemp==21);CHECK(k._settingsBaselined);}
+ }
+ CASE("reply_inside_quiet_period_resumes_cycle") {
+  now_ms=5000;pump.latencyMs=CN105_REPLY_DEADLINE_MS+300;c.begin(&pump);ticks(c,4000,10);
+  CHECK(pump.connects==1);CHECK(c.getState().roomTemp==21);
+  CHECK(std::count(pump.infoTypes.begin(),pump.infoTypes.end(),CN105_INFO_STANDBY)>0);
+  CHECK(!c._errorPollDisabled);
+ }
+ CASE("reply_after_quiet_period_is_ignored") {
+  now_ms=5000;pump.missingInfo=CN105_INFO_ROOMTEMP;c.setUpdateInterval(30000);c.begin(&pump);ticks(c);
+  c.setPower(false);c.sendPendingChanges();
+  ticks(c,(CN105_REPLY_DEADLINE_MS+CN105_DEFER_DELAY+100)/10,10);CHECK(pump.sets==1);int infos=pump.infos;
+  pump.packet(CN105_PKT_INFO_RESP,CN105_INFO_ROOMTEMP);c.loop();
+  CHECK(pump.infos==infos);CHECK(!c._cycleRunning);
+ }
+ CASE("slow_cycle_yields_to_queued_command") {
+  // A unit answering just under the deadline completes its cycles, but a
+  // command must not wait for all five slow phases (past the UI grace).
+  now_ms=5000;pump.latencyMs=2400;c.begin(&pump);ticks(c,400,10);CHECK(pump.sets==0);
+  c.setPower(false);c.sendPendingChanges();uint32_t staged=now_ms;
+  while(pump.sets==0&&now_ms-staged<20000){c.loop();now_ms+=10;}
+  CHECK(pump.sets==1);CHECK(now_ms-staged<=CN105_REPLY_DEADLINE_MS+2400);
+  int standby=std::count(pump.infoTypes.begin(),pump.infoTypes.end(),CN105_INFO_STANDBY);
+  ticks(c,3000,10);CHECK(std::count(pump.infoTypes.begin(),pump.infoTypes.end(),CN105_INFO_STANDBY)>standby);
+ }
+ CASE("late_error_code_reply_reenables_diagnostics") {
+  now_ms=5000;pump.missingInfo=CN105_INFO_ERRORCODE;c.begin(&pump);
+  while(!c._errorPollDisabled&&now_ms<200000){c.loop();now_ms+=10;}
+  CHECK(c._errorPollDisabled);
+  pump.packet(CN105_PKT_INFO_RESP,CN105_INFO_ERRORCODE);c.loop();
+  CHECK(!c._errorPollDisabled);
+  pump.missingInfo=0;int n=std::count(pump.infoTypes.begin(),pump.infoTypes.end(),CN105_INFO_ERRORCODE);
+  ticks(c,1000,10);CHECK(std::count(pump.infoTypes.begin(),pump.infoTypes.end(),CN105_INFO_ERRORCODE)>n);
+ }
+ CASE("reply_inside_quiet_period_of_other_type_is_ignored") {
+  now_ms=5000;pump.missingInfo=CN105_INFO_ROOMTEMP;c.setUpdateInterval(30000);c.begin(&pump);ticks(c);
+  ticks(c,(CN105_REPLY_DEADLINE_MS+100)/10,10);int infos=pump.infos;
+  pump.packet(CN105_PKT_INFO_RESP,CN105_INFO_SETTINGS);c.loop();
+  CHECK(pump.infos==infos);CHECK(!c._cycleRunning&&c._replyDeferred);
+ }
+ CASE("mismatched_reply_does_not_advance_cycle") {
+  now_ms=5000;c.begin(&pump);ticks(c);pump.missingInfo=CN105_INFO_ROOMTEMP;
+  now_ms+=CN105_UPDATE_INTERVAL;c.loop();c.loop();
+  int infos=pump.infos;CHECK(pump.infoTypes.back()==CN105_INFO_ROOMTEMP);
+  pump.target=166;pump.packet(CN105_PKT_INFO_RESP,CN105_INFO_SETTINGS);c.loop();
+  CHECK(pump.infos==infos);CHECK(c._cycleRunning&&c._awaitingResponse);
+ }
+ CASE("continuous_commands_allow_confirmation_and_diagnostics") {
+  now_ms=5000;c.setUpdateInterval(30000);c.begin(&pump);ticks(c);int infos=pump.infos;
+  for(int i=0;i<200;i++){
+   c.setTargetTemp(i%2?24:25);c.sendPendingChanges();c.loop();now_ms+=100;
+  }
+  ticks(c,300,10);CHECK(c.getState().targetTemp==24);
+  CHECK(pump.infos>=infos+25);CHECK(c.externalAutoChanges()==0);CHECK(c.isHealthy());
+ }
+ CASE("continuous_remote_feeds_allow_idle_diagnostic_polls") {
+  now_ms=5000;c.setUpdateInterval(30000);c.begin(&pump);ticks(c);int infos=pump.infos;
+  for(int i=0;i<1200;i++){c.sendRemoteTemperature(27);c.loop();now_ms+=100;}
+  CHECK(pump.infos>=infos+15);CHECK(c.getState().roomTemp==27);CHECK(c.isHealthy());
+ }
+ CASE("idle_poll_cadence_remains_configurable") {
+  now_ms=5000;c.setUpdateInterval(30000);c.begin(&pump);ticks(c);
+  ticks(c,290,100);CHECK(pump.infos==5);
+  ticks(c,20,100);CHECK(pump.infos==10);
+ }
+ CASE("diagnostic_soft_disable_preserves_later_phases") {
+  now_ms=5000;pump.missingInfo=CN105_INFO_ERRORCODE;c.begin(&pump);ticks(c,3000,10);
+  CHECK(std::count(pump.infoTypes.begin(),pump.infoTypes.end(),CN105_INFO_ERRORCODE)==3);
+  CHECK(std::count(pump.infoTypes.begin(),pump.infoTypes.end(),CN105_INFO_STANDBY)>0);
+  CHECK(c.isHealthy());
+ }
+ CASE("timeout_and_quiet_period_survive_clock_rollover") {
+  now_ms=UINT32_MAX-700;pump.missingInfo=CN105_INFO_STANDBY;c.begin(&pump);ticks(c);
+  c.setPower(false);c.sendPendingChanges();ticks(c,100,10);CHECK(pump.sets==0);
+  ticks(c,330,10);CHECK(pump.sets==1);CHECK(!pump.power);
+ }
 }

@@ -39,7 +39,7 @@ namespace BleSensor {
     int      rssi(int idx);          // BLE advertisement RSSI
     bool     isActive(int idx);      // Has fresh data
     bool     isStale(int idx);       // No data for stale timeout
-    uint32_t lastUpdateAge(int idx); // ms since last reading; UINT32_MAX if none
+    uint32_t lastUpdateAge(int idx); // ms since reading; saturates at UINT32_MAX, also none
     const char* sensorType(int idx); // Detected type (nullptr if unknown)
     bool     isConfigured(int idx);  // Slot has a valid address
 

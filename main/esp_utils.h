@@ -8,6 +8,18 @@ static inline uint32_t uptime_ms(void) {
     return (uint32_t)(esp_timer_get_time() / 1000);
 }
 
+// Sample freshness must survive more than one 32-bit uptime cycle. Keep the
+// full clock internally and saturate only at the public 32-bit age boundary.
+static inline uint64_t uptime_ms64(void) {
+    return (uint64_t)(esp_timer_get_time() / 1000);
+}
+
+static inline uint32_t elapsed_ms32(uint64_t since, uint64_t now) {
+    // A callback may publish just after a reader samples its clock.
+    const uint64_t age = now >= since ? now - since : 0;
+    return age > UINT32_MAX ? UINT32_MAX : (uint32_t)age;
+}
+
 // Human-readable esp_reset_reason() — boot banner (main.cpp) and the web
 // state push share this so a fleet unit's reboots are classifiable remotely.
 static inline const char *resetReasonStr(esp_reset_reason_t r) {

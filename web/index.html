@@ -3906,7 +3906,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   };
 
   window.saveWifi=function(){
-    var ssid=$('cfgSSID').value.trim();
+    var ssid=$('cfgSSID').value;
     var pass=$('cfgPass').value;
     if(!ssid) return;
     if(!send({cmd:'wifi',ssid:ssid,password:pass})){
@@ -4460,6 +4460,16 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     // roomSource is not BLE-specific (Internal/Link don't need BLE at all), so
     // it rides at the top level rather than inside the ble sub-object.
     if(s.roomSource!=null) out.settings.roomSource=s.roomSource;
+    // Optional v1 additions: old importers ignore them, while current clients
+    // restore the blend model instead of interpreting roomSource as a pick.
+    ['roomMode','roomSingle','roomMembers','betaChannel','nightLat','nightLon',
+      'nightDuskOff','nightDawnOff','nightCeil'].forEach(function(k){
+      if(s[k]!==undefined) out.settings[k]=s[k];
+    });
+    if(Array.isArray(s.roomOffs)) out.settings.roomOffs=s.roomOffs.slice(0,6);
+    if(Array.isArray(s.bleSensors)) out.settings.bleSensors=s.bleSensors.map(function(b){
+      return {i:b.i,addr:b.addr,name:b.name};
+    });
     // The sensor timeout governs BLE AND Serin Link, so it also needs a
     // top-level slot independent of bleEnabled (a BLE-disabled build with a
     // bonded dial still has a timeout to export). Kept inside ble.timeout too
@@ -4483,6 +4493,43 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       var j=JSON.parse(txt);
       if(j.app!=='cn105-homekit-settings'||!j.settings) throw new Error('not a settings file');
       var st=j.settings;
+      var sensorMap=null,sensorCmds=[];
+      if('bleSensors' in st){
+        // Validate the whole list before sending anything. Legacy add uses the
+        // first free slot, so map saved identities onto the destination slots
+        // rather than assuming a sparse list keeps its old indices.
+        if(!Array.isArray(st.bleSensors)||st.bleSensors.length>4) throw new Error('invalid sensor list');
+        var wanted={},indices={};
+        var sensors=st.bleSensors.map(function(b){
+          if(!b||!Number.isInteger(b.i)||b.i<0||b.i>=4||typeof b.addr!=='string'||
+            !/^([0-9a-f]{2}:){5}[0-9a-f]{2}$/i.test(b.addr)) throw new Error('invalid sensor identity');
+          var mac=b.addr.toUpperCase();
+          if(wanted[mac]||indices[b.i]) throw new Error('duplicate sensor identity');
+          wanted[mac]=true;indices[b.i]=true;
+          return {i:b.i,addr:mac,name:b.name};
+        }).sort(function(a,b){return a.i-b.i});
+        var slots=[null,null,null,null];
+        var current=lastState&&lastState.bleSensors;
+        if(Array.isArray(current)) current.forEach(function(b){
+          if(b.i>=0&&b.i<4&&b.addr) slots[b.i]=b.addr.toUpperCase();
+        });
+        for(var i=0;i<4;i++){
+          // Without a complete sensor state, clear all four slots first. A
+          // known matching identity stays in place, keeping its live reading.
+          if(!Array.isArray(current)||(slots[i]&&(!wanted[slots[i]]||slots.indexOf(slots[i])!==i))){
+            sensorCmds.push({cmd:'config',bleDelIdx:i});slots[i]=null;
+          }
+        }
+        sensorMap={};
+        sensors.forEach(function(b){
+          var slot=slots.indexOf(b.addr);
+          if(slot<0){slot=slots.indexOf(null);slots[slot]=b.addr}
+          sensorMap[b.i]=slot;
+          var add={cmd:'config',bleAddMac:b.addr};
+          if(typeof b.name==='string') add.bleAddName=b.name;
+          sensorCmds.push(add);
+        });
+      }
       var cfg={cmd:'config'};
       // Same sanitization as the manual save path (saveConfig)
       if(typeof st.deviceName==='string') cfg.deviceName=st.deviceName.replace(/["\\\n\r]/g,'').trim();
@@ -4495,18 +4542,63 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       if(typeof st.logLevel==='number') cfg.logLevel=st.logLevel;
       if(typeof st.vaneConfig==='number') cfg.vaneConfig=st.vaneConfig;
       if(typeof st.modeMask==='number') cfg.modeMask=st.modeMask;
-      if(typeof st.roomSource==='number') cfg.roomSource=st.roomSource;
+      if(typeof st.betaChannel==='boolean') cfg.betaChannel=st.betaChannel;
       if(typeof st.roomTimeout==='number') cfg.bleTimeout=st.roomTimeout;
       if(st.ble){
         if(typeof st.ble.enabled==='boolean') cfg.bleEnabled=st.ble.enabled;
-        if(typeof st.ble.addr==='string'&&st.ble.addr) cfg.bleAddr=st.ble.addr;
+        if(!sensorMap&&typeof st.ble.addr==='string'&&st.ble.addr) cfg.bleAddr=st.ble.addr;
         if(typeof st.ble.timeout==='number') cfg.bleTimeout=st.ble.timeout;
       }
-      // Validate the whole profile and band before sending anything.
+      // Validate the whole profile and band before sending anything. The
+      // thresholds ride with the ranges in the checked config message.
       copyRangeSettings(st,cfg);
       validRangeSettings(cfg);
+      var commands=sensorCmds.slice();
+      if(Array.isArray(st.roomOffs)){
+        var offsets=st.roomOffs.slice(0,6);
+        if(sensorMap){
+          offsets=[st.roomOffs[0],st.roomOffs[1],0,0,0,0];
+          Object.keys(sensorMap).forEach(function(i){offsets[sensorMap[i]+2]=st.roomOffs[Number(i)+2]});
+        }
+        offsets.forEach(function(value,i){
+          if(typeof value==='number') commands.push({cmd:'config',roomOffIdx:i,roomOffVal:value});
+        });
+      }
+      var source={cmd:'config'};
+      var modern=['roomMode','roomSingle','roomMembers'].some(function(k){return typeof st[k]==='number'});
+      if(modern){
+        if(typeof st.roomMode==='number') source.roomMode=st.roomMode;
+        if(typeof st.roomSingle==='number'){
+          var single=st.roomSingle;
+          if(sensorMap&&single>=2) single=sensorMap[single-2]!=null?sensorMap[single-2]+2:0;
+          source.roomSingle=single;
+        }
+        if(typeof st.roomMembers==='number'){
+          var members=st.roomMembers;
+          if(sensorMap){
+            members=st.roomMembers&3;
+            Object.keys(sensorMap).forEach(function(i){
+              if(st.roomMembers&(1<<(Number(i)+2))) members|=1<<(sensorMap[i]+2);
+            });
+          }
+          source.roomMembers=members;
+        }
+      }else if(typeof st.roomSource==='number') source.roomSource=st.roomSource;
+      if(Object.keys(source).length>1) commands.push(source);
+      var t={cmd:'set'};
+      ['nightLat','nightLon','nightDuskOff','nightDawnOff','nightCeil'].forEach(function(k){
+        if(typeof st[k]==='number') t[k]=st[k];
+      });
+      if(st.nightLat===null||st.nightLon===null) t.nightLocClear=1;
+      if(Object.keys(t).length>1) commands.push(t);
+      // WebSocket messages are ordered, and each config handler applies its
+      // identities synchronously before the later selection is validated.
+      // The checked config goes first; its result reports the import.
       rangeEditVersion++;
-      submitCheckedConfig(cfg,'Settings imported');
+      if(!submitCheckedConfig(cfg,'Settings imported')) throw new Error('connection lost; import stopped');
+      commands.forEach(function(command){
+        if(!send(command)) throw new Error('connection lost; import stopped');
+      });
     }).catch(function(e){showToast('Import failed: '+(e.message||e),true)});
   };
 
@@ -4615,7 +4707,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   };
 
   function checkWifiFields(){
-    $('wifiSaveBtn').disabled=!$('cfgSSID').value.trim();
+    $('wifiSaveBtn').disabled=!$('cfgSSID').value;
   }
   $('cfgSSID').addEventListener('input',checkWifiFields);
   $('cfgPass').addEventListener('input',checkWifiFields);
