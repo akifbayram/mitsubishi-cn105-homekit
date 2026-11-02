@@ -35,11 +35,12 @@ Each request allows 2.5 seconds for its response. A missing reply ends that
 cycle and starts a 750 ms quiet period before another transaction; it does
 not hold queued commands for the full idle interval. A reply of the expected
 type that arrives inside the quiet period resumes the cycle from that phase;
-replies arriving later are ignored. A cycle older than one deadline yields
+a later reply does not resume it. A cycle older than one deadline yields
 to a queued command at the next phase boundary, so a slow unit cannot hold a
-SET for all five phases. Only the response type currently requested advances
-the cycle or updates state. Three consecutive error-query timeouts disable
-the optional `0x04` phase; a later `0x04` answer re-enables it.
+SET for all five phases. Every well-formed reply updates state, but only the
+response type currently requested advances the cycle. Three consecutive
+error-query timeouts disable the optional `0x04` phase; a later `0x04` answer
+re-enables it.
 
 ## Remote Temperature (0x07)
 
