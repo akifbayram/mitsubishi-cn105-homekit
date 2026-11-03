@@ -58,6 +58,7 @@ HOST = r'''
 #include <functional>
 #include "sl2_proto.h"
 #include "cn105_baud.h"
+#include "vane_preset.h"
 #include "uart_interface.h"
 // Tests inspect mailbox/protocol internals; keep private below system includes.
 #define private public

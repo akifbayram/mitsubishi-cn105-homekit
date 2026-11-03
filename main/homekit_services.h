@@ -36,6 +36,7 @@ void homekit_create_fan(hap_acc_t *acc);
 void homekit_create_fan_auto_switch(hap_acc_t *acc);
 void homekit_create_fan_mode_switch(hap_acc_t *acc);
 void homekit_create_dry_mode_switch(hap_acc_t *acc);
+void homekit_create_vane_switch(hap_acc_t *acc);
 
 // ── CN105 controller reference (set during init, used by callbacks) ─────────
 /// Must be set before any write callbacks fire.

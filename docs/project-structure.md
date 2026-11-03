@@ -5,13 +5,14 @@ main/
   main.cpp                    # app_main(), init sequence, FreeRTOS main loop
   cn105_protocol.cpp/h        # UART driver, packet TX/RX/parsing, WantedSettings
   cn105_baud.h                # Accepted CN105 baud rates + NVS load rule (host-tested)
+  vane_preset.h               # Vane Preset values, equality, mirror match + enable rules (host-tested)
   cn105_strings.h             # Shared enum-string conversions (log + web + parsers)
   homekit_setup.cpp/h         # HAP init, setup code gen, event handler, status
   homekit_services.h          # Service creation + sync interface
   homekit_services_glue.cpp   # Service dispatcher, CN105 controller binding
   homekit_thermostat.cpp      # Thermostat service (write callback, sync, dual setpoint)
   homekit_fan.cpp             # Fan v2 + Fan Auto switch services
-  homekit_switches.cpp        # FAN mode + DRY mode switch services
+  homekit_switches.cpp        # FAN mode, DRY mode + opt-in Vane Preset switch services
   web_server.cpp/h            # HTTP server setup, request routing, HomeKit status
   web_ws.cpp                  # WebSocket handler, state push, command dispatch
   web_ota.cpp                 # OTA firmware upload with SHA256 verification

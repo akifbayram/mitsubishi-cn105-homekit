@@ -111,28 +111,16 @@ inline const char* vaneToLogStr(uint8_t vane) {
     }
 }
 
+// Web vocabulary lives in vane_preset.h (host-tested); these keep the lenient
+// edges the live controls rely on: unknown bytes print as "unknown", unknown
+// strings fall back to Auto.
 inline const char* vaneToWebStr(uint8_t vane) {
-    switch (vane) {
-        case CN105_VANE_AUTO:  return "auto";
-        case CN105_VANE_1:     return "1";
-        case CN105_VANE_2:     return "2";
-        case CN105_VANE_3:     return "3";
-        case CN105_VANE_4:     return "4";
-        case CN105_VANE_5:     return "5";
-        case CN105_VANE_SWING: return "swing";
-        default:               return "unknown";
-    }
+    return vane_value_valid(vane) ? vane_to_web_str(vane) : "unknown";
 }
 
 inline uint8_t strToVane(const char *s) {
-    if (strcmp(s, "auto")  == 0) return CN105_VANE_AUTO;
-    if (strcmp(s, "1")     == 0) return CN105_VANE_1;
-    if (strcmp(s, "2")     == 0) return CN105_VANE_2;
-    if (strcmp(s, "3")     == 0) return CN105_VANE_3;
-    if (strcmp(s, "4")     == 0) return CN105_VANE_4;
-    if (strcmp(s, "5")     == 0) return CN105_VANE_5;
-    if (strcmp(s, "swing") == 0) return CN105_VANE_SWING;
-    return CN105_VANE_AUTO;
+    uint8_t v;
+    return vane_from_web_str(s, &v) ? v : CN105_VANE_AUTO;
 }
 
 // ── Wide Vane (Horizontal) ──────────────────────────────────────────────────
@@ -151,27 +139,12 @@ inline const char* wideVaneToLogStr(uint8_t wv) {
 }
 
 inline const char* wideVaneToWebStr(uint8_t wv) {
-    switch (wv) {
-        case CN105_WVANE_LEFT_LEFT:   return "ll";
-        case CN105_WVANE_LEFT:        return "l";
-        case CN105_WVANE_CENTER:      return "c";
-        case CN105_WVANE_RIGHT:       return "r";
-        case CN105_WVANE_RIGHT_RIGHT: return "rr";
-        case CN105_WVANE_SPLIT:       return "split";
-        case CN105_WVANE_SWING:       return "swing";
-        default:                      return "unknown";
-    }
+    return wide_vane_value_valid(wv) ? wide_vane_to_web_str(wv) : "unknown";
 }
 
 inline uint8_t strToWideVane(const char *s) {
-    if (strcmp(s, "ll")    == 0) return CN105_WVANE_LEFT_LEFT;
-    if (strcmp(s, "l")     == 0) return CN105_WVANE_LEFT;
-    if (strcmp(s, "c")     == 0) return CN105_WVANE_CENTER;
-    if (strcmp(s, "r")     == 0) return CN105_WVANE_RIGHT;
-    if (strcmp(s, "rr")    == 0) return CN105_WVANE_RIGHT_RIGHT;
-    if (strcmp(s, "split") == 0) return CN105_WVANE_SPLIT;
-    if (strcmp(s, "swing") == 0) return CN105_WVANE_SWING;
-    return CN105_WVANE_CENTER;
+    uint8_t v;
+    return wide_vane_from_web_str(s, &v) ? v : CN105_WVANE_CENTER;
 }
 
 // ── Sub Mode (from 0x09 data[3]) ────────────────────────────────────────────

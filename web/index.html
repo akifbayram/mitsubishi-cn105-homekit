@@ -984,6 +984,66 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
         <a id="hkSetupLink" href="com.apple.home://" class="btn-primary" style="text-decoration:none">Open Home App</a>
       </div>
     </div>
+    <!-- Vane Switch (CONTEXT.md › Airflow). Hidden while Vane Type is None.
+         The toggle is boot-fixed (restart banner); presets apply on tap. -->
+    <div id="vaneSwitchBlock" style="display:none;margin-top:14px;padding-top:14px;border-top:1px solid var(--sep)">
+      <div class="inset-row" style="padding:0 0 10px;border-bottom:none">
+        <div><div class="lbl">Vane Switch</div></div>
+        <label class="ios-toggle">
+          <input type="checkbox" id="vaneSwitchToggle" onchange="toggleVaneSwitch()" aria-label="Vane Switch">
+          <span class="ios-toggle-slider"></span>
+        </label>
+      </div>
+      <div id="vaneSwitchBanner" class="ble-banner info" style="display:none;margin:0 0 12px;flex-direction:column;align-items:stretch;gap:10px;text-align:center">
+        Vane Switch saved. Restart to apply it to HomeKit.
+        <button class="btn-danger" onclick="restartDevice()">Reboot Now</button>
+      </div>
+      <div id="vanePresetRows">
+      <div class="card-label">On</div>
+      <div class="seg" id="vaneOnVGrp" style="margin-top:8px">
+        <div class="seg-bg"></div>
+        <button data-v="auto" onclick="pickVanePreset(this)">Auto</button>
+        <button data-v="1" onclick="pickVanePreset(this)" title="Position 1 (horizontal)"><span class="vane-arrow" style="--vr:0deg">&larr;</span></button>
+        <button data-v="2" onclick="pickVanePreset(this)" title="Position 2"><span class="vane-arrow" style="--vr:-22deg">&larr;</span></button>
+        <button data-v="3" onclick="pickVanePreset(this)" title="Position 3"><span class="vane-arrow" style="--vr:-45deg">&larr;</span></button>
+        <button data-v="4" onclick="pickVanePreset(this)" title="Position 4"><span class="vane-arrow" style="--vr:-67deg">&larr;</span></button>
+        <button data-v="5" onclick="pickVanePreset(this)" title="Position 5 (down)"><span class="vane-arrow" style="--vr:-90deg">&larr;</span></button>
+        <button data-v="swing" onclick="pickVanePreset(this)">Swing</button>
+      </div>
+      <div class="seg" id="vaneOnWGrp" style="margin-top:8px">
+        <div class="seg-bg"></div>
+        <button data-v="ll" onclick="pickVanePreset(this)">&laquo;</button>
+        <button data-v="l" onclick="pickVanePreset(this)">&lsaquo;</button>
+        <button data-v="c" onclick="pickVanePreset(this)">|</button>
+        <button data-v="r" onclick="pickVanePreset(this)">&rsaquo;</button>
+        <button data-v="rr" onclick="pickVanePreset(this)">&raquo;</button>
+        <button data-v="split" onclick="pickVanePreset(this)">&lsaquo;&rsaquo;</button>
+        <button data-v="swing" onclick="pickVanePreset(this)">Swing</button>
+      </div>
+      <div class="card-label" style="margin-top:14px">Off</div>
+      <div class="seg" id="vaneOffVGrp" style="margin-top:8px">
+        <div class="seg-bg"></div>
+        <button data-v="auto" onclick="pickVanePreset(this)">Auto</button>
+        <button data-v="1" onclick="pickVanePreset(this)" title="Position 1 (horizontal)"><span class="vane-arrow" style="--vr:0deg">&larr;</span></button>
+        <button data-v="2" onclick="pickVanePreset(this)" title="Position 2"><span class="vane-arrow" style="--vr:-22deg">&larr;</span></button>
+        <button data-v="3" onclick="pickVanePreset(this)" title="Position 3"><span class="vane-arrow" style="--vr:-45deg">&larr;</span></button>
+        <button data-v="4" onclick="pickVanePreset(this)" title="Position 4"><span class="vane-arrow" style="--vr:-67deg">&larr;</span></button>
+        <button data-v="5" onclick="pickVanePreset(this)" title="Position 5 (down)"><span class="vane-arrow" style="--vr:-90deg">&larr;</span></button>
+        <button data-v="swing" onclick="pickVanePreset(this)">Swing</button>
+      </div>
+      <div class="seg" id="vaneOffWGrp" style="margin-top:8px">
+        <div class="seg-bg"></div>
+        <button data-v="ll" onclick="pickVanePreset(this)">&laquo;</button>
+        <button data-v="l" onclick="pickVanePreset(this)">&lsaquo;</button>
+        <button data-v="c" onclick="pickVanePreset(this)">|</button>
+        <button data-v="r" onclick="pickVanePreset(this)">&rsaquo;</button>
+        <button data-v="rr" onclick="pickVanePreset(this)">&raquo;</button>
+        <button data-v="split" onclick="pickVanePreset(this)">&lsaquo;&rsaquo;</button>
+        <button data-v="swing" onclick="pickVanePreset(this)">Swing</button>
+      </div>
+      <div class="hk-hint" id="vanePresetEqual" style="display:none;margin-top:10px">The On and Off presets must differ.</div>
+      </div>
+    </div>
     <button class="btn-danger" id="hkResetBtn" style="margin-top:10px;display:none" onclick="resetHomeKit()">Reset HomeKit Pairing</button>
   </div>
 
@@ -1393,7 +1453,8 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       bg.style.width=active.offsetWidth+'px';
     });
   }
-  var segGroups=['modeGrp','fanGrp','vaneGrp','wideVaneGrp','unitGrp','vaneTypeGrp','logLevelGrp','roomModeSeg','baudGrp'];
+  var segGroups=['modeGrp','fanGrp','vaneGrp','wideVaneGrp','unitGrp','vaneTypeGrp','logLevelGrp','roomModeSeg','baudGrp',
+    'vaneOnVGrp','vaneOnWGrp','vaneOffVGrp','vaneOffWGrp'];
   window.addEventListener('resize',function(){segGroups.forEach(updateSegBg)});
   // Segmented-control thumbs need layout to measure offsets; re-position
   // those under root once a collapsed section or <details> reveals them
@@ -2618,6 +2679,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       $('vaneSection').style.display=s.vaneConfig>=1?'':'none';
       $('wideVaneSection').style.display=s.vaneConfig>=2?'':'none';
     }
+    renderVaneSwitch(s);
     if(s.modeMask!=null){
       applyModeVisibility(s.modeMask, s.power?s.mode:null);
       if(s.modeMaskBoot!=null){
@@ -4305,6 +4367,49 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
 
   // Betas are listed either way; the toggle only decides whether a newer one
   // counts as the update. Re-rendered from the list in hand: no fetch.
+  // ── Vane Switch (Settings › HomeKit) ────────────────────────────────────
+  // Each preset axis saves on tap (a plain partial config, like the log
+  // level); the firmware pushes state back, which re-renders the thumbs.
+  var VANE_PRESET_GRPS={vaneOnV:'vaneOnVGrp',vaneOnW:'vaneOnWGrp',vaneOffV:'vaneOffVGrp',vaneOffW:'vaneOffWGrp'};
+  // Equal on the axes that apply: the Wide Vane axis drops out on a Vane-only unit.
+  function vanePresetsEqual(s){
+    return s.vaneOnV===s.vaneOffV&&(s.vaneConfig===1||s.vaneOnW===s.vaneOffW);
+  }
+  function renderVaneSwitch(s){
+    if(s.vaneConfig==null||s.vaneSwitch==null) return;
+    var has=s.vaneConfig>=1,wide=s.vaneConfig>=2;
+    $('vaneSwitchBlock').style.display=has?'':'none';
+    if(!has) return;
+    var equal=vanePresetsEqual(s),t=$('vaneSwitchToggle');
+    t.checked=!!s.vaneSwitch;
+    t.disabled=equal&&!s.vaneSwitch;
+    // Presets only matter while the switch is on. They stay visible when the
+    // pair is equal, or a blocked toggle could never be unblocked. Shown
+    // before the thumbs are positioned: a hidden seg measures as zero.
+    $('vanePresetRows').style.display=(s.vaneSwitch||equal)?'':'none';
+    $('vaneOnWGrp').style.display=wide?'':'none';
+    $('vaneOffWGrp').style.display=wide?'':'none';
+    Object.keys(VANE_PRESET_GRPS).forEach(function(k){if(s[k]!=null)setActive(VANE_PRESET_GRPS[k],s[k]);});
+    $('vanePresetEqual').style.display=equal?'':'none';
+    // Pending = the service the next boot would build differs from this boot's.
+    var wanted=!!s.vaneSwitch&&has;
+    $('vaneSwitchBanner').style.display=(s.vaneSwitchBoot!=null&&wanted!==s.vaneSwitchBoot)?'flex':'none';
+  }
+  window.pickVanePreset=function(b){
+    var grp=b.parentNode.id,cfg={cmd:'config'},key=null;
+    Object.keys(VANE_PRESET_GRPS).forEach(function(k){if(VANE_PRESET_GRPS[k]===grp)key=k;});
+    cfg[key]=b.getAttribute('data-v');
+    // Same rule as the firmware: while the switch is on, the pair must stay distinct.
+    var s=lastState;
+    if(s&&s.vaneSwitch){var next=Object.assign({},s);next[key]=cfg[key];
+      if(vanePresetsEqual(next)){showToast('The On and Off presets must differ',true);return;}}
+    if(send(cfg)) setActive(grp,cfg[key]);
+  };
+  window.toggleVaneSwitch=function(){
+    var on=$('vaneSwitchToggle').checked;
+    if(!send({cmd:'config',vaneSwitch:on})) $('vaneSwitchToggle').checked=!on;
+  };
+
   window.toggleBetaChannel=function(){
     var on=$('fwBetaToggle').checked;
     if(!send({cmd:'config',betaChannel:on})){
@@ -4463,7 +4568,8 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     // Optional v1 additions: old importers ignore them, while current clients
     // restore the blend model instead of interpreting roomSource as a pick.
     ['roomMode','roomSingle','roomMembers','betaChannel','nightLat','nightLon',
-      'nightDuskOff','nightDawnOff','nightCeil'].forEach(function(k){
+      'nightDuskOff','nightDawnOff','nightCeil',
+      'vaneSwitch','vaneOnV','vaneOnW','vaneOffV','vaneOffW'].forEach(function(k){
       if(s[k]!==undefined) out.settings[k]=s[k];
     });
     if(Array.isArray(s.roomOffs)) out.settings.roomOffs=s.roomOffs.slice(0,6);
@@ -4541,6 +4647,10 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       if('cn105Baud' in st) cfg.cn105Baud=st.cn105Baud;
       if(typeof st.logLevel==='number') cfg.logLevel=st.logLevel;
       if(typeof st.vaneConfig==='number') cfg.vaneConfig=st.vaneConfig;
+      // Presets before the flag: the firmware judges enable on the file's own
+      // presets. Strings go through unfiltered; the firmware rejects and logs.
+      ['vaneOnV','vaneOnW','vaneOffV','vaneOffW'].forEach(function(k){if(typeof st[k]==='string') cfg[k]=st[k];});
+      if(typeof st.vaneSwitch==='boolean') cfg.vaneSwitch=st.vaneSwitch;
       if(typeof st.modeMask==='number') cfg.modeMask=st.modeMask;
       if(typeof st.betaChannel==='boolean') cfg.betaChannel=st.betaChannel;
       if(typeof st.roomTimeout==='number') cfg.bleTimeout=st.roomTimeout;

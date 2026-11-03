@@ -246,9 +246,10 @@ static bool webConfigTypes(const cJSON* root) {
                            "roomSource", "roomMode", "roomSingle", "roomMembers", "roomOffIdx", "roomOffVal",
                            "bleDelIdx", "bleRenIdx"})
         if (cJSON_HasObjectItem(root, key) && !webGetInt(root, key, &integer)) return false;
-    for (const char* key : {"deviceName", "trustedHost", "tempUnit", "bleAddr", "bleAddMac", "bleAddName", "bleRenName"})
+    for (const char* key : {"deviceName", "trustedHost", "tempUnit", "bleAddr", "bleAddMac", "bleAddName", "bleRenName",
+                           "vaneOnV", "vaneOnW", "vaneOffV", "vaneOffW"})
         if (cJSON_HasObjectItem(root, key) && !cJSON_IsString(cJSON_GetObjectItemCaseSensitive(root, key))) return false;
-    for (const char* key : {"betaChannel", "bleEnabled", "autoSingle"})
+    for (const char* key : {"betaChannel", "bleEnabled", "autoSingle", "vaneSwitch"})
         if (cJSON_HasObjectItem(root, key) && !cJSON_IsBool(cJSON_GetObjectItemCaseSensitive(root, key))) return false;
     return true;
 }
@@ -510,6 +511,63 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
             settings.get().modeMask = m;
             LOG_INFO("Config modeMask=0x%02X", m);
             changed = true;
+        }
+
+        // Vane Switch presets: one web-vocabulary string per axis. Keyed on
+        // presence so a bad string in a hand-edited file is logged, not
+        // skipped; a rejected axis leaves the stored preset as it was.
+        {
+            struct Axis { const char* key; uint8_t* field; bool wide; };
+            const Axis axes[] = {
+                {"vaneOnV",  &settings.get().vaneOn.vane,      false},
+                {"vaneOnW",  &settings.get().vaneOn.wideVane,  true},
+                {"vaneOffV", &settings.get().vaneOff.vane,     false},
+                {"vaneOffW", &settings.get().vaneOff.wideVane, true},
+            };
+            // Staged on a copy: while the switch is enabled, an edit that would
+            // make On equal Off is refused as a whole, the same rule as enable.
+            const VanePreset wasOn = settings.get().vaneOn, wasOff = settings.get().vaneOff;
+            bool edited = false;
+            char strVal[8];
+            for (const Axis& a : axes) {
+                if (!cJSON_HasObjectItem(parsed.get(), a.key)) continue;
+                uint8_t v;
+                const bool ok = webGetString(parsed.get(), a.key, strVal, sizeof(strVal)) &&
+                                (a.wide ? wide_vane_from_web_str(strVal, &v) : vane_from_web_str(strVal, &v));
+                if (!ok) {
+                    LOG_WARN("Config %s rejected (not a vane position), keeping %u", a.key, (unsigned)*a.field);
+                    continue;
+                }
+                if (*a.field != v) LOG_INFO("Config %s=%s", a.key, strVal);
+                *a.field = v;
+                edited = true;
+            }
+            if (edited) {
+                DeviceSettings& cfg = settings.get();
+                if (cfg.vaneSwitch && !vane_switch_enable_allowed(cfg.vaneOn, cfg.vaneOff, cfg.vaneConfig)) {
+                    LOG_WARN("Config vane preset rejected (On and Off would be equal while the switch is on)");
+                    cfg.vaneOn = wasOn; cfg.vaneOff = wasOff;
+                    sendWsText(httpd_req_to_sockfd(req),
+                               "{\"type\":\"error\",\"msg\":\"Vane Switch: the On and Off presets must differ\"}");
+                } else {
+                    changed = true;
+                }
+            }
+        }
+        // The flag, after the presets so a file that sets both in one message
+        // is judged on its own presets. Stored now, built at the next boot.
+        bool vaneSwitchVal;
+        if (webGetBool(parsed.get(), "vaneSwitch", &vaneSwitchVal)) {
+            const DeviceSettings& cfg = settings.get();
+            if (vaneSwitchVal && !vane_switch_enable_allowed(cfg.vaneOn, cfg.vaneOff, cfg.vaneConfig)) {
+                LOG_WARN("Config vaneSwitch=ON rejected (On and Off presets are equal)");
+                sendWsText(httpd_req_to_sockfd(req),
+                           "{\"type\":\"error\",\"msg\":\"Vane Switch: the On and Off presets must differ\"}");
+            } else {
+                settings.get().vaneSwitch = vaneSwitchVal;
+                LOG_INFO("Config vaneSwitch=%s", vaneSwitchVal ? "ON" : "OFF");
+                changed = true;
+            }
         }
 
         char unitVal[4];
@@ -1220,6 +1278,10 @@ void WebUI::pushState() {
         ",\"tempUnit\":\"%s\""
         ",\"betaChannel\":%s"
         ",\"vaneConfig\":%d"
+        ",\"vaneSwitch\":%s"
+        ",\"vaneSwitchBoot\":%s"
+        ",\"vaneOnV\":\"%s\",\"vaneOnW\":\"%s\""
+        ",\"vaneOffV\":\"%s\",\"vaneOffW\":\"%s\""
         ",\"modeMask\":%d"
         ",\"modeMaskBoot\":%d"
         ",\"trustedHost\":\"%s\""
@@ -1235,6 +1297,13 @@ void WebUI::pushState() {
         cfg.useFahrenheit ? "F" : "C",
         cfg.betaChannel ? "true" : "false",
         (int)cfg.vaneConfig,
+        cfg.vaneSwitch ? "true" : "false",
+        // Before HomeKit starts, mirror the saved flag (nothing pending);
+        // after, what was actually built this boot.
+        (hkReady ? homekit_get_boot_vane_switch()
+                 : vane_switch_service_wanted(cfg.vaneSwitch, cfg.vaneConfig)) ? "true" : "false",
+        vane_to_web_str(cfg.vaneOn.vane), wide_vane_to_web_str(cfg.vaneOn.wideVane),
+        vane_to_web_str(cfg.vaneOff.vane), wide_vane_to_web_str(cfg.vaneOff.wideVane),
         (int)cfg.modeMask,
         (int)(hkReady ? homekit_get_boot_mode_mask() : cfg.modeMask),
         escHost,

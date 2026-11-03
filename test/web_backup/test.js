@@ -116,6 +116,24 @@ test('same-device round trip preserves Average and restores names before depende
     nightLat: 42, nightLon: -71, nightDuskOff: 10, nightDawnOff: -10, nightCeil: 30 });
 });
 
+test('Vane Preset switch and both presets travel with the backup; a file from before it sends none', async () => {
+  const withVane = { ...original, vaneSwitch: true, vaneOnV: '3', vaneOnW: 'c', vaneOffV: 'auto', vaneOffW: 'swing' };
+  const backup = browser(withVane).export();
+  for (const key of ['vaneSwitch', 'vaneOnV', 'vaneOnW', 'vaneOffV', 'vaneOffW']) {
+    assert.deepEqual(backup.settings[key], withVane[key], key);
+  }
+  const ui = browser(withVane);
+  await ui.import(backup);
+  // The checked config goes first and carries the flag and all four axes.
+  const config = ui.sent[0];
+  assert.equal(config.vaneSwitch, true);
+  assert.deepEqual([config.vaneOnV, config.vaneOnW, config.vaneOffV, config.vaneOffW], ['3', 'c', 'auto', 'swing']);
+  // A pre-feature file names none of them, so the device keeps its own.
+  const old = browser(original);
+  await old.import(browser(original).export());
+  assert.ok(old.sent.every(message => !('vaneSwitch' in message) && !('vaneOnV' in message)));
+});
+
 test('restore remaps sparse saved sensor selections and offsets onto a full destination by MAC', async () => {
   const file = browser().export();
   const destination = { ...original, bleSensors: [

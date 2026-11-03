@@ -46,6 +46,11 @@ bool homekit_is_started(void);
 // Differs from settings.get().modeMask after a web-UI change until restart.
 uint8_t homekit_get_boot_mode_mask(void);
 
+// Whether the Vane Switch service was built at boot (vane_switch_service_wanted
+// over the boot-time flag and Vane Type). Differs from the saved flag after a
+// web-UI change until restart.
+bool homekit_get_boot_vane_switch(void);
+
 // Installed temperature metadata, in canonical half-degrees (target, heat, cool).
 struct HomekitTemperatureMetadata {
     int16_t min2[3], max2[3];
