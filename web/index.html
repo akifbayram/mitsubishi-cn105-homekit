@@ -164,23 +164,26 @@ input[type=range].slim::-moz-range-thumb{width:22px;height:22px;}
 .temp-lbl{font-size:11.5px;font-weight:500;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;display:block;}
 .temp-setting{min-width:0;}
 .temp-heading{display:flex;align-items:center;gap:4px;min-height:14px;}
-.auto-help-btn{display:flex;align-items:center;justify-content:center;flex:none;width:44px;height:44px;
+.help-btn{display:flex;align-items:center;justify-content:center;flex:none;width:44px;height:44px;
   margin:-15px -8px;padding:0;border:none;border-radius:50%;background:none;color:var(--text2);cursor:pointer;}
-.auto-help-btn svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;}
-.auto-help-btn[aria-expanded="true"]{color:var(--text);}
-.auto-help-btn:focus-visible{outline-offset:-5px;}
+.help-btn svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;}
+.help-btn[aria-expanded="true"]{color:var(--text);}
+.help-btn:focus-visible{outline-offset:-5px;}
 /* Outside .frame so the temperature card and phone frame cannot clip help. */
-.auto-help{position:fixed;z-index:60;width:350px;max-width:calc(100vw - 24px);max-height:calc(100vh - 24px);
+.help-pop{position:fixed;z-index:60;width:350px;max-width:calc(100vw - 24px);max-height:calc(100vh - 24px);
   overflow:auto;overscroll-behavior:contain;padding:18px;border-radius:18px;background:var(--surface2);color:var(--text);
   box-shadow:0 16px 48px rgba(0,0,0,.4),0 0 0 1px var(--border);}
-.auto-help-head{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:14px;}
-.auto-help-head h2{margin:0;font-size:17px;font-weight:600;line-height:1.3;letter-spacing:-.2px;}
-.auto-help-close{display:flex;align-items:center;justify-content:center;flex:none;width:44px;height:44px;
+.help-head{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-bottom:14px;}
+.help-head h2{margin:0;font-size:17px;font-weight:600;line-height:1.3;letter-spacing:-.2px;}
+.help-close{display:flex;align-items:center;justify-content:center;flex:none;width:44px;height:44px;
   margin:-10px -10px -10px 0;padding:0;border:none;border-radius:50%;background:none;color:var(--text2);cursor:pointer;}
-.auto-help-close svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;}
-.auto-help h3{font-size:13px;font-weight:600;line-height:1.4;margin:16px 0 5px;}
-.auto-help-head+h3{margin-top:0;}
-.auto-help p{font-size:13px;line-height:1.55;margin:0;color:var(--text);opacity:.8;}
+.help-close svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;}
+.help-pop>.help-close{position:absolute;top:4px;right:4px;margin:0;}
+.help-pop>.help-close+p{padding-right:28px;}
+.help-pop h3{font-size:13px;font-weight:600;line-height:1.4;margin:16px 0 5px;}
+.help-head+h3{margin-top:0;}
+.help-pop p{font-size:13px;line-height:1.55;margin:0;color:var(--text);opacity:.8;}
+.help-pop p strong{font-weight:600;}
 /* Degrees hang from the cap height, not the baseline: align the tops of the
    boxes and nudge by the ascender/cap-height gap of each size. */
 .temp-num{display:flex;align-items:flex-start;gap:2px;margin-top:3px;}
@@ -577,7 +580,7 @@ button.wifi-row:active{background:var(--surface3);}
   .log-btn:hover{filter:brightness(1.12);}
   .seg button:not(.active):hover{color:var(--text);}
   .temp-step:hover,.theme-toggle:hover,.refresh-btn:hover{background:var(--surface3);}
-  .auto-help-btn:hover,.auto-help-close:hover{color:var(--text);}
+  .help-btn:hover,.help-close:hover{color:var(--text);}
   .net-row:hover,.ble-scan-item:hover,button.wifi-row:hover{background:var(--surface3);}
 }
 .save-btn,.btn-primary,.btn-secondary,.btn-danger,.file-btn{transition:opacity .15s,filter .15s;}
@@ -702,7 +705,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
         <div class="temp-setting">
           <div class="temp-heading">
             <span class="temp-lbl" id="setLbl">Set</span>
-            <button type="button" class="auto-help-btn hidden" id="autoHelpBtn" aria-label="About Auto mode" aria-haspopup="dialog" aria-expanded="false" aria-controls="autoHelp">
+            <button type="button" class="help-btn hidden" id="autoHelpBtn" aria-label="About Auto mode" aria-haspopup="dialog" aria-expanded="false" aria-controls="autoHelp">
               <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7h.01"/></svg>
             </button>
           </div>
@@ -988,7 +991,11 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
          The toggle is boot-fixed (restart banner); presets apply on tap. -->
     <div id="vaneSwitchBlock" style="display:none;margin-top:14px;padding-top:14px;border-top:1px solid var(--sep)">
       <div class="inset-row" style="padding:0 0 10px;border-bottom:none">
-        <div><div class="lbl">Vane Switch</div></div>
+        <div style="display:flex;align-items:center;gap:2px"><div class="lbl">Vane Switch</div>
+          <button type="button" class="help-btn" id="vaneHelpBtn" aria-label="About the Vane Switch" aria-haspopup="dialog" aria-expanded="false" aria-controls="vaneHelp">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7h.01"/></svg>
+          </button>
+        </div>
         <label class="ios-toggle">
           <input type="checkbox" id="vaneSwitchToggle" onchange="toggleVaneSwitch()" aria-label="Vane Switch">
           <span class="ios-toggle-slider"></span>
@@ -1348,15 +1355,20 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
 </section>
 </main>
 
-<div class="auto-help hidden" id="autoHelp" role="dialog" aria-labelledby="autoHelpTitle">
-  <div class="auto-help-head">
+<div class="help-pop hidden" id="autoHelp" role="dialog" aria-labelledby="autoHelpTitle">
+  <div class="help-head">
     <h2 id="autoHelpTitle" tabindex="-1">About Auto</h2>
-    <button type="button" class="auto-help-close" id="autoHelpClose" aria-label="Close Auto help"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+    <button type="button" class="help-close" id="autoHelpClose" aria-label="Close Auto help"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
   </div>
   <h3>Changeover delay</h3>
   <p>Auto change-over is handled by the heat pump: it switches between heating and cooling once the room drifts about 4&deg;F (2&deg;C) past the set point, so a switch can lag.</p>
   <h3>Multi-zone systems</h3>
   <p>On a multi-zone system an idle head left in Auto can hold the outdoor unit's mode and block other zones &mdash; Mitsubishi advises against Auto there.</p>
+</div>
+
+<div class="help-pop hidden" id="vaneHelp" role="dialog" aria-label="About the Vane Switch" tabindex="-1">
+  <button type="button" class="help-close" aria-label="Close Vane Switch help"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  <p><strong>Aims airflow from HomeKit.</strong> On moves the vanes to the On preset, Off to the Off preset. Nothing else changes. <strong>Reads On</strong> only while the vanes match the On preset; a remote change turns it Off. <strong>Needs a restart</strong> after the switch is turned on or off. Preset edits apply at once.</p>
 </div>
 
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
@@ -1997,52 +2009,79 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   // ── auto-view:end
   // Nonmodal help: keep it outside the clipped card, with no extra row in
   // either Auto layout. State updates only close it when Auto goes away.
-  var autoHelp=$('autoHelp'),autoHelpBtn=$('autoHelpBtn'),autoHelpOpen=false;
-  function positionAutoHelp(){
-    if(!autoHelpOpen)return;
-    var edge=12,width=document.documentElement.clientWidth,height=window.innerHeight;
-    var anchor=autoHelpBtn.getBoundingClientRect();
-    autoHelp.style.width=Math.min(350,width-edge*2)+'px';
-    autoHelp.style.maxHeight=Math.max(0,height-edge*2)+'px';
-    var box=autoHelp.getBoundingClientRect();
-    var top=anchor.bottom+6;
-    if(top+box.height>height-edge)top=anchor.top-box.height-6;
-    autoHelp.style.left=Math.max(edge,Math.min(anchor.left-8,width-box.width-edge))+'px';
-    autoHelp.style.top=Math.max(edge,Math.min(top,height-box.height-edge))+'px';
-  }
-  function closeAutoHelp(restoreFocus){
-    if(!autoHelpOpen)return;
-    var focusedInside=autoHelp.contains(document.activeElement);
-    autoHelpOpen=false;
-    autoHelp.classList.add('hidden');
-    autoHelpBtn.setAttribute('aria-expanded','false');
-    if(restoreFocus||focusedInside){
-      var target=autoHelpBtn.classList.contains('hidden')?document.querySelector('#modeGrp button.active'):autoHelpBtn;
-      if(target)target.focus({preventScroll:true});
+  // ── Help popovers ─────────────────────────────────────────────────────────
+  // One info glyph (.help-btn) opens one .help-pop panel, anchored under the
+  // glyph and kept inside the viewport. Markup: the button carries
+  // aria-controls="<panel id>"; the panel holds a .help-close button and,
+  // optionally, an <h2 id="<panel id>Title"> (focus goes there on open, else
+  // to the panel, which then needs tabindex="-1" and an aria-label). Wire a
+  // new pair with helpPopover('<btn id>'). `fallbackFocus` is where focus
+  // goes on close if the glyph itself is hidden.
+  var helpPopovers=[];
+  function helpPopover(btnId,opts){
+    var btn=$(btnId),pop=$(btn.getAttribute('aria-controls')),title=$(pop.id+'Title')||pop,open=false;
+    var fallbackFocus=(opts&&opts.fallbackFocus)||function(){return null;};
+    function position(){
+      if(!open)return;
+      var edge=12,width=document.documentElement.clientWidth,height=window.innerHeight;
+      var anchor=btn.getBoundingClientRect();
+      pop.style.width=Math.min(350,width-edge*2)+'px';
+      pop.style.maxHeight=Math.max(0,height-edge*2)+'px';
+      var box=pop.getBoundingClientRect();
+      var top=anchor.bottom+6;
+      if(top+box.height>height-edge)top=anchor.top-box.height-6;
+      pop.style.left=Math.max(edge,Math.min(anchor.left-8,width-box.width-edge))+'px';
+      pop.style.top=Math.max(edge,Math.min(top,height-box.height-edge))+'px';
     }
+    function close(restoreFocus){
+      if(!open)return;
+      var focusedInside=pop.contains(document.activeElement);
+      open=false;
+      pop.classList.add('hidden');
+      btn.setAttribute('aria-expanded','false');
+      if(restoreFocus||focusedInside){
+        var target=btn.classList.contains('hidden')?fallbackFocus():btn;
+        if(target)target.focus({preventScroll:true});
+      }
+    }
+    btn.addEventListener('click',function(){
+      if(open){close(true);return;}
+      // One panel at a time: a glyph tapped while another is open swaps them.
+      helpPopovers.forEach(function(h){h.close(false);});
+      open=true;
+      pop.classList.remove('hidden');
+      btn.setAttribute('aria-expanded','true');
+      position();
+      title.focus({preventScroll:true});
+    });
+    pop.querySelector('.help-close').addEventListener('click',function(){close(true);});
+    var api={
+      close:close,
+      position:position,
+      contains:function(el){return pop.contains(el)||btn.contains(el);},
+      isOpen:function(){return open;},
+      // Show or hide the glyph itself (a help that applies to one view only).
+      setVisible:function(v){btn.classList.toggle('hidden',!v);if(!v)close(false);else position();}
+    };
+    helpPopovers.push(api);
+    return api;
   }
-  function renderAutoHelp(view){
-    autoHelpBtn.classList.toggle('hidden',!view);
-    if(!view)closeAutoHelp(false);
-    else positionAutoHelp();
-  }
-  autoHelpBtn.addEventListener('click',function(){
-    if(autoHelpOpen){closeAutoHelp(true);return;}
-    autoHelpOpen=true;
-    autoHelp.classList.remove('hidden');
-    autoHelpBtn.setAttribute('aria-expanded','true');
-    positionAutoHelp();
-    $('autoHelpTitle').focus({preventScroll:true});
-  });
-  $('autoHelpClose').addEventListener('click',function(){closeAutoHelp(true);});
   document.addEventListener('click',function(e){
-    if(autoHelpOpen&&!autoHelp.contains(e.target)&&!autoHelpBtn.contains(e.target))closeAutoHelp(false);
+    helpPopovers.forEach(function(h){if(h.isOpen()&&!h.contains(e.target))h.close(false);});
   });
   document.addEventListener('keydown',function(e){
-    if(autoHelpOpen&&e.key==='Escape'){e.preventDefault();closeAutoHelp(true);}
+    if(e.key!=='Escape')return;
+    helpPopovers.forEach(function(h){if(h.isOpen()){e.preventDefault();h.close(true);}});
   });
-  window.addEventListener('resize',positionAutoHelp);
-  window.addEventListener('scroll',positionAutoHelp);
+  function positionHelpPopovers(){helpPopovers.forEach(function(h){h.position();});}
+  window.addEventListener('resize',positionHelpPopovers);
+  window.addEventListener('scroll',positionHelpPopovers);
+
+  // Auto: the glyph exists only while an Auto view is showing.
+  var autoHelp=helpPopover('autoHelpBtn',{fallbackFocus:function(){return document.querySelector('#modeGrp button.active');}});
+  function renderAutoHelp(view){autoHelp.setVisible(!!view);}
+  // Vane Switch (Settings › HomeKit).
+  helpPopover('vaneHelpBtn');
   function setSingleHeadline(s,view){
     $('setLbl').textContent=singleHeadline(s,view);
     targetTemp.style.color='';
