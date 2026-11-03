@@ -9,6 +9,7 @@
 #include "ble_config.h"
 #include "mode_caps.h"
 #include "cn105_baud.h"
+#include "vane_preset.h"
 #include "setpoint_range.h"
 
 // Bump when a stored key's meaning or encoding changes, and add a
@@ -89,7 +90,14 @@ struct DeviceSettings {
     // HomeKit's database is fixed once it starts.
     bool     autoSingleSetpoint = false;
     bool     wifiChangePending = false; // True after WiFi creds changed via web UI (shorter fallback timeout)
-    uint8_t  vaneConfig = 2;          // 0=no vanes, 1=vertical only, 2=vertical+horizontal
+    uint8_t  vaneConfig = 2;          // Vane Type: VANE_TYPE_* (vane_preset.h)
+    // Vane Switch (vane_preset.h): an opt-in HomeKit switch that applies vaneOn
+    // when turned on and vaneOff when turned off. The service set is fixed at
+    // boot, so the flag takes effect at the next restart; the presets apply
+    // immediately. Never cleared by a Vane Type change.
+    bool     vaneSwitch = false;
+    VanePreset vaneOn  = VANE_PRESET_ON_DEFAULT;
+    VanePreset vaneOff = VANE_PRESET_OFF_DEFAULT;
     uint8_t  modeMask = MODE_CAP_ALL; // MODE_CAP_* bits — operating modes this unit supports (mode_caps.h)
     // Which source drives the heat pump's room temperature. Outside the BLE
     // ifdef on purpose: a build without BLE still chooses Internal vs Link.

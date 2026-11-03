@@ -47,7 +47,17 @@ The controller tells the two apart with its own command state: a reported change
 
 ## Vane Control
 
-Vane positions (including swing mode) are controlled exclusively through the [web UI](../README.md#web-ui).
+Vane and wide vane positions (including swing) are set through the [web UI](../README.md#web-ui). HomeKit has no vane characteristic, so the only way to change airflow direction from the Home app, a scene or Siri is the optional **Vane Switch** below.
+
+### Vane Switch
+
+An opt-in Switch service that applies a saved vane preset. In **Settings › HomeKit** you save two presets, each a vane position plus a wide vane position: **On** and **Off**. Turning the switch on in the Home app sends the On preset; turning it off sends the Off preset. The switch changes vanes only — never power, mode, fan speed or setpoint — so a scene that heats a second room sets the thermostat and the switch together.
+
+- **Enabling or disabling the switch needs a restart.** HomeKit services are fixed when the firmware starts; the web UI shows a reboot prompt until then. Editing a preset applies immediately.
+- **The switch mirrors the unit.** It reads On only while the current vane and wide vane match the On preset. A change made with the remote, the wall controller or the web UI flips it to Off.
+- **The two presets must differ.** The switch cannot be enabled while On and Off are the same position, and while it is on an edit that would make them equal is refused.
+- **Vane Type gates it.** On a unit declared as Vane only, presets hold a vane position alone and the wide vane choice is hidden. With Vane Type set to None, the controls are hidden and the switch is not created. Saved presets survive a Vane Type change.
+- The default name in the Home app is "Vane Preset"; rename it like any other accessory.
 
 ## Temperature
 

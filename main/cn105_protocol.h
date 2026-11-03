@@ -13,6 +13,7 @@
 #include "logging.h"
 #include "uart_interface.h"
 #include "cn105_baud.h"
+#include "vane_preset.h"
 #include "setpoint_range.h"
 #ifndef UNIT_TEST
 #include "hardware_uart.h"
@@ -83,6 +84,15 @@ constexpr uint8_t CN105_WVANE_RIGHT       = 0x04;
 constexpr uint8_t CN105_WVANE_RIGHT_RIGHT = 0x05;
 constexpr uint8_t CN105_WVANE_SPLIT       = 0x08;
 constexpr uint8_t CN105_WVANE_SWING       = 0x0C;
+
+// vane_preset.h restates these so it can stay ESP-IDF-free; keep them equal.
+static_assert(vane_value_valid(CN105_VANE_AUTO) && vane_value_valid(CN105_VANE_5) &&
+              vane_value_valid(CN105_VANE_SWING) && !vane_value_valid(CN105_VANE_SWING - 1),
+              "vane_preset.h Vane values drifted from CN105_VANE_*");
+static_assert(wide_vane_value_valid(CN105_WVANE_LEFT_LEFT) && wide_vane_value_valid(CN105_WVANE_RIGHT_RIGHT) &&
+              wide_vane_value_valid(CN105_WVANE_SPLIT) && wide_vane_value_valid(CN105_WVANE_SWING) &&
+              !wide_vane_value_valid(CN105_WVANE_LEFT_LEFT - 1),
+              "vane_preset.h Wide Vane values drifted from CN105_WVANE_*");
 
 // ── Sub Mode Values (from 0x09 data[3]) ─────────────────────────────────
 constexpr uint8_t CN105_SUB_NORMAL      = 0x00;

@@ -128,18 +128,22 @@ static void homekit_set_setup_id(const char* setupId)
 // hap_update_config_number() when it changes.
 //
 // Shape byte: bits 0-4 = the boot-time mode capability mask (MODE_CAP_*),
+// bit 5 = Vane Switch service present,
 // bit 6 = Single Auto setpoint (no threshold characteristics),
 // bit 7 = Remote Sensor accessory present.
+static constexpr uint8_t SHAPE_VANE_SWITCH    = 0x20;
 static constexpr uint8_t SHAPE_AUTO_SINGLE    = 0x40;
 static constexpr uint8_t SHAPE_SENSOR_PRESENT = 0x80;
 
 static std::atomic<bool> s_started{false};   // hap_start() has succeeded
 
 static uint8_t s_bootModeMask = MODE_CAP_ALL;
+static bool    s_bootVaneSwitch = false;
 
 static uint8_t current_service_shape(void)
 {
     uint8_t shape = s_bootModeMask;
+    if (s_bootVaneSwitch) shape |= SHAPE_VANE_SWITCH;
     if (settings.autoSingleBoot()) shape |= SHAPE_AUTO_SINGLE;
 #ifdef BLE_ENABLE
     if (homekit_sensor_is_present()) shape |= SHAPE_SENSOR_PRESENT;
@@ -226,6 +230,11 @@ uint8_t homekit_get_boot_mode_mask(void)
     return s_bootModeMask;
 }
 
+bool homekit_get_boot_vane_switch(void)
+{
+    return s_bootVaneSwitch;
+}
+
 bool homekit_is_started(void)
 {
     return s_started;
@@ -246,6 +255,8 @@ bool homekit_init(const char* name, const char* manufacturer,
     static bool s_handlerRegistered = false;
 
     s_bootModeMask = settings.get().modeMask;
+    s_bootVaneSwitch = vane_switch_service_wanted(settings.get().vaneSwitch,
+                                                  settings.get().vaneConfig);
 
     if (!s_coreInited) {
         hap_cfg_t hap_cfg;

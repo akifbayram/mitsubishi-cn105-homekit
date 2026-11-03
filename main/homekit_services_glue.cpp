@@ -1,6 +1,7 @@
 #include "homekit_services.h"
 #include "logging.h"
 #include "settings.h"
+#include "homekit_setup.h"
 
 static const char *TAG = "hk_svc";
 
@@ -34,6 +35,12 @@ void homekit_services_create_all(hap_acc_t *acc)
         homekit_create_dry_mode_switch(acc);
     } else {
         LOG_INFO("[HK] DRY mode disabled by capability mask — switch not created");
+    }
+    // Last, so enabling it never moves the service IDs Home scenes are bound to.
+    if (homekit_get_boot_vane_switch()) {
+        homekit_create_vane_switch(acc);
+    } else {
+        LOG_INFO("[HK] Vane Switch off (or no vanes) — switch not created");
     }
 
     LOG_INFO("[HK] All HomeKit services created");

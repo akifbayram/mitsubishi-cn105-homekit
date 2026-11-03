@@ -578,6 +578,24 @@ void SettingsStore::begin() {
         _settings.vaneConfig = val;
     }
 
+    // Vane Switch. One u8 per preset axis rather than a blob so a later
+    // firmware can add presets without re-encoding these. A preset with a
+    // bad axis goes back to its default whole: half a preset reaching the
+    // unit would be a position nobody chose.
+    {
+        uint8_t val = 0;
+        nvs_get_u8(_handle, "vaneSw", &val);
+        _settings.vaneSwitch = (val != 0);
+        uint8_t onV = VANE_PRESET_ON_DEFAULT.vane, onH = VANE_PRESET_ON_DEFAULT.wideVane;
+        uint8_t offV = VANE_PRESET_OFF_DEFAULT.vane, offH = VANE_PRESET_OFF_DEFAULT.wideVane;
+        nvs_get_u8(_handle, "vaneOnV", &onV);
+        nvs_get_u8(_handle, "vaneOnW", &onH);
+        nvs_get_u8(_handle, "vaneOffV", &offV);
+        nvs_get_u8(_handle, "vaneOffW", &offH);
+        _settings.vaneOn  = vane_preset_load(onV, onH, VANE_PRESET_ON_DEFAULT);
+        _settings.vaneOff = vane_preset_load(offV, offH, VANE_PRESET_OFF_DEFAULT);
+    }
+
     // modeMask — uint8_t (sanitized here so consumers can trust it everywhere)
     {
         uint8_t val = MODE_CAP_ALL;
@@ -891,6 +909,11 @@ void SettingsStore::save() {
     nvs_set_u8(_handle, "autoSingle", _settings.autoSingleSetpoint ? 1 : 0);
     nvs_set_u8(_handle, "wifiChgPend", _settings.wifiChangePending ? 1 : 0);
     nvs_set_u8(_handle, "vaneConfig", _settings.vaneConfig);
+    nvs_set_u8(_handle, "vaneSw", _settings.vaneSwitch ? 1 : 0);
+    nvs_set_u8(_handle, "vaneOnV", _settings.vaneOn.vane);
+    nvs_set_u8(_handle, "vaneOnW", _settings.vaneOn.wideVane);
+    nvs_set_u8(_handle, "vaneOffV", _settings.vaneOff.vane);
+    nvs_set_u8(_handle, "vaneOffW", _settings.vaneOff.wideVane);
     nvs_set_u8(_handle, "modeMask", _settings.modeMask);
     // Legacy roomSrc stays written (derived) so the dial and a downgrade to
     // the pre-averaging firmware keep their source.
