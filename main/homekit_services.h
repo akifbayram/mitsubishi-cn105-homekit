@@ -31,12 +31,14 @@ void homekit_sync_switches(CN105Controller &cn105);
 
 // ── Per-service creation (internal, called from create_all) ─────────────────
 
+// The optional services return the added service, or nullptr on failure, so
+// create_all can pin its IIDs to a fixed slot (hk_service_slots.h).
 void homekit_create_thermostat(hap_acc_t *acc);
-void homekit_create_fan(hap_acc_t *acc);
-void homekit_create_fan_auto_switch(hap_acc_t *acc);
-void homekit_create_fan_mode_switch(hap_acc_t *acc);
-void homekit_create_dry_mode_switch(hap_acc_t *acc);
-void homekit_create_vane_switch(hap_acc_t *acc);
+hap_serv_t *homekit_create_fan(hap_acc_t *acc);
+hap_serv_t *homekit_create_fan_auto_switch(hap_acc_t *acc);
+hap_serv_t *homekit_create_fan_mode_switch(hap_acc_t *acc);
+hap_serv_t *homekit_create_dry_mode_switch(hap_acc_t *acc);
+hap_serv_t *homekit_create_vane_switch(hap_acc_t *acc);
 
 // ── CN105 controller reference (set during init, used by callbacks) ─────────
 /// Must be set before any write callbacks fire.

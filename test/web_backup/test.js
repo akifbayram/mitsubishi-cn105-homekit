@@ -134,6 +134,24 @@ test('Vane Preset switch and both presets travel with the backup; a file from be
   assert.ok(old.sent.every(message => !('vaneSwitch' in message) && !('vaneOnV' in message)));
 });
 
+test('HomeKit service visibility travels with the backup; a file from before it sends none', async () => {
+  const withHidden = { ...original, hkHidden: 6 };
+  const backup = browser(withHidden).export();
+  assert.equal(backup.settings.hkHidden, 6);
+  const ui = browser(withHidden);
+  await ui.import(backup);
+  // The checked config goes first and carries the value.
+  assert.equal(ui.sent[0].hkHidden, 6);
+  // All shown is a value too, not an absence.
+  const shown = browser({ ...original, hkHidden: 0 });
+  await shown.import(browser({ ...original, hkHidden: 0 }).export());
+  assert.equal(shown.sent[0].hkHidden, 0);
+  // A pre-feature file names no services, so the device keeps its own.
+  const old = browser(original);
+  await old.import(browser(original).export());
+  assert.ok(old.sent.every(message => !('hkHidden' in message)));
+});
+
 test('restore remaps sparse saved sensor selections and offsets onto a full destination by MAC', async () => {
   const file = browser().export();
   const destination = { ...original, bleSensors: [

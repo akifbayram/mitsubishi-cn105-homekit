@@ -30,6 +30,15 @@ HomeKit's Fan service uses a 0–100% rotation speed slider, mapped to discrete 
 
 Setting the slider to 0% or deactivating the fan service powers the unit off. Auto fan speed is controlled exclusively via the **Fan Auto** switch.
 
+## Service Visibility
+
+Four services on the Heat Pump accessory can be removed from HomeKit: the Fan (labelled **Fan Speed** in the web UI), **Fan Auto**, **Fan Mode** and **Dry Mode**. In **Settings › HomeKit › Services**, turn a toggle off to remove that service; turn it on to bring it back. The thermostat cannot be removed.
+
+- **A change needs a restart.** HomeKit services are fixed when the firmware starts; the web UI shows a restart prompt until then.
+- **Modes still apply.** Fan Mode and Dry Mode exist only while their mode is enabled under **Settings › Modes**. Their toggles are hidden while the mode is off, and the saved choice is kept.
+- **The remaining services keep their IDs.** Each service owns fixed HomeKit instance IDs, so removing one never moves another onto its IDs.
+- Factory Reset shows every service again.
+
 ## Dual Setpoint (Auto Mode)
 
 The HomeKit Thermostat service supports independent heating and cooling thresholds, but the CN105 protocol only accepts a **single target temperature**. The controller maps the two thresholds onto that single setpoint with a room-vs-band deadband: room below the heating threshold → send the heating threshold; room above the cooling threshold → send the cooling threshold; room inside the band → send the current room temperature so the unit idles. The heat pump's reported `autoSubMode` is used only for status display, not to choose the setpoint (it lags and can latch to a stale side). A 2°C minimum gap is enforced between thresholds.
@@ -53,7 +62,7 @@ Vane and wide vane positions (including swing) are set through the [web UI](../R
 
 An opt-in Switch service that applies a saved vane preset. In **Settings › HomeKit** you save two presets, each a vane position plus a wide vane position: **On** and **Off**. Turning the switch on in the Home app sends the On preset; turning it off sends the Off preset. The switch changes vanes only — never power, mode, fan speed or setpoint — so a scene that heats a second room sets the thermostat and the switch together.
 
-- **Enabling or disabling the switch needs a restart.** HomeKit services are fixed when the firmware starts; the web UI shows a reboot prompt until then. Editing a preset applies immediately.
+- **Enabling or disabling the switch needs a restart.** HomeKit services are fixed when the firmware starts; the web UI shows a restart prompt until then. Editing a preset applies immediately.
 - **The switch mirrors the unit.** It reads On only while the current vane and wide vane match the On preset. A change made with the remote, the wall controller or the web UI flips it to Off.
 - **The two presets must differ.** The switch cannot be enabled while On and Off are the same position, and while it is on an edit that would make them equal is refused.
 - **Vane Type gates it.** On a unit declared as Vane only, presets hold a vane position alone and the wide vane choice is hidden. With Vane Type set to None, the controls are hidden and the switch is not created. Saved presets survive a Vane Type change.

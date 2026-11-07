@@ -10,6 +10,7 @@
 #include "mode_caps.h"
 #include "cn105_baud.h"
 #include "vane_preset.h"
+#include "hk_service_slots.h"
 #include "setpoint_range.h"
 
 // Bump when a stored key's meaning or encoding changes, and add a
@@ -98,6 +99,12 @@ struct DeviceSettings {
     bool     vaneSwitch = false;
     VanePreset vaneOn  = VANE_PRESET_ON_DEFAULT;
     VanePreset vaneOff = VANE_PRESET_OFF_DEFAULT;
+    // HomeKit services the owner removed (hk_service_slots.h): HK_SVC_* bits,
+    // bit set = not built. NVS "hkHidden", a stable contract: bit 0 Fan,
+    // bit 1 Fan Auto, bit 2 Fan Mode, bit 3 Dry Mode, never renumbered.
+    // 0 (also a missing key and Factory Reset) shows every service. Takes
+    // effect at the next restart; modeMask still gates Fan Mode and Dry Mode.
+    uint8_t  hkHidden = 0;
     uint8_t  modeMask = MODE_CAP_ALL; // MODE_CAP_* bits — operating modes this unit supports (mode_caps.h)
     // Which source drives the heat pump's room temperature. Outside the BLE
     // ifdef on purpose: a build without BLE still chooses Internal vs Link.

@@ -596,6 +596,14 @@ void SettingsStore::begin() {
         _settings.vaneOff = vane_preset_load(offV, offH, VANE_PRESET_OFF_DEFAULT);
     }
 
+    // HomeKit service visibility. Unknown bits are dropped, so a service a
+    // later firmware learns to hide stays shown here.
+    {
+        uint8_t val = 0;
+        nvs_get_u8(_handle, "hkHidden", &val);
+        _settings.hkHidden = val & HK_SVC_ALL;
+    }
+
     // modeMask — uint8_t (sanitized here so consumers can trust it everywhere)
     {
         uint8_t val = MODE_CAP_ALL;
@@ -914,6 +922,7 @@ void SettingsStore::save() {
     nvs_set_u8(_handle, "vaneOnW", _settings.vaneOn.wideVane);
     nvs_set_u8(_handle, "vaneOffV", _settings.vaneOff.vane);
     nvs_set_u8(_handle, "vaneOffW", _settings.vaneOff.wideVane);
+    nvs_set_u8(_handle, "hkHidden", _settings.hkHidden);
     nvs_set_u8(_handle, "modeMask", _settings.modeMask);
     // Legacy roomSrc stays written (derived) so the dial and a downgrade to
     // the pre-averaging firmware keep their source.

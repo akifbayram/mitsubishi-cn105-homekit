@@ -18,6 +18,20 @@ int main(int, char** argv) {
   CHECK(c.isHealthy());CHECK(fanHealth.val.b&&autoHealth.val.b&&autoOn.val.b);
   CHECK(autoOn.updates==updates+1);
  }
+ CASE("fan_auto_syncs_when_fan_is_hidden") {
+  s_fanStatusActive=nullptr;   // Fan not built this boot
+  now_ms=5000;c.begin(&pump);ticks(c);homekit_sync_fan(c);
+  CHECK(autoHealth.val.b&&autoOn.val.b);CHECK(fanHealth.updates==0);
+  pump.responding=false;now_ms+=15000;ticks(c);homekit_sync_fan(c);
+  CHECK(!autoHealth.val.b);CHECK(fanHealth.updates==0);
+ }
+ CASE("fan_syncs_when_fan_auto_is_hidden") {
+  s_fanAutoStatusActive=nullptr;s_fanAutoOn=nullptr;   // Fan Auto not built this boot
+  now_ms=5000;c.begin(&pump);ticks(c);homekit_sync_fan(c);
+  CHECK(fanHealth.val.b);CHECK(autoHealth.updates==0&&autoOn.updates==0);
+  pump.responding=false;now_ms+=15000;ticks(c);homekit_sync_fan(c);
+  CHECK(!fanHealth.val.b);CHECK(autoHealth.updates==0);
+ }
  CASE("fan_sync_does_not_update_before_its_next_tick") {
   now_ms=5000;homekit_sync_fan(c);int updates=autoHealth.updates;
   now_ms+=1000;homekit_sync_fan(c);CHECK(autoHealth.updates==updates);

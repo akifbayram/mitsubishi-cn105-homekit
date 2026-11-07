@@ -25,3 +25,9 @@ _Avoid_: Saved vane position, airflow preset, scene
 **Vane Switch**:
 The optional HomeKit Switch service that applies one Vane Preset when turned On and another when turned Off. It reads On only while the unit's current Vane and Wide Vane match the On preset.
 _Avoid_: Vane scene, preset switch
+
+### HomeKit
+
+**Hidden Service**:
+One of Fan, Fan Auto, Fan Mode or Dry Mode that the owner removed from the Heat Pump accessory under Settings › HomeKit › Services. It is not built at the next boot, and every service that stays keeps its HomeKit instance IDs.
+_Avoid_: Disabled service, removed tile
