@@ -570,6 +570,19 @@ button.wifi-row:active{background:var(--surface3);}
 .toast.show{opacity:1;transform:translate(-50%,0);}
 .toast.err{background:var(--red);color:#fff;}
 
+/* ===== Restart bar ===== */
+.restart-bar{position:fixed;left:50%;bottom:calc(16px + env(safe-area-inset-bottom));z-index:45;
+  width:calc(min(430px,100vw) - 32px);display:flex;align-items:center;gap:12px;padding:10px 10px 10px 16px;
+  border-radius:16px;background:var(--surface);color:var(--text);font-size:13px;line-height:1.35;
+  box-shadow:0 12px 32px rgba(0,0,0,.28),0 0 0 1px var(--border);
+  opacity:0;visibility:hidden;transform:translate(-50%,12px);transition:opacity .2s,transform .2s,visibility .2s;}
+.restart-bar.show{opacity:1;visibility:visible;transform:translate(-50%,0);}
+.restart-bar span{flex:1;min-width:0;}
+.restart-bar .btn-primary{width:auto;flex:none;padding:9px 14px;}
+/* Keep the page end and toasts clear of the bar while it shows. */
+body.restart-pending .container{padding-bottom:84px;}
+body.restart-pending .toast{bottom:96px;}
+
 /* ===== Animations ===== */
 @keyframes spin{to{transform:rotate(360deg);}}
 @keyframes pulse{0%,100%{opacity:1;}50%{opacity:.35;}}
@@ -948,7 +961,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     </div>
 
     <div id="wifiBanner" class="ble-banner muted" style="display:none;margin-top:12px;flex-direction:column;align-items:stretch;gap:10px;text-align:center">
-      Testing new Wi-Fi credentials — the device switches over automatically if they work, and reverts to the current network if they don't. No reboot needed; if the address changes, reconnect at the new IP.
+      Testing new Wi-Fi credentials — the device switches over automatically if they work, and reverts to the current network if they don't. No restart needed; if the address changes, reconnect at the new IP.
     </div>
     <span id="rssiVal" class="hidden"></span>
   </div>
@@ -988,7 +1001,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       </div>
     </div>
     <!-- Vane Switch (CONTEXT.md › Airflow). Hidden while Vane Type is None.
-         The toggle is boot-fixed (restart banner); presets apply on tap. -->
+         The toggle is boot-fixed (the restart bar); presets apply on tap. -->
     <div id="vaneSwitchBlock" style="display:none;margin-top:14px;padding-top:14px;border-top:1px solid var(--sep)">
       <div class="inset-row" style="padding:0 0 10px;border-bottom:none">
         <div style="display:flex;align-items:center;gap:2px"><div class="lbl">Vane Switch</div>
@@ -1000,10 +1013,6 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
           <input type="checkbox" id="vaneSwitchToggle" onchange="toggleVaneSwitch()" aria-label="Vane Switch">
           <span class="ios-toggle-slider"></span>
         </label>
-      </div>
-      <div id="vaneSwitchBanner" class="ble-banner info" style="display:none;margin:0 0 12px;flex-direction:column;align-items:stretch;gap:10px;text-align:center">
-        Vane Switch saved. Restart to apply it to HomeKit.
-        <button class="btn-danger" onclick="restartDevice()">Reboot Now</button>
       </div>
       <div id="vanePresetRows">
       <div class="card-label">On</div>
@@ -1212,10 +1221,6 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     <button type="button" class="inset-row mode-row" data-mode="fan" style="--c:var(--fan)" onclick="openModePage('fan')"><span class="mode-ico" id="modeIco-fan"><svg aria-hidden="true"><use href="#icFan"/></svg></span><span class="mode-main"><span class="lbl">Fan</span><span class="sub" id="modeSub-fan" hidden></span></span><span class="mode-val" id="modeVal-fan"></span><svg class="mode-chev" aria-hidden="true"><use href="#icChev"/></svg></button>
   </div>
   <p class="mode-foot">Home app &amp; Link range: <span id="modeEnv">--</span></p>
-  <div id="capBanner" class="ble-banner info" style="display:none;margin:12px 16px 0;flex-direction:column;align-items:stretch;gap:10px;text-align:center">
-    Mode changes saved. Restart to apply them to HomeKit.
-    <button class="btn-danger" onclick="restartDevice()">Reboot Now</button>
-  </div>
 
   <!-- ===== FIRMWARE ===== -->
   <h2 class="group-label">Firmware<span class="section-summary" id="fwBadge" style="display:none"><span class="status-dot warning"></span><span class="summary-text" style="color:var(--orange)">Update available</span></span></h2>
@@ -1247,7 +1252,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       </div>
       <button class="btn-secondary" id="fwUploadBtn" style="margin-top:9px" onclick="uploadFirmware()" disabled>Upload</button>
       <button class="btn-secondary" id="fwIdentifyBtn" style="margin-top:9px" onclick="identifyDevice()">Flash LED</button>
-      <button class="btn-danger" id="fwRestartBtn" style="margin-top:9px" onclick="restartDevice()">Restart Device</button>
+      <button class="btn-secondary" id="fwRestartBtn" style="margin-top:9px" onclick="restartDevice()">Restart Device</button>
     </div>
   </div>
 
@@ -1369,6 +1374,14 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
 <div class="help-pop hidden" id="vaneHelp" role="dialog" aria-label="About the Vane Switch" tabindex="-1">
   <button type="button" class="help-close" aria-label="Close Vane Switch help"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
   <p><strong>Aims airflow from HomeKit.</strong> On moves the vanes to the On preset, Off to the Off preset. Nothing else changes. <strong>Reads On</strong> only while the vanes match the On preset; a remote change turns it Off. <strong>Needs a restart</strong> after the switch is turned on or off. Preset edits apply at once.</p>
+</div>
+
+<!-- Any saved change waiting for a restart (Modes, Auto setpoint style,
+     Vane Switch). Fixed, so it stays in reach from any
+     scroll position or page until the restart that applies it. -->
+<div id="restartBar" class="restart-bar" role="status" aria-live="polite">
+  <span id="restartBarText">Changes saved. Restart to apply them to HomeKit.</span>
+  <button class="btn-primary" id="restartBarBtn" onclick="restartDevice()">Restart</button>
 </div>
 
 <div id="toast" class="toast" role="status" aria-live="polite"></div>
@@ -1845,6 +1858,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       if(connectTimeout){clearTimeout(connectTimeout);connectTimeout=null}
       lastConnectedAt=Date.now();
       setConnState('connected');
+      endRestarting();
       if(reconnTimer){clearTimeout(reconnTimer);reconnTimer=null}
       reconnDelay=0;
       fwBack(true);                               // no-op unless an install is out
@@ -2721,10 +2735,8 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     renderVaneSwitch(s);
     if(s.modeMask!=null){
       applyModeVisibility(s.modeMask, s.power?s.mode:null);
-      if(s.modeMaskBoot!=null){
-        $('capBanner').style.display=restartPending(s)?'flex':'none';
-      }
     }
+    renderRestartBar(s);
 
     if(s.hkPaired!=null){
       var hkLbl=$('hkStatusLabel');
@@ -4430,9 +4442,35 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     $('vaneOffWGrp').style.display=wide?'':'none';
     Object.keys(VANE_PRESET_GRPS).forEach(function(k){if(s[k]!=null)setActive(VANE_PRESET_GRPS[k],s[k]);});
     $('vanePresetEqual').style.display=equal?'':'none';
-    // Pending = the service the next boot would build differs from this boot's.
-    var wanted=!!s.vaneSwitch&&has;
-    $('vaneSwitchBanner').style.display=(s.vaneSwitchBoot!=null&&wanted!==s.vaneSwitchBoot)?'flex':'none';
+  }
+  // ── Restart bar ─────────────────────────────────────────────────────────
+  // One bar for every saved change that waits for a restart. After a restart
+  // is sent it reads "Restarting…" with the button disabled until the page
+  // reconnects (socket.onopen), or a minute passes without that.
+  var restarting=false,restartingTimer=null;
+  // The Vane Switch service the next boot would build differs from this boot's.
+  function vaneRestartPending(s){
+    return s.vaneSwitchBoot!=null&&s.vaneSwitch!=null&&(!!s.vaneSwitch&&s.vaneConfig>=1)!==s.vaneSwitchBoot;
+  }
+  function renderRestartBar(s){
+    var pending=!!s&&s.modeMaskBoot!=null&&(restartPending(s)||vaneRestartPending(s));
+    var show=restarting||pending;
+    $('restartBar').classList.toggle('show',show);
+    document.body.classList.toggle('restart-pending',show);
+    $('restartBarText').textContent=restarting?'Restarting\u2026':'Changes saved. Restart to apply them to HomeKit.';
+    $('restartBarBtn').disabled=restarting;
+  }
+  function setRestarting(on){
+    restarting=on;
+    if(restartingTimer){clearTimeout(restartingTimer);restartingTimer=null;}
+    if(on) restartingTimer=setTimeout(function(){setRestarting(false);},60000);
+    renderRestartBar(lastState);
+  }
+  // The page reconnected, so a restart in flight has finished; the first
+  // fresh state frame then draws the bar.
+  function endRestarting(){
+    restarting=false;
+    if(restartingTimer){clearTimeout(restartingTimer);restartingTimer=null;}
   }
   window.pickVanePreset=function(b){
     var grp=b.parentNode.id,cfg={cmd:'config'},key=null;
@@ -4767,9 +4805,11 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     send({cmd:'factoryReset',confirm:'ERASE'});
   };
 
+  // A restart erases nothing, so one tap does it. The confirm word still
+  // rides along: the firmware refuses a bare restart frame.
   window.restartDevice=function(){
     if(!ensureConnected()) return;
-    if(typedConfirm('Restart the device?','RESTART','Restart')){send({cmd:'restart',confirm:'RESTART'})}
+    if(send({cmd:'restart',confirm:'RESTART'})) setRestarting(true);
   };
 
   window.identifyDevice=function(){

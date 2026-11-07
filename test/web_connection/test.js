@@ -25,6 +25,7 @@ function setup() {
     setConnState(state) { states.push(state); },
     onState(message) { messages.push(message); },
     fwBack() {},
+    endRestarting() {},
     WebSocket: function () {
       this.readyState = 0;
       this.sent = [];
