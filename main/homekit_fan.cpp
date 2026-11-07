@@ -100,13 +100,13 @@ static int fan_write_cb(hap_write_data_t write_data[], int count,
 
 // ── Service creation ────────────────────────────────────────────────────────
 
-void homekit_create_fan(hap_acc_t *acc)
+hap_serv_t *homekit_create_fan(hap_acc_t *acc)
 {
     // Create Fan v2 service with Active characteristic
     hap_serv_t *serv = hap_serv_fan_v2_create(1);
     if (!serv) {
         LOG_ERROR("[HK:Fan] Failed to create fan service");
-        return;
+        return nullptr;
     }
 
     s_fanActive = hap_serv_get_char_by_uuid(serv, HAP_CHAR_UUID_ACTIVE);
@@ -132,6 +132,7 @@ void homekit_create_fan(hap_acc_t *acc)
     hap_acc_add_serv(acc, serv);
 
     LOG_INFO("[HK:Fan] Service created (0-100%%, bands: Quiet/1/2/3/4)");
+    return serv;
 }
 
 // Forward declaration for fan auto sync
@@ -147,6 +148,7 @@ void homekit_sync_fan(CN105Controller &cn105)
 
     // Health must reach both services, including the disconnected path.
     sync_fan_auto(cn105);
+    if (!s_fanStatusActive) return;   // Fan not built this boot (hkHidden)
 
     if (!cn105.isHealthy()) {
         s_fanWasDisconnected = true;
@@ -235,12 +237,12 @@ static int fan_auto_write_cb(hap_write_data_t write_data[], int count,
     return ret;
 }
 
-void homekit_create_fan_auto_switch(hap_acc_t *acc)
+hap_serv_t *homekit_create_fan_auto_switch(hap_acc_t *acc)
 {
     hap_serv_t *serv = hap_serv_switch_create(true);
     if (!serv) {
         LOG_ERROR("[HK:FanAuto] Failed to create switch service");
-        return;
+        return nullptr;
     }
 
     s_fanAutoOn = hap_serv_get_char_by_uuid(serv, HAP_CHAR_UUID_ON);
@@ -260,11 +262,13 @@ void homekit_create_fan_auto_switch(hap_acc_t *acc)
     hap_acc_add_serv(acc, serv);
 
     LOG_INFO("[HK:FanAuto] Service created (toggle for auto fan speed)");
+    return serv;
 }
 
 // Fan Auto sync — called from homekit_sync_fan to keep it grouped
 static void sync_fan_auto(CN105Controller &cn105)
 {
+    if (!s_fanAutoOn) return;   // not built this boot (hkHidden)
     uint32_t now = uptime_ms();
     if (now - s_fanAutoLastSync < 2000) return;
     s_fanAutoLastSync = now;

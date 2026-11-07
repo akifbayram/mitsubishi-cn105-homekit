@@ -57,12 +57,12 @@ static int fan_mode_write_cb(hap_write_data_t write_data[], int count,
     return ret;
 }
 
-void homekit_create_fan_mode_switch(hap_acc_t *acc)
+hap_serv_t *homekit_create_fan_mode_switch(hap_acc_t *acc)
 {
     hap_serv_t *serv = hap_serv_switch_create(false);
     if (!serv) {
         LOG_ERROR("[HK:FanMode] Failed to create switch service");
-        return;
+        return nullptr;
     }
 
     s_fanModeOn = hap_serv_get_char_by_uuid(serv, HAP_CHAR_UUID_ON);
@@ -85,10 +85,12 @@ void homekit_create_fan_mode_switch(hap_acc_t *acc)
     hap_acc_add_serv(acc, serv);
 
     LOG_INFO("[HK:FanMode] Service created (FAN mode switch)");
+    return serv;
 }
 
 static void sync_fan_mode(CN105Controller &cn105)
 {
+    if (!s_fanModeOn) return;   // not built this boot (modeMask or hkHidden)
     uint32_t now = uptime_ms();
     if (now - s_fanModeLastSync < 2000) return;
     s_fanModeLastSync = now;
@@ -169,12 +171,12 @@ static int dry_mode_write_cb(hap_write_data_t write_data[], int count,
     return ret;
 }
 
-void homekit_create_dry_mode_switch(hap_acc_t *acc)
+hap_serv_t *homekit_create_dry_mode_switch(hap_acc_t *acc)
 {
     hap_serv_t *serv = hap_serv_switch_create(false);
     if (!serv) {
         LOG_ERROR("[HK:DryMode] Failed to create switch service");
-        return;
+        return nullptr;
     }
 
     s_dryModeOn = hap_serv_get_char_by_uuid(serv, HAP_CHAR_UUID_ON);
@@ -194,10 +196,12 @@ void homekit_create_dry_mode_switch(hap_acc_t *acc)
     hap_acc_add_serv(acc, serv);
 
     LOG_INFO("[HK:DryMode] Service created (DRY mode switch)");
+    return serv;
 }
 
 static void sync_dry_mode(CN105Controller &cn105)
 {
+    if (!s_dryModeOn) return;   // not built this boot (modeMask or hkHidden)
     uint32_t now = uptime_ms();
     if (now - s_dryModeLastSync < 2000) return;
     s_dryModeLastSync = now;
@@ -299,12 +303,12 @@ static int vane_switch_write_cb(hap_write_data_t write_data[], int count,
     return ret;
 }
 
-void homekit_create_vane_switch(hap_acc_t *acc)
+hap_serv_t *homekit_create_vane_switch(hap_acc_t *acc)
 {
     hap_serv_t *serv = hap_serv_switch_create(false);
     if (!serv) {
         LOG_ERROR("[HK:Vane] Failed to create switch service");
-        return;
+        return nullptr;
     }
 
     s_vaneOn = hap_serv_get_char_by_uuid(serv, HAP_CHAR_UUID_ON);
@@ -324,6 +328,7 @@ void homekit_create_vane_switch(hap_acc_t *acc)
     hap_acc_add_serv(acc, serv);
 
     LOG_INFO("[HK:Vane] Service created (Vane Switch, shown in Home as Vane Preset)");
+    return serv;
 }
 
 static void sync_vane_switch(CN105Controller &cn105)

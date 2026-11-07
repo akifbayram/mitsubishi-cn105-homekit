@@ -1000,66 +1000,89 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
         <a id="hkSetupLink" href="com.apple.home://" class="btn-primary" style="text-decoration:none">Open Home App</a>
       </div>
     </div>
-    <!-- Vane Switch (CONTEXT.md › Airflow). Hidden while Vane Type is None.
-         The toggle is boot-fixed (the restart bar); presets apply on tap. -->
-    <div id="vaneSwitchBlock" style="display:none;margin-top:14px;padding-top:14px;border-top:1px solid var(--sep)">
+    <!-- HomeKit services (hk_service_slots.h): on = built at boot. Collapsed like
+         Device › Advanced. The floating restart bar (#restartBar) covers these
+         and the Vane Switch. -->
+    <details class="advanced" id="hkServicesBlock" style="display:none">
+      <summary>Services</summary>
+      <div class="hk-hint" style="margin:10px 0 10px">HomeKit's thermostat only offers Heat, Cool and Auto. These switches add the unit's other controls; turn on the ones you use.</div>
       <div class="inset-row" style="padding:0 0 10px;border-bottom:none">
-        <div style="display:flex;align-items:center;gap:2px"><div class="lbl">Vane Switch</div>
-          <button type="button" class="help-btn" id="vaneHelpBtn" aria-label="About the Vane Switch" aria-haspopup="dialog" aria-expanded="false" aria-controls="vaneHelp">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7h.01"/></svg>
-          </button>
+        <div class="lbl">Fan Speed</div>
+        <label class="ios-toggle"><input type="checkbox" data-hk-svc="1" onchange="toggleHkService(this)" aria-label="Fan Speed"><span class="ios-toggle-slider"></span></label>
+      </div>
+      <div class="inset-row" style="padding:10px 0;border-bottom:none;border-top:1px solid var(--sep)">
+        <div class="lbl">Fan Auto</div>
+        <label class="ios-toggle"><input type="checkbox" data-hk-svc="2" onchange="toggleHkService(this)" aria-label="Fan Auto"><span class="ios-toggle-slider"></span></label>
+      </div>
+      <div class="inset-row" id="hkSvcFanModeRow" style="padding:10px 0;border-bottom:none;border-top:1px solid var(--sep)">
+        <div class="lbl">Fan Mode</div>
+        <label class="ios-toggle"><input type="checkbox" data-hk-svc="4" onchange="toggleHkService(this)" aria-label="Fan Mode"><span class="ios-toggle-slider"></span></label>
+      </div>
+      <div class="inset-row" id="hkSvcDryRow" style="padding:10px 0;border-bottom:none;border-top:1px solid var(--sep)">
+        <div class="lbl">Dry Mode</div>
+        <label class="ios-toggle"><input type="checkbox" data-hk-svc="8" onchange="toggleHkService(this)" aria-label="Dry Mode"><span class="ios-toggle-slider"></span></label>
+      </div>
+      <!-- Vane Switch (CONTEXT.md › Airflow). Hidden while Vane Type is None.
+           The toggle is boot-fixed (the restart bar); presets apply on tap. -->
+      <div id="vaneSwitchBlock" style="display:none;padding-top:10px">
+        <div class="inset-row" style="padding:0 0 10px;border-bottom:none">
+          <div style="display:flex;align-items:center;gap:2px"><div class="lbl">Vane Switch</div>
+            <button type="button" class="help-btn" id="vaneHelpBtn" aria-label="About the Vane Switch" aria-haspopup="dialog" aria-expanded="false" aria-controls="vaneHelp">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7h.01"/></svg>
+            </button>
+          </div>
+          <label class="ios-toggle">
+            <input type="checkbox" id="vaneSwitchToggle" onchange="toggleVaneSwitch()" aria-label="Vane Switch">
+            <span class="ios-toggle-slider"></span>
+          </label>
         </div>
-        <label class="ios-toggle">
-          <input type="checkbox" id="vaneSwitchToggle" onchange="toggleVaneSwitch()" aria-label="Vane Switch">
-          <span class="ios-toggle-slider"></span>
-        </label>
+        <div id="vanePresetRows">
+        <div class="card-label">On</div>
+        <div class="seg" id="vaneOnVGrp" style="margin-top:8px">
+          <div class="seg-bg"></div>
+          <button data-v="auto" onclick="pickVanePreset(this)">Auto</button>
+          <button data-v="1" onclick="pickVanePreset(this)" title="Position 1 (horizontal)"><span class="vane-arrow" style="--vr:0deg">&larr;</span></button>
+          <button data-v="2" onclick="pickVanePreset(this)" title="Position 2"><span class="vane-arrow" style="--vr:-22deg">&larr;</span></button>
+          <button data-v="3" onclick="pickVanePreset(this)" title="Position 3"><span class="vane-arrow" style="--vr:-45deg">&larr;</span></button>
+          <button data-v="4" onclick="pickVanePreset(this)" title="Position 4"><span class="vane-arrow" style="--vr:-67deg">&larr;</span></button>
+          <button data-v="5" onclick="pickVanePreset(this)" title="Position 5 (down)"><span class="vane-arrow" style="--vr:-90deg">&larr;</span></button>
+          <button data-v="swing" onclick="pickVanePreset(this)">Swing</button>
+        </div>
+        <div class="seg" id="vaneOnWGrp" style="margin-top:8px">
+          <div class="seg-bg"></div>
+          <button data-v="ll" onclick="pickVanePreset(this)">&laquo;</button>
+          <button data-v="l" onclick="pickVanePreset(this)">&lsaquo;</button>
+          <button data-v="c" onclick="pickVanePreset(this)">|</button>
+          <button data-v="r" onclick="pickVanePreset(this)">&rsaquo;</button>
+          <button data-v="rr" onclick="pickVanePreset(this)">&raquo;</button>
+          <button data-v="split" onclick="pickVanePreset(this)">&lsaquo;&rsaquo;</button>
+          <button data-v="swing" onclick="pickVanePreset(this)">Swing</button>
+        </div>
+        <div class="card-label" style="margin-top:14px">Off</div>
+        <div class="seg" id="vaneOffVGrp" style="margin-top:8px">
+          <div class="seg-bg"></div>
+          <button data-v="auto" onclick="pickVanePreset(this)">Auto</button>
+          <button data-v="1" onclick="pickVanePreset(this)" title="Position 1 (horizontal)"><span class="vane-arrow" style="--vr:0deg">&larr;</span></button>
+          <button data-v="2" onclick="pickVanePreset(this)" title="Position 2"><span class="vane-arrow" style="--vr:-22deg">&larr;</span></button>
+          <button data-v="3" onclick="pickVanePreset(this)" title="Position 3"><span class="vane-arrow" style="--vr:-45deg">&larr;</span></button>
+          <button data-v="4" onclick="pickVanePreset(this)" title="Position 4"><span class="vane-arrow" style="--vr:-67deg">&larr;</span></button>
+          <button data-v="5" onclick="pickVanePreset(this)" title="Position 5 (down)"><span class="vane-arrow" style="--vr:-90deg">&larr;</span></button>
+          <button data-v="swing" onclick="pickVanePreset(this)">Swing</button>
+        </div>
+        <div class="seg" id="vaneOffWGrp" style="margin-top:8px">
+          <div class="seg-bg"></div>
+          <button data-v="ll" onclick="pickVanePreset(this)">&laquo;</button>
+          <button data-v="l" onclick="pickVanePreset(this)">&lsaquo;</button>
+          <button data-v="c" onclick="pickVanePreset(this)">|</button>
+          <button data-v="r" onclick="pickVanePreset(this)">&rsaquo;</button>
+          <button data-v="rr" onclick="pickVanePreset(this)">&raquo;</button>
+          <button data-v="split" onclick="pickVanePreset(this)">&lsaquo;&rsaquo;</button>
+          <button data-v="swing" onclick="pickVanePreset(this)">Swing</button>
+        </div>
+        <div class="hk-hint" id="vanePresetEqual" style="display:none;margin-top:10px">The On and Off presets must differ.</div>
+        </div>
       </div>
-      <div id="vanePresetRows">
-      <div class="card-label">On</div>
-      <div class="seg" id="vaneOnVGrp" style="margin-top:8px">
-        <div class="seg-bg"></div>
-        <button data-v="auto" onclick="pickVanePreset(this)">Auto</button>
-        <button data-v="1" onclick="pickVanePreset(this)" title="Position 1 (horizontal)"><span class="vane-arrow" style="--vr:0deg">&larr;</span></button>
-        <button data-v="2" onclick="pickVanePreset(this)" title="Position 2"><span class="vane-arrow" style="--vr:-22deg">&larr;</span></button>
-        <button data-v="3" onclick="pickVanePreset(this)" title="Position 3"><span class="vane-arrow" style="--vr:-45deg">&larr;</span></button>
-        <button data-v="4" onclick="pickVanePreset(this)" title="Position 4"><span class="vane-arrow" style="--vr:-67deg">&larr;</span></button>
-        <button data-v="5" onclick="pickVanePreset(this)" title="Position 5 (down)"><span class="vane-arrow" style="--vr:-90deg">&larr;</span></button>
-        <button data-v="swing" onclick="pickVanePreset(this)">Swing</button>
-      </div>
-      <div class="seg" id="vaneOnWGrp" style="margin-top:8px">
-        <div class="seg-bg"></div>
-        <button data-v="ll" onclick="pickVanePreset(this)">&laquo;</button>
-        <button data-v="l" onclick="pickVanePreset(this)">&lsaquo;</button>
-        <button data-v="c" onclick="pickVanePreset(this)">|</button>
-        <button data-v="r" onclick="pickVanePreset(this)">&rsaquo;</button>
-        <button data-v="rr" onclick="pickVanePreset(this)">&raquo;</button>
-        <button data-v="split" onclick="pickVanePreset(this)">&lsaquo;&rsaquo;</button>
-        <button data-v="swing" onclick="pickVanePreset(this)">Swing</button>
-      </div>
-      <div class="card-label" style="margin-top:14px">Off</div>
-      <div class="seg" id="vaneOffVGrp" style="margin-top:8px">
-        <div class="seg-bg"></div>
-        <button data-v="auto" onclick="pickVanePreset(this)">Auto</button>
-        <button data-v="1" onclick="pickVanePreset(this)" title="Position 1 (horizontal)"><span class="vane-arrow" style="--vr:0deg">&larr;</span></button>
-        <button data-v="2" onclick="pickVanePreset(this)" title="Position 2"><span class="vane-arrow" style="--vr:-22deg">&larr;</span></button>
-        <button data-v="3" onclick="pickVanePreset(this)" title="Position 3"><span class="vane-arrow" style="--vr:-45deg">&larr;</span></button>
-        <button data-v="4" onclick="pickVanePreset(this)" title="Position 4"><span class="vane-arrow" style="--vr:-67deg">&larr;</span></button>
-        <button data-v="5" onclick="pickVanePreset(this)" title="Position 5 (down)"><span class="vane-arrow" style="--vr:-90deg">&larr;</span></button>
-        <button data-v="swing" onclick="pickVanePreset(this)">Swing</button>
-      </div>
-      <div class="seg" id="vaneOffWGrp" style="margin-top:8px">
-        <div class="seg-bg"></div>
-        <button data-v="ll" onclick="pickVanePreset(this)">&laquo;</button>
-        <button data-v="l" onclick="pickVanePreset(this)">&lsaquo;</button>
-        <button data-v="c" onclick="pickVanePreset(this)">|</button>
-        <button data-v="r" onclick="pickVanePreset(this)">&rsaquo;</button>
-        <button data-v="rr" onclick="pickVanePreset(this)">&raquo;</button>
-        <button data-v="split" onclick="pickVanePreset(this)">&lsaquo;&rsaquo;</button>
-        <button data-v="swing" onclick="pickVanePreset(this)">Swing</button>
-      </div>
-      <div class="hk-hint" id="vanePresetEqual" style="display:none;margin-top:10px">The On and Off presets must differ.</div>
-      </div>
-    </div>
+    </details>
     <button class="btn-danger" id="hkResetBtn" style="margin-top:10px;display:none" onclick="resetHomeKit()">Reset HomeKit Pairing</button>
   </div>
 
@@ -1377,7 +1400,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
 </div>
 
 <!-- Any saved change waiting for a restart (Modes, Auto setpoint style,
-     Vane Switch). Fixed, so it stays in reach from any
+     HomeKit services, Vane Switch). Fixed, so it stays in reach from any
      scroll position or page until the restart that applies it. -->
 <div id="restartBar" class="restart-bar" role="status" aria-live="polite">
   <span id="restartBarText">Changes saved. Restart to apply them to HomeKit.</span>
@@ -2733,6 +2756,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       $('wideVaneSection').style.display=s.vaneConfig>=2?'':'none';
     }
     renderVaneSwitch(s);
+    renderHkServices(s);
     if(s.modeMask!=null){
       applyModeVisibility(s.modeMask, s.power?s.mode:null);
     }
@@ -4443,17 +4467,44 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     Object.keys(VANE_PRESET_GRPS).forEach(function(k){if(s[k]!=null)setActive(VANE_PRESET_GRPS[k],s[k]);});
     $('vanePresetEqual').style.display=equal?'':'none';
   }
+  // ── HomeKit services (Settings › HomeKit) ──────────────────────────────
+  // hkHidden carries HK_SVC_* bits (main/hk_service_slots.h), set = removed.
+  // Each tap saves the whole value from the four toggles, hidden rows included.
+  var HK_SVC={fan:1,fanAuto:2,fanMode:4,dry:8};
+  function hkServicesAvailable(mask){
+    return HK_SVC.fan|HK_SVC.fanAuto|(mask&CAP_BITS.fan?HK_SVC.fanMode:0)|(mask&CAP_BITS.dry?HK_SVC.dry:0);
+  }
+  // Pending = the next boot would build other services than this boot did.
+  // Judged on this boot's mode mask, so a Modes change counts once (restartPending).
+  function hkRestartPending(s){
+    var avail=hkServicesAvailable(s.modeMaskBoot);
+    var svc=s.hkHiddenBoot!=null&&(s.hkHidden&avail)!==(s.hkHiddenBoot&avail);
+    var vane=s.vaneSwitchBoot!=null&&s.vaneSwitch!=null&&(!!s.vaneSwitch&&s.vaneConfig>=1)!==s.vaneSwitchBoot;
+    return svc||vane;
+  }
+  function renderHkServices(s){
+    if(s.hkHidden==null) return;
+    $('hkServicesBlock').style.display='';
+    document.querySelectorAll('[data-hk-svc]').forEach(function(t){
+      t.checked=!(s.hkHidden&Number(t.getAttribute('data-hk-svc')));
+    });
+    if(s.modeMask!=null){
+      $('hkSvcFanModeRow').style.display=s.modeMask&CAP_BITS.fan?'':'none';
+      $('hkSvcDryRow').style.display=s.modeMask&CAP_BITS.dry?'':'none';
+    }
+  }
+  // Services stays open or closed across reloads, like the sections.
+  (function(d){
+    if(loadSectionOpen('hk-services')) d.open=true;
+    d.addEventListener('toggle',function(){saveSectionOpen('hk-services',d.open);});
+  })($('hkServicesBlock'));
   // ── Restart bar ─────────────────────────────────────────────────────────
   // One bar for every saved change that waits for a restart. After a restart
   // is sent it reads "Restarting…" with the button disabled until the page
   // reconnects (socket.onopen), or a minute passes without that.
   var restarting=false,restartingTimer=null;
-  // The Vane Switch service the next boot would build differs from this boot's.
-  function vaneRestartPending(s){
-    return s.vaneSwitchBoot!=null&&s.vaneSwitch!=null&&(!!s.vaneSwitch&&s.vaneConfig>=1)!==s.vaneSwitchBoot;
-  }
   function renderRestartBar(s){
-    var pending=!!s&&s.modeMaskBoot!=null&&(restartPending(s)||vaneRestartPending(s));
+    var pending=!!s&&s.modeMaskBoot!=null&&(restartPending(s)||hkRestartPending(s));
     var show=restarting||pending;
     $('restartBar').classList.toggle('show',show);
     document.body.classList.toggle('restart-pending',show);
@@ -4472,6 +4523,13 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     restarting=false;
     if(restartingTimer){clearTimeout(restartingTimer);restartingTimer=null;}
   }
+  window.toggleHkService=function(t){
+    var hidden=0;
+    document.querySelectorAll('[data-hk-svc]').forEach(function(x){
+      if(!x.checked) hidden|=Number(x.getAttribute('data-hk-svc'));
+    });
+    if(!send({cmd:'config',hkHidden:hidden})) t.checked=!t.checked;
+  };
   window.pickVanePreset=function(b){
     var grp=b.parentNode.id,cfg={cmd:'config'},key=null;
     Object.keys(VANE_PRESET_GRPS).forEach(function(k){if(VANE_PRESET_GRPS[k]===grp)key=k;});
@@ -4646,7 +4704,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     // restore the blend model instead of interpreting roomSource as a pick.
     ['roomMode','roomSingle','roomMembers','betaChannel','nightLat','nightLon',
       'nightDuskOff','nightDawnOff','nightCeil',
-      'vaneSwitch','vaneOnV','vaneOnW','vaneOffV','vaneOffW'].forEach(function(k){
+      'vaneSwitch','vaneOnV','vaneOnW','vaneOffV','vaneOffW','hkHidden'].forEach(function(k){
       if(s[k]!==undefined) out.settings[k]=s[k];
     });
     if(Array.isArray(s.roomOffs)) out.settings.roomOffs=s.roomOffs.slice(0,6);
@@ -4728,6 +4786,9 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       // presets. Strings go through unfiltered; the firmware rejects and logs.
       ['vaneOnV','vaneOnW','vaneOffV','vaneOffW'].forEach(function(k){if(typeof st[k]==='string') cfg[k]=st[k];});
       if(typeof st.vaneSwitch==='boolean') cfg.vaneSwitch=st.vaneSwitch;
+      // Absent in files from before the setting: the device keeps its services.
+      // The firmware refuses unknown bits and logs it.
+      if(typeof st.hkHidden==='number') cfg.hkHidden=st.hkHidden;
       if(typeof st.modeMask==='number') cfg.modeMask=st.modeMask;
       if(typeof st.betaChannel==='boolean') cfg.betaChannel=st.betaChannel;
       if(typeof st.roomTimeout==='number') cfg.bleTimeout=st.roomTimeout;

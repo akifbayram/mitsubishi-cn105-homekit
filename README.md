@@ -379,7 +379,7 @@ The page is organised into cards:
 - **Heat Pump · CN105** — link status plus compressor frequency, outside temp, runtime hours, error codes, and sub mode/stage
 - **Room Sensor** — single or averaged room temperature sources, BLE sensor list, readings, offsets, stale timeout (see [Room Temperature](#room-temperature))
 - **Network · Wi-Fi** — current network and uptime, a scan list of nearby networks, credential entry with trial-before-save, and *Forget Wi-Fi…* under **Advanced**
-- **HomeKit** — pairing status, controller count, setup code with copy button, QR code, the optional Vane Switch with its On and Off presets, and reset pairing
+- **HomeKit** — pairing status, controller count, setup code with copy button, QR code, toggles that remove Fan Speed, Fan Auto, Fan Mode or Dry Mode from HomeKit, the optional Vane Switch with its On and Off presets, and reset pairing
 - **Link** — paired dial model, firmware, signal, last seen; pair, *Pair another Link*, and cancel; a per-dial *Forget* plus *Forget All* once two or more dials are paired (see [Serin Link](#serin-link))
 - **Device** — device name, °C/°F, vane type, Unit Capabilities (which HVAC modes your unit actually has), log level, and settings export/import; poll interval, CN105 baud rate, and factory reset sit behind an **Advanced** disclosure
 - **Firmware** — installed version, the version menu, manual `.bin` upload, **Flash LED** to identify the device, and Restart (see [OTA Updates](#ota-updates))

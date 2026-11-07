@@ -30,6 +30,15 @@ HomeKit's Fan service uses a 0–100% rotation speed slider, mapped to discrete 
 
 Setting the slider to 0% or deactivating the fan service powers the unit off. Auto fan speed is controlled exclusively via the **Fan Auto** switch.
 
+## Service Visibility
+
+Four services on the Heat Pump accessory can be removed from HomeKit: the Fan (labelled **Fan Speed** in the web UI), **Fan Auto**, **Fan Mode** and **Dry Mode**. In **Settings › HomeKit › Services**, turn a toggle off to remove that service; turn it on to bring it back. The thermostat cannot be removed.
+
+- **A change needs a restart.** HomeKit services are fixed when the firmware starts; the web UI shows a restart prompt until then.
+- **Modes still apply.** Fan Mode and Dry Mode exist only while their mode is enabled under **Settings › Modes**. Their toggles are hidden while the mode is off, and the saved choice is kept.
+- **The remaining services keep their IDs.** Each service owns fixed HomeKit instance IDs, so removing one never moves another onto its IDs.
+- Factory Reset shows every service again.
+
 ## Dual Setpoint (Auto Mode)
 
 The HomeKit Thermostat service supports independent heating and cooling thresholds, but the CN105 protocol only accepts a **single target temperature**. The controller maps the two thresholds onto that single setpoint with a room-vs-band deadband: room below the heating threshold → send the heating threshold; room above the cooling threshold → send the cooling threshold; room inside the band → send the current room temperature so the unit idles. The heat pump's reported `autoSubMode` is used only for status display, not to choose the setpoint (it lags and can latch to a stale side). A 2°C minimum gap is enforced between thresholds.

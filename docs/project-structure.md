@@ -6,6 +6,7 @@ main/
   cn105_protocol.cpp/h        # UART driver, packet TX/RX/parsing, WantedSettings
   cn105_baud.h                # Accepted CN105 baud rates + NVS load rule (host-tested)
   vane_preset.h               # Vane Preset values, equality, mirror match + enable rules (host-tested)
+  hk_service_slots.h          # HomeKit service visibility bits + fixed IID slots (host-tested)
   cn105_strings.h             # Shared enum-string conversions (log + web + parsers)
   homekit_setup.cpp/h         # HAP init, setup code gen, event handler, status
   homekit_services.h          # Service creation + sync interface

@@ -1,6 +1,8 @@
 #define CASE(name) if (!strcmp(argv[1], name))
 static void event(int e,const char* reason=nullptr){hap_event_handler(nullptr,HAP_EVENT,e,(void*)reason);}
 static bool start(){return homekit_init("Test","Serin","CN105","serial","1.0",nullptr);}
+static std::vector<uint8_t> builtMeta(){return hkNvs.committed["hk-meta"]["svcBuilt"];}
+static void hide(uint8_t bits){settings.get().hkHidden=bits;settings.save();}
 static bool storedPaired(){auto& ns=hkNvs.committed["ac-settings"];return ns.count("hkPaired")&&ns["hkPaired"]==std::vector<uint8_t>{1};}
 static void reboot(){settings=SettingsStore{};hkNvs.pending.clear();settings.begin();controllers=0;s_started=false;s_pairingsReset=false;}
 int main(int,char**argv){
@@ -63,6 +65,50 @@ int main(int,char**argv){
   CHECK(start());settings.get().autoSingleSetpoint=true;settings.save();reboot();CHECK(start());
   settings.get().autoSingleSetpoint=false;settings.save();reboot();CHECK(start());
   CHECK(configCalls==2);CHECK(hkNvs.committed["hk-meta"]["svcShape"]==std::vector<uint8_t>{0x1F});
+ }
+ CASE("hidden_services_default_upgrade_no_bump") {
+  // A device from before service visibility: hk-meta has the shape and
+  // temperature keys, ac-settings has no hkHidden.
+  CHECK(start());hkNvs.committed["hk-meta"].erase("svcBuilt");hkNvs.committed["ac-settings"].erase("hkHidden");
+  reboot();CHECK(settings.get().hkHidden==0);CHECK(start());
+  CHECK(configCalls==0);CHECK(homekit_get_boot_hidden()==0);
+  CHECK(builtMeta()==std::vector<uint8_t>{HK_SVC_ALL});
+  CHECK(hkNvs.committed["hk-meta"]["svcShape"]==std::vector<uint8_t>{0x1F});
+  reboot();CHECK(start());CHECK(configCalls==0);
+ }
+ CASE("hidden_service_bumps_once_and_again_on_restore") {
+  CHECK(start());hide(HK_SVC_FAN_AUTO);CHECK(homekit_get_boot_hidden()==0);
+  reboot();CHECK(settings.get().hkHidden==HK_SVC_FAN_AUTO);CHECK(start());
+  CHECK(configCalls==1);CHECK(builtMeta()==std::vector<uint8_t>{HK_SVC_ALL&~HK_SVC_FAN_AUTO});
+  CHECK(hkNvs.committed["hk-meta"]["svcShape"]==std::vector<uint8_t>{0x1F});   // shape byte untouched
+  reboot();CHECK(start());CHECK(configCalls==1);                                // plain reboot
+  hide(0);reboot();CHECK(start());CHECK(configCalls==2);CHECK(builtMeta()==std::vector<uint8_t>{HK_SVC_ALL});
+  reboot();CHECK(start());CHECK(configCalls==2);
+ }
+ CASE("hidden_service_value_persists") {
+  hide(HK_SVC_FAN|HK_SVC_DRY_MODE);reboot();
+  CHECK(settings.get().hkHidden==(HK_SVC_FAN|HK_SVC_DRY_MODE));
+  CHECK(hkNvs.committed["ac-settings"]["hkHidden"]==std::vector<uint8_t>{HK_SVC_FAN|HK_SVC_DRY_MODE});
+  CHECK(start());CHECK(homekit_get_boot_hidden()==(HK_SVC_FAN|HK_SVC_DRY_MODE));
+  // Unknown bits from a later firmware load as shown.
+  hkNvs.committed["ac-settings"]["hkHidden"]={0xF2};reboot();CHECK(settings.get().hkHidden==HK_SVC_FAN_AUTO);
+ }
+ CASE("hidden_mask_gated_service_does_not_bump") {
+  // Fan mode is off, so Fan Mode is not built either way.
+  settings.get().modeMask=MODE_CAP_ALL&~MODE_CAP_FAN;settings.save();reboot();CHECK(start());
+  hide(HK_SVC_FAN_MODE);reboot();CHECK(start());CHECK(configCalls==0);
+  CHECK(builtMeta()==std::vector<uint8_t>{HK_SVC_ALL&~HK_SVC_FAN_MODE});
+ }
+ CASE("hidden_and_mask_change_bump_once") {
+  CHECK(start());settings.get().modeMask=MODE_CAP_ALL&~MODE_CAP_DRY;hide(HK_SVC_FAN);
+  reboot();CHECK(start());CHECK(configCalls==1);
+ }
+ CASE("factory_reset_shows_every_service") {
+  hide(HK_SVC_ALL);reboot();CHECK(start());CHECK(builtMeta()==std::vector<uint8_t>{0});
+  settings.beginFactoryReset();CHECK(nvs_flash_erase()==ESP_OK);CHECK(nvs_flash_init()==ESP_OK);
+  s_factoryResetting.store(false);reboot();
+  CHECK(settings.get().hkHidden==0);CHECK(start());CHECK(homekit_get_boot_hidden()==0);
+  CHECK(builtMeta()==std::vector<uint8_t>{HK_SVC_ALL});
  }
  CASE("factory_reset_blocks_first_start") {
   settings.beginFactoryReset();

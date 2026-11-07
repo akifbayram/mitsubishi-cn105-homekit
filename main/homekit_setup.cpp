@@ -131,6 +131,10 @@ static void homekit_set_setup_id(const char* setupId)
 // bit 5 = Vane Switch service present,
 // bit 6 = Single Auto setpoint (no threshold characteristics),
 // bit 7 = Remote Sensor accessory present.
+// "svcBuilt" beside it records which of Fan, Fan Auto, Fan Mode and Dry Mode
+// were built (HK_SVC_* bits, hk_service_slots.h). A missing key reads as every
+// service the mask allows, which is what firmware before service visibility
+// built, so an upgrade with nothing hidden does not bump.
 static constexpr uint8_t SHAPE_VANE_SWITCH    = 0x20;
 static constexpr uint8_t SHAPE_AUTO_SINGLE    = 0x40;
 static constexpr uint8_t SHAPE_SENSOR_PRESENT = 0x80;
@@ -139,6 +143,7 @@ static std::atomic<bool> s_started{false};   // hap_start() has succeeded
 
 static uint8_t s_bootModeMask = MODE_CAP_ALL;
 static bool    s_bootVaneSwitch = false;
+static uint8_t s_bootHidden = 0;
 
 static uint8_t current_service_shape(void)
 {
@@ -149,6 +154,11 @@ static uint8_t current_service_shape(void)
     if (homekit_sensor_is_present()) shape |= SHAPE_SENSOR_PRESENT;
 #endif
     return shape;
+}
+
+static uint8_t current_built_services(void)
+{
+    return hk_services_built(s_bootHidden, s_bootModeMask);
 }
 
 // Hash explicit bytes rather than struct padding. Include all three min/max/step
@@ -178,25 +188,31 @@ static void store_service_shape(bool bumpOnChange)
     nvs_handle_t h;
     if (nvs_open("hk-meta", NVS_READWRITE, &h) != ESP_OK) return;
     const uint8_t shape = current_service_shape();
+    const uint8_t built = current_built_services();
     const uint32_t temperature = temperature_fingerprint(s_temperatureMetadata);
     uint8_t storedShape = shape;
+    uint8_t storedBuilt = hk_services_available(s_bootModeMask);
     uint32_t storedTemperature = temperature_fingerprint(formerTemperatureMetadata);
     const auto shapeResult = nvs_get_u8(h, "svcShape", &storedShape);
+    const auto builtResult = nvs_get_u8(h, "svcBuilt", &storedBuilt);
     const auto tempResult = bumpOnChange ? nvs_get_u32(h, "tempMeta", &storedTemperature) : ESP_OK;
     if ((shapeResult != ESP_OK && shapeResult != ESP_ERR_NVS_NOT_FOUND) ||
+        (builtResult != ESP_OK && builtResult != ESP_ERR_NVS_NOT_FOUND) ||
         (tempResult != ESP_OK && tempResult != ESP_ERR_NVS_NOT_FOUND)) {
         nvs_close(h);
         return;
     }
-    const bool changed = storedShape != shape || (bumpOnChange && storedTemperature != temperature);
+    const bool changed = storedShape != shape || storedBuilt != built ||
+                         (bumpOnChange && storedTemperature != temperature);
     if (changed && bumpOnChange && hap_update_config_number() != HAP_SUCCESS) {
         LOG_WARN("[HK] Metadata configuration enqueue failed; retry pending");
         nvs_close(h);
         return;
     }
-    if (changed || shapeResult == ESP_ERR_NVS_NOT_FOUND || tempResult == ESP_ERR_NVS_NOT_FOUND) {
+    if (changed || shapeResult == ESP_ERR_NVS_NOT_FOUND || builtResult == ESP_ERR_NVS_NOT_FOUND ||
+        tempResult == ESP_ERR_NVS_NOT_FOUND) {
         nvs_erase_key(h, "svcMask");
-        if (nvs_set_u8(h, "svcShape", shape) != ESP_OK ||
+        if (nvs_set_u8(h, "svcShape", shape) != ESP_OK || nvs_set_u8(h, "svcBuilt", built) != ESP_OK ||
             (bumpOnChange && nvs_set_u32(h, "tempMeta", temperature) != ESP_OK) || nvs_commit(h) != ESP_OK) {
             LOG_WARN("[HK] Metadata acknowledgement storage failed; retry pending");
         }
@@ -235,6 +251,11 @@ bool homekit_get_boot_vane_switch(void)
     return s_bootVaneSwitch;
 }
 
+uint8_t homekit_get_boot_hidden(void)
+{
+    return s_bootHidden;
+}
+
 bool homekit_is_started(void)
 {
     return s_started;
@@ -257,6 +278,7 @@ bool homekit_init(const char* name, const char* manufacturer,
     s_bootModeMask = settings.get().modeMask;
     s_bootVaneSwitch = vane_switch_service_wanted(settings.get().vaneSwitch,
                                                   settings.get().vaneConfig);
+    s_bootHidden = settings.get().hkHidden;
 
     if (!s_coreInited) {
         hap_cfg_t hap_cfg;

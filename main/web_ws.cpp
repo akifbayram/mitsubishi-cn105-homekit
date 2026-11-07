@@ -244,7 +244,7 @@ static bool webConfigTypes(const cJSON* root) {
     int integer;
     for (const char* key : {"logLevel", "pollInterval", "cn105Baud", "vaneConfig", "modeMask", "bleTimeout",
                            "roomSource", "roomMode", "roomSingle", "roomMembers", "roomOffIdx", "roomOffVal",
-                           "bleDelIdx", "bleRenIdx"})
+                           "bleDelIdx", "bleRenIdx", "hkHidden"})
         if (cJSON_HasObjectItem(root, key) && !webGetInt(root, key, &integer)) return false;
     for (const char* key : {"deviceName", "trustedHost", "tempUnit", "bleAddr", "bleAddMac", "bleAddName", "bleRenName",
                            "vaneOnV", "vaneOnW", "vaneOffV", "vaneOffW"})
@@ -554,6 +554,20 @@ void WebUI::handleWsMessage(httpd_req_t *req, const char *msg) {
                 }
             }
         }
+        // HomeKit service visibility: HK_SVC_* bits, set = removed. Stored now,
+        // built at the next boot. A value naming an unknown service is refused
+        // whole, so a typo cannot hide something by accident.
+        if (webGetInt(parsed.get(), "hkHidden", &intVal)) {
+            if (intVal < 0 || (intVal & ~HK_SVC_ALL)) {
+                LOG_WARN("Config hkHidden=%d rejected (unknown service bits), keeping 0x%02X",
+                         intVal, (unsigned)settings.get().hkHidden);
+            } else {
+                if (settings.get().hkHidden != intVal) LOG_INFO("Config hkHidden=0x%02X", (unsigned)intVal);
+                settings.get().hkHidden = (uint8_t)intVal;
+                changed = true;
+            }
+        }
+
         // The flag, after the presets so a file that sets both in one message
         // is judged on its own presets. Stored now, built at the next boot.
         bool vaneSwitchVal;
@@ -1280,6 +1294,7 @@ void WebUI::pushState() {
         ",\"vaneConfig\":%d"
         ",\"vaneSwitch\":%s"
         ",\"vaneSwitchBoot\":%s"
+        ",\"hkHidden\":%d,\"hkHiddenBoot\":%d"
         ",\"vaneOnV\":\"%s\",\"vaneOnW\":\"%s\""
         ",\"vaneOffV\":\"%s\",\"vaneOffW\":\"%s\""
         ",\"modeMask\":%d"
@@ -1302,6 +1317,8 @@ void WebUI::pushState() {
         // after, what was actually built this boot.
         (hkReady ? homekit_get_boot_vane_switch()
                  : vane_switch_service_wanted(cfg.vaneSwitch, cfg.vaneConfig)) ? "true" : "false",
+        (int)cfg.hkHidden,
+        (int)(hkReady ? homekit_get_boot_hidden() : cfg.hkHidden),
         vane_to_web_str(cfg.vaneOn.vane), wide_vane_to_web_str(cfg.vaneOn.wideVane),
         vane_to_web_str(cfg.vaneOff.vane), wide_vane_to_web_str(cfg.vaneOff.wideVane),
         (int)cfg.modeMask,
