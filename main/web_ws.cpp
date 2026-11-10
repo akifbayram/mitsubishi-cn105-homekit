@@ -1107,7 +1107,7 @@ void WebUI::pushState() {
         ",\"autoSubMode\":\"%s\""
         ",\"deviceName\":\"%s\""
         ",\"ssid\":\"%s\""
-        // Header, not the blend section below: the Manage Sensors panel
+        // Header, not the blend section below: each sensor row's editor
         // read-modify-writes roomMembers, so a frame that dropped it would
         // have the browser toggle a bit into a map it can no longer see.
         ",\"roomMembers\":%u",

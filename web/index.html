@@ -265,17 +265,71 @@ input[type=range].slim::-moz-range-thumb{width:22px;height:22px;}
 .inset-row .lbl,.inset-block .lbl{font-size:15px;color:var(--text);font-weight:500;}
 .inset-row .sub,.inset-block .sub{font-size:12px;color:var(--text2);margin-top:2px;max-width:230px;}
 
-/* ===== Room sensor source rows (radio-style; tap = select) ===== */
-.src-rows{display:flex;flex-direction:column;gap:8px;margin-bottom:6px;}
-.src-row{display:flex;align-items:center;gap:12px;padding:12px 14px;width:100%;text-align:left;cursor:pointer;
-  background:transparent;border:1.5px solid var(--sep);border-radius:14px;font:inherit;color:inherit;
-  transition:border-color .2s ease,background .2s ease;}
-.src-row.sel{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 7%,transparent);}
-.src-row:active{background:var(--surface3);}
-.src-row .src-main{flex:1;min-width:0;}
-.src-row .lbl{display:flex;align-items:center;gap:8px;font-size:15px;font-weight:500;color:var(--text);}
-.src-row .sub{display:block;font-size:12px;color:var(--text2);margin-top:2px;}
-.src-row .src-temp{flex:none;font-size:17px;font-weight:600;color:var(--text);font-variant-numeric:tabular-nums;}
+/* ===== Room sensor rows (radio in One Sensor, checkbox in Average) =====
+   One bordered list. Each row is a pick button plus, for sensors that can be
+   edited, a chevron that opens the row's own editor underneath. */
+.room-group{display:flex;flex-direction:column;gap:8px;margin-top:16px;}
+.room-note{font-size:12px;color:var(--text2);line-height:1.4;}
+.seg.tall button{padding:13px 2px;font-size:13.5px;}
+.src-rows{border:1.5px solid var(--sep);border-radius:14px;overflow:hidden;}
+.src-rows:empty{display:none;}
+.src-row{border-top:1px solid var(--sep);transition:background .2s ease;}
+.src-row:first-child{border-top:none;}
+.src-row.sel{background:color-mix(in srgb,var(--accent) 7%,transparent);}
+.src-row.stale{background:color-mix(in srgb,var(--orange) 7%,transparent);}
+.src-line{display:flex;align-items:stretch;}
+.src-pick{flex:1;min-width:0;display:flex;align-items:center;gap:12px;min-height:60px;padding:10px 14px;
+  text-align:left;cursor:pointer;background:transparent;border:none;font:inherit;color:inherit;}
+.src-pick.has-chev{padding-right:2px;}
+.src-pick[disabled]{cursor:default;}
+.src-pick:not([disabled]):active,.src-chev:active{background:var(--surface3);}
+.src-row.dim .src-pick{opacity:.5;}
+.src-lead{width:22px;height:22px;flex:none;box-sizing:border-box;border:2px solid var(--text3);
+  display:flex;align-items:center;justify-content:center;color:#fff;}
+.src-lead.radio{border-radius:50%;}
+.src-lead.check{border-radius:6px;}
+.src-lead.radio.on{border-color:var(--accent);}
+.src-lead.radio.on::after{content:"";width:10px;height:10px;border-radius:50%;background:var(--accent);}
+.src-lead.check.on{border-color:var(--accent);background:var(--accent);}
+.src-main{flex:1;min-width:0;}
+.src-main .lbl{display:flex;align-items:center;gap:8px;font-size:15px;font-weight:500;color:var(--text);}
+.src-main .sub{display:block;font-size:12px;color:var(--text2);margin-top:3px;line-height:1.5;}
+.src-main .sub .status-dot{margin-right:7px;vertical-align:1px;}
+.src-low{display:inline-block;margin-left:7px;padding:0 7px;border-radius:8px;font-weight:600;color:var(--text);
+  background:color-mix(in srgb,var(--orange) 26%,var(--surface));}
+.src-temp{flex:none;font-size:17px;font-weight:600;color:var(--text);font-variant-numeric:tabular-nums;text-align:right;}
+.src-temp.mut{color:var(--text3);}
+.src-temp .adj{display:block;font-size:11px;font-weight:500;color:var(--text2);}
+.src-chev{width:44px;flex:none;display:flex;align-items:center;justify-content:center;padding:0;
+  background:transparent;border:none;color:var(--text2);cursor:pointer;}
+.src-chev svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round;transition:transform .2s ease;}
+.src-chev[aria-expanded="true"] svg{transform:rotate(90deg);}
+.src-edit{padding:0 14px 6px 48px;}
+/* Label left, control right; both controls share one column so their edges line up. */
+.src-edit .ef{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,190px);align-items:center;gap:12px;padding:5px 0;}
+.src-edit .ef label{font-size:14px;color:var(--text);}
+.src-edit .ef label small{display:block;font-size:12px;color:var(--text2);margin-top:1px;}
+.src-edit .field{min-height:44px;padding:0 12px;font-size:15px;}
+/* One stepper: minus, value, plus in a single field with hairline dividers. */
+.off-ctl{display:flex;align-items:stretch;min-height:44px;background:var(--surface2);border-radius:var(--radius-sm);overflow:hidden;}
+.off-ctl:focus-within{box-shadow:0 0 0 2px var(--accent);}
+.off-step{width:44px;flex:none;padding:0;border:none;background:transparent;color:var(--accent);font:inherit;font-size:20px;font-weight:400;line-height:1;cursor:pointer;}
+.off-step:active{background:var(--surface3);}
+.off-val{flex:1;min-width:0;display:flex;align-items:baseline;justify-content:center;align-self:center;gap:1px;
+  border-left:1px solid var(--sep);border-right:1px solid var(--sep);padding:4px 1ch 4px 0;}
+.off-val input{width:5ch;border:none;background:transparent;color:var(--text);font:inherit;font-size:15px;font-weight:500;
+  font-variant-numeric:tabular-nums;text-align:right;outline:none;padding:0;-moz-appearance:textfield;appearance:textfield;}
+.off-val input::-webkit-outer-spin-button,.off-val input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0;}
+.off-val .unit{font-size:15px;font-weight:500;color:var(--text2);}
+/* Read-only facts about the sensor: quiet label/value lines under a hairline. */
+.src-facts{margin:8px 0 0;padding:8px 0 2px;border-top:1px solid var(--sep);display:grid;grid-template-columns:auto minmax(0,1fr);gap:5px 16px;font-size:12.5px;}
+.src-facts dt{color:var(--text2);}
+.src-facts dd{margin:0;color:var(--text);text-align:right;overflow-wrap:anywhere;font-variant-numeric:tabular-nums;}
+.src-facts dd .signal-bars{margin-right:7px;vertical-align:-1px;}
+.src-remove{display:block;background:none;border:none;padding:0;min-height:44px;cursor:pointer;font:inherit;font-size:14px;font-weight:500;color:var(--red);}
+.src-confirm{display:flex;flex-direction:column;gap:8px;padding:10px 0 8px;font-size:13px;line-height:1.4;color:var(--text);}
+.link-btn{background:none;border:none;padding:0;min-height:44px;cursor:pointer;font:inherit;font-size:13px;color:var(--accent);text-align:left;}
+.scan-add{flex:none;padding:6px 12px;border-radius:10px;background:var(--accent);color:#fff;font-size:13px;font-weight:600;}
 .src-badge{flex:none;font-size:10.5px;font-weight:600;padding:2px 7px;border-radius:8px;background:var(--accent);color:#fff;}
 .src-badge.stale{background:var(--orange);}
 .inset-block{padding:14px 18px;border-bottom:1px solid var(--sep);}
@@ -286,32 +340,16 @@ input[type=range].slim::-moz-range-thumb{width:22px;height:22px;}
 .num-chip .unit{font-size:12px;color:var(--text2);}
 .ble-help{font-size:12px;color:var(--text2);margin-top:6px;line-height:1.4;}
 
-/* ===== Room Sensor blend (hero / chips / checkbox rows / offsets) ===== */
-.room-hero{background:var(--surface2);border-radius:16px;padding:14px 15px;margin-top:12px;}
+/* ===== Room Sensor hero (what the heat pump is fed, and from where) ===== */
+.room-hero{background:var(--surface2);border-radius:16px;padding:14px 15px;}
 .room-hero .hlabel{font-size:11.5px;font-weight:500;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;display:block;}
 .room-hero .hval{display:flex;align-items:flex-start;gap:2px;margin-top:5px;}
 .room-hero .hval .n{font-size:34px;font-weight:500;letter-spacing:-1px;color:var(--text);line-height:1;font-variant-numeric:tabular-nums;}
 .room-hero .hval .d{font-size:16px;font-weight:500;color:var(--text2);line-height:1;margin-top:1px;}
-.hero-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:11px;}
-.hero-chips .chip{background:var(--surface);border-radius:10px;padding:5px 10px;font-size:12px;font-weight:500;color:var(--text);}
-.hero-chips .chip .off{color:var(--orange);}
-.hero-chips .chip.excl{background:color-mix(in srgb,var(--surface) 55%,transparent);color:var(--text3);}
-.hero-chips .chip.excl.strike{text-decoration:line-through;}
-.hero-foot{font-size:11px;color:var(--text2);margin-top:9px;}
-.hero-foot.warn{color:var(--orange);}
-.src-row .chk{width:22px;height:22px;border-radius:50%;border:2px solid var(--text3);flex:none;box-sizing:border-box;display:flex;align-items:center;justify-content:center;color:#fff;}
-.src-row .chk.on{border:none;background:var(--accent);}
-.src-row.stale{border-color:color-mix(in srgb,var(--orange) 55%,transparent);background:color-mix(in srgb,var(--orange) 6%,transparent);}
-.src-row.stale .chk.on{background:var(--orange);}
-.src-row.dim{opacity:.5;}
+.hero-foot{font-size:12.5px;color:var(--text2);margin-top:8px;line-height:1.4;}
+.hero-foot.warn{color:var(--text);}
+.hero-foot.warn::before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--orange);margin-right:7px;}
 .src-badge.mut{background:var(--surface2);color:var(--text2);}
-.src-temp.mut{color:var(--text3);}
-.src-temp .adj{display:block;font-size:11px;font-weight:500;color:var(--orange);text-align:right;}
-.off-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;}
-.off-row .nm{font-size:13.5px;color:var(--text);font-weight:500;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:flex;align-items:center;gap:7px;}
-.off-row .acts{display:flex;align-items:center;gap:6px;flex:none;}
-.off-row .icon-btn{background:none;border:none;padding:3px 5px;color:var(--text3);cursor:pointer;font-size:13px;line-height:1;}
-.off-row .num-chip input{width:56px;}
 .field{width:100%;min-width:0;background:var(--surface2);border:none;border-radius:var(--radius-sm);padding:12px 14px;
   color:var(--text);font-size:14px;font-family:inherit;outline:none;}
 .field::placeholder{color:var(--text3);}
@@ -843,59 +881,65 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     </div>
   </div>
 
-  <!-- ===== ROOM SENSOR (source rows: Heat Pump / BLE / Serin Link) ===== -->
+  <!-- ===== ROOM SENSOR (reading, then choice, then sensors, then settings) ===== -->
   <!-- Hidden until a state push carries roomSource AND there is at least one
        remote source to offer (a BLE build, or a bonded sensing dial). A user
        with neither never sees this section. -->
   <h2 class="group-label" id="roomGroupLabel" style="display:none">Room Sensor<span class="section-summary"><span class="status-dot idle" id="roomDot"></span><span class="summary-text" id="roomStatusLabel"></span></span></h2>
   <div class="card" id="roomCard" style="display:none">
-    <div id="bleBanner" class="ble-banner info hidden" style="margin-bottom:12px"></div>
-    <div class="seg" id="roomModeSeg" role="radiogroup" aria-label="Room sensor mode">
-      <div class="seg-bg"></div>
-      <button data-v="single" onclick="setRoomMode(0)">Single</button>
-      <button data-v="average" onclick="setRoomMode(1)">Average</button>
-    </div>
     <div class="room-hero" id="roomHero">
       <span class="hlabel">Heat pump sees</span>
       <div class="hval"><span class="n" id="heroVal">--</span><span class="d">&deg;</span></div>
-      <div class="hero-chips" id="heroChips" style="display:none"></div>
       <div class="hero-foot" id="heroFoot"></div>
     </div>
-    <div id="srcRows" class="src-rows" style="margin-top:12px" role="radiogroup" aria-label="Room temperature sources"></div>
-    <div class="ble-help" id="roomHelp" style="margin-top:8px;margin-bottom:4px"></div>
+    <div id="bleBanner" class="ble-banner info hidden" style="margin-top:12px"></div>
 
-    <div class="inset-row" id="bleEnableRow" style="padding-left:0;padding-right:0">
-      <div><div class="lbl">Enable Remote Sensors</div><div class="sub">Scans for the paired BLE sensors.</div></div>
-      <label class="ios-toggle">
-        <input type="checkbox" id="bleEnableToggle" onchange="toggleBleEnabled()" aria-label="Enable remote sensors">
-        <span class="ios-toggle-slider"></span>
-      </label>
-    </div>
-    <div class="inset-row" id="bleTimeoutRow" style="padding-left:0;padding-right:0;border-bottom:none">
-      <div><div class="lbl">Sensor Timeout</div><div class="sub" id="bleTimeoutHelp">A silent sensor is excluded from the average; if none remain, the internal sensor takes over.</div></div>
-      <div class="num-chip"><input type="number" id="bleTimeoutInput" min="30" max="3600" step="10" aria-label="Sensor timeout in seconds"><span class="unit">sec</span></div>
-    </div>
-
-    <div id="bleAddWrap">
-      <button class="btn-secondary" style="width:100%" id="bleAddBtn" onclick="startBleScan()">Add Sensor&hellip;</button>
-      <div class="ble-help" id="bleScanStatus" role="status" style="display:none"></div>
-      <div id="bleScanResults" style="display:none;margin-top:10px"></div>
-      <button type="button" id="bleManualToggle" style="background:none;border:none;padding:0;margin-top:8px;cursor:pointer;font-size:12px;color:var(--accent)" onclick="toggleBleManual()">Enter address manually&hellip;</button>
-      <div id="bleManualWrap" style="display:none;margin-top:8px">
-        <div class="btn-row">
-          <input type="text" class="field mono" id="bleManualMac" placeholder="AA:BB:CC:DD:EE:FF" maxlength="17" spellcheck="false" autocomplete="off" aria-label="Sensor MAC address">
-          <button class="btn-primary grow0" onclick="addBleByMac()">Add</button>
-        </div>
-        <div class="ble-help">The Bluetooth address of the sensor to add.</div>
+    <div class="room-group">
+      <span class="card-label" id="roomUseLbl">Use</span>
+      <div class="seg tall" id="roomModeSeg" role="radiogroup" aria-labelledby="roomUseLbl">
+        <div class="seg-bg"></div>
+        <button data-v="single" role="radio" onclick="setRoomMode(0)">One Sensor</button>
+        <button data-v="average" role="radio" onclick="setRoomMode(1)">Average of Several</button>
       </div>
-      <div id="bleToast" class="ble-banner info" style="display:none;margin-top:10px"></div>
+      <div class="room-note" id="roomHelp"></div>
+      <div id="srcRows" class="src-rows" role="radiogroup" aria-label="Sensors"></div>
+      <div class="room-note" id="roomBuiltinNote" style="display:none"></div>
+
+      <div id="bleAddWrap">
+        <button class="btn-secondary" style="width:100%" id="bleAddBtn" onclick="startBleScan()">Add Sensor&hellip;</button>
+        <div class="ble-help" id="bleScanStatus" role="status" style="display:none"></div>
+        <div id="bleScanResults" style="display:none;margin-top:10px"></div>
+        <div style="display:flex;justify-content:space-between;gap:12px">
+          <button type="button" class="link-btn" id="bleManualToggle" onclick="toggleBleManual()">Enter address manually&hellip;</button>
+          <button type="button" class="link-btn" id="bleScanDone" style="display:none" onclick="closeBleScan()">Done</button>
+        </div>
+        <div id="bleManualWrap" style="display:none">
+          <div class="btn-row">
+            <input type="text" class="field mono" id="bleManualMac" placeholder="AA:BB:CC:DD:EE:FF" maxlength="17" spellcheck="false" autocomplete="off" aria-label="Sensor Bluetooth address">
+            <button class="btn-primary grow0" onclick="addBleByMac()">Add</button>
+          </div>
+          <div class="ble-help">The Bluetooth address of the sensor to add.</div>
+        </div>
+        <div id="bleToast" class="ble-banner info" style="display:none;margin-top:10px"></div>
+      </div>
     </div>
 
-    <details class="advanced" id="roomAdvanced">
-      <summary>Manage Sensors</summary>
-      <div id="offsetRows" style="margin-top:10px"></div>
-      <div class="ble-help">Rename or remove a sensor. The offset is applied to its reading before it is used or averaged.</div>
-    </details>
+    <div class="room-group">
+      <span class="card-label">Settings</span>
+      <div>
+        <div class="inset-row" id="bleEnableRow" style="padding-left:0;padding-right:0">
+          <div><div class="lbl" id="bleEnableLbl">Bluetooth Sensors</div><div class="sub" id="bleOffCaution" style="display:none;color:var(--text)"></div></div>
+          <label class="ios-toggle">
+            <input type="checkbox" id="bleEnableToggle" onchange="toggleBleEnabled()" aria-labelledby="bleEnableLbl">
+            <span class="ios-toggle-slider"></span>
+          </label>
+        </div>
+        <div class="inset-row" id="bleTimeoutRow" style="padding-left:0;padding-right:0;padding-bottom:0;border-bottom:none">
+          <div><label class="lbl" for="bleTimeoutInput">Ignore a Sensor After</label><div class="sub">Time without a reading.</div></div>
+          <div class="num-chip"><input type="number" id="bleTimeoutInput" min="0.5" max="60" step="0.5" inputmode="decimal"><span class="unit">min</span></div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- ===== NETWORK ===== -->
@@ -2163,7 +2207,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     return sec<60?sec+'s ago':Math.floor(sec/60)+'m ago';
   }
   function memberName(s,bit){
-    if(bit===MEMBER_INTERNAL)return 'Heat Pump Sensor';
+    if(bit===MEMBER_INTERNAL)return 'Built-in sensor';
     if(bit===MEMBER_LINK)return 'Serin Link';
     var nm=null;
     (s.bleSensors||[]).forEach(function(b){if(MEMBER_BLE0+b.i===bit)nm=b.name||('Sensor '+(b.i+1))});
@@ -2186,26 +2230,25 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     // value back as the room temp, so the thermistor is unobservable — the
     // internal row shows no reading then.
     var overridden=!!s.avgFeeding||(s.roomMode!==1&&s.roomSingle>0&&s.roomStatus===0);
-    // The internal row is informational in Average mode (checkable:false): it
+    // The internal sensor is not a row in Average mode (checkable:false): it
     // can never blend with a live remote (the pump echoes the fed value back)
-    // and it takes over automatically when nothing else reports. It also has
-    // no offset lever — the pump reads its own sensor (hasOffset:false).
-    list.push({bit:MEMBER_INTERNAL,name:memberName(s,MEMBER_INTERNAL),
-               sub:s.roomMode===1?'Used automatically when no remote sensor is live':'Built into the indoor unit',
+    // and it takes over automatically when nothing else reports, which the
+    // note under the list says. It also has no offset lever — the pump reads
+    // its own sensor (hasOffset:false).
+    list.push({bit:MEMBER_INTERNAL,name:memberName(s,MEMBER_INTERNAL),sub:'Inside the indoor unit',
                temp:overridden?null:pumpRoom(s),active:true,stale:false,off:false,
                checkable:false,hasOffset:false});
     (s.bleSensors||[]).forEach(function(b){
-      var e={bit:MEMBER_BLE0+b.i,idx:b.i,name:memberName(s,MEMBER_BLE0+b.i),badge:b.type,
+      // Type, address and signal are setup detail: they ride the row's editor,
+      // not its sub-line. Battery is appended by the row (low gets a marker).
+      var e={bit:MEMBER_BLE0+b.i,idx:b.i,name:memberName(s,MEMBER_BLE0+b.i),type:b.type,addr:b.addr,
+             rssi:b.rssi,batt:b.batt,
              temp:b.temp,ageMs:b.age,active:!!b.active,stale:!!b.stale,off:!s.bleEnabled,
              checkable:true,hasOffset:true};
-      var bits=[];
-      if(b.batt>=0)bits.push(b.batt+'% batt');
-      if(b.rssi)bits.push(b.rssi+' dBm');
       var age=fmtAge(b.age);
-      if(age)bits.push(age);else if(b.active)bits.push('updated now');
-      e.sub=e.off?'Disabled'
-           :e.stale?('Last reading '+(b.temp!=null?fmtReadingTemp(b.temp)+'°':'—')+(age?' · '+age:''))
-           :(bits.join(' · ')||'Scanning…');
+      e.sub=e.off?'Bluetooth off'
+           :e.stale?'No reading'+(age?' for '+age.replace(' ago',''):'')
+           :(age||(b.active?'Updated now':'Scanning…'));
       if(e.off)e.temp=null;
       list.push(e);
     });
@@ -2217,14 +2260,14 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     var linkWanted=s.roomMode===1?!!((s.roomMembers|0)&(1<<MEMBER_LINK)):s.roomSingle===MEMBER_LINK;
     if(s.hasLinkSensor||linkWanted){
       var lb=[];
-      if(s.linkHumidity!=null)lb.push(s.linkHumidity+'%');
       var lage=fmtAge(s.linkStaleMs);
-      if(lage)lb.push(lage);else if(s.linkActive)lb.push('updated now');
+      if(lage)lb.push(lage);else if(s.linkActive)lb.push('Updated now');
+      if(s.linkHumidity!=null)lb.push(s.linkHumidity+'% humidity');
       var lsub;
       if(!s.linkActive&&!s.linkStale){   // never reported — say why, not "waiting"
         lsub=linkSilentWhy(s);
       }else if(s.linkStale){
-        lsub='Last reading '+(s.linkTemp!=null?fmtReadingTemp(s.linkTemp)+'°':'—')+(lage?' · '+lage:'');
+        lsub='No reading'+(lage?' for '+lage.replace(' ago',''):'');
       }else{
         lsub=lb.join(' · ')||'Waiting for a reading…';
       }
@@ -2247,9 +2290,9 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   // Temperature DELTAS (offsets, spread) scale by 9/5 between units — no
   // 32 shift, unlike the absolute fmtReadingTemp path.
   function deltaScale(){return tempUnit==='F'?1.8:1}
-  function fmtOffSuffix(t){  // "(−1.0)" in the display unit
+  function fmtOff(t){  // "−1.0°" in the display unit
     var v=t/10*deltaScale();
-    return '('+(v<0?'−':'+')+Math.abs(v).toFixed(1)+')';
+    return (v<0?'−':'+')+Math.abs(v).toFixed(1)+'°';
   }
   function dispSpread(s){return (s.spread||0)*deltaScale()}
   // Skip innerHTML writes when nothing changed — cheap at 1 Hz and keeps a
@@ -2260,105 +2303,104 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   }
   function contribCount(s){var c=0;for(var b=0;b<8;b++)if((s.contrib|0)&(1<<b))c++;return c}
 
-  function roomRowHtml(s,m){
+  // The row whose editor is open (name / offset / remove), and whether that
+  // editor is asking to confirm a removal. View state only.
+  var roomEditBit=null,roomRemoveAsk=false;
+  var CHEV_SVG='<svg viewBox="0 0 24 24" aria-hidden="true"><use href="#icChev"/></svg>';
+  // One row: {cls, html}. The lead is the CHOICE (radio in One Sensor,
+  // checkbox in Average) and always shows the configuration; each sensor's
+  // own health sits on the sub-line as a dot. The row highlight follows what
+  // the pump is really fed, so a fallback moves it to the built-in row.
+  function roomRowView(s,m){
     var avg=s.roomMode===1;
-    var internalAvg=avg&&!m.checkable;              // informational row, no checkbox
     var checked=avg?(m.checkable&&!!(s.roomMembers&(1<<m.bit))):s.roomSingle===m.bit;
     var exclStale=avg&&checked&&!m.off&&!!(s.exclStale&(1<<m.bit));
-    var off=offTenths(s,m.bit);
     // While the selected remote is stale or silent the pump reads its own
-    // thermistor, so the selection highlight follows REALITY: the built-in
-    // row shows as in use, the configured row keeps only its radio semantics.
-    // With the pump unreachable there is no reality to follow, so the list
-    // shows the configuration and each sensor's own health instead.
+    // thermistor, so the highlight follows REALITY: the built-in row shows as
+    // in use, the configured row keeps its radio. With the pump unreachable
+    // there is no reality to follow, so the list shows the configuration.
     var offline=pumpOffline(s);
     var fallback=!avg&&!offline&&s.roomSingle>0&&(s.roomStatus===1||s.roomStatus===2);
     var effSel=avg?checked:(fallback?m.bit===MEMBER_INTERNAL:checked);
     var cls='src-row'+(effSel&&!exclStale&&!m.off?' sel':'')+(exclStale?' stale':'')+(m.off?' dim':'');
-    var lead;
-    if(internalAvg){
-      lead='<span class="chk" style="visibility:hidden"></span>';   // keep column alignment
-    }else if(avg){
-      lead='<span class="chk'+(checked&&!m.off?' on':'')+'">'+(checked&&!m.off?CHECK_SVG:'')+'</span>';
-    }else{
-      // A remote dot is that sensor's own liveness; the built-in dot says the
-      // pump is reading it, which nobody can know while the link is down.
-      var dot=m.off?'idle':m.stale?'error':(m.bit!==MEMBER_INTERNAL&&m.active)?'active':(effSel&&m.bit===MEMBER_INTERNAL&&!offline)?'active':'idle';
-      lead='<span class="status-dot '+dot+'"></span>';
+    var internal=m.bit===MEMBER_INTERNAL;
+    // A remote dot is that sensor's own liveness. The built-in sensor has no
+    // liveness of its own to report, so it carries none.
+    var sub=(internal||m.off?'':'<span class="status-dot '+(m.stale?'warning':m.active?'active':'idle')+'"></span>')+
+            escHtml(m.sub||'');
+    if(!m.off&&m.batt>=0){
+      // A silent sensor keeps only the low-battery marker: it is the likely cause.
+      sub+=m.batt<=20?'<span class="src-low">Battery '+m.batt+'%</span>':m.stale?'':' · '+m.batt+'% battery';
     }
     var badges='';
-    if(m.badge)badges+='<span class="src-badge mut">'+escHtml(m.badge)+'</span>';
-    if(exclStale){
-      // A member that has NEVER reported isn't "stale" — say "no data".
-      var hadReading=!!fmtAge(m.ageMs)||m.temp!=null;
-      badges+='<span class="src-badge stale">'+
-        (hadReading?(s.avgFallback?'Stale':'Excluded · stale'):(s.avgFallback?'No data':'Excluded · no data'))+'</span>';
-    }
-    if(!avg&&checked){
-      // A degraded selection isn't "Active" — the pump reverted. Stale keeps
-      // the red badge; a source that never reported gets a muted one.
-      var b=m.bit===MEMBER_INTERNAL?null:s.roomStatus===1?'stale':s.roomStatus===2?'nodata':null;
-      badges+=b==='stale'?'<span class="src-badge stale">Selected · stale</span>'
-             :b==='nodata'?'<span class="src-badge mut">Selected · no reading</span>'
-             :offline?'<span class="src-badge mut">Selected</span>'
-             :'<span class="src-badge">Active</span>';
-    }
-    if(!avg&&!checked&&fallback&&m.bit===MEMBER_INTERNAL){
-      badges+='<span class="src-badge">In use</span>';
-    }
+    if(fallback&&internal)badges='<span class="src-badge">In use</span>';
     var right='';
     if(m.temp!=null){
-      right='<span class="src-temp'+(exclStale?' mut':'')+'">'+fmtReadingTemp(m.temp)+'°';
-      if(avg&&checked&&!m.off&&!exclStale&&off)right+='<span class="adj">→ '+fmtReadingTemp(adjTemp(s,m))+'°</span>';
-      right+='</span>';
+      // The figure is what this sensor contributes: its reading plus offset.
+      var o=m.hasOffset?offTenths(s,m.bit):0;
+      right='<span class="src-temp'+(m.stale||exclStale?' mut':'')+'">'+fmtReadingTemp(o?adjTemp(s,m):m.temp)+'°'+
+            (o?'<span class="adj">offset '+fmtOff(o)+'</span>':'')+'</span>';
     }
-    // Dimmed (BLE-off) rows and the informational internal row take no taps.
-    var tappable=!m.off&&!internalAvg;
-    return '<button type="button" class="'+cls+'"'+(tappable?' role="'+(avg?'checkbox':'radio')+'" aria-checked="'+(checked?'true':'false')+
-      '" onclick="'+(avg?'toggleRoomMember('+m.bit+')':'selectRoomSingle('+m.bit+')')+'"':' disabled')+'>'+
-      lead+'<span class="src-main"><span class="lbl">'+escHtml(m.name)+badges+'</span>'+
-      (m.sub?'<span class="sub">'+escHtml(m.sub)+'</span>':'')+'</span>'+right+'</button>';
+    // A Bluetooth-off row keeps its mark (the configuration) but takes no taps.
+    var html='<button type="button" class="src-pick'+(m.hasOffset?' has-chev':'')+'"'+
+      (m.off?' disabled':' role="'+(avg?'checkbox':'radio')+'" aria-checked="'+(checked?'true':'false')+
+        '" onclick="'+(avg?'toggleRoomMember('+m.bit+')':'selectRoomSingle('+m.bit+')')+'"')+'>'+
+      '<span class="src-lead '+(avg?'check':'radio')+(checked?' on':'')+'">'+(avg&&checked?CHECK_SVG:'')+'</span>'+
+      '<span class="src-main"><span class="lbl">'+escHtml(m.name)+badges+'</span>'+
+      (sub?'<span class="sub">'+sub+'</span>':'')+'</span>'+right+'</button>';
+    if(m.hasOffset){
+      html+='<button type="button" class="src-chev" aria-expanded="'+(roomEditBit===m.bit?'true':'false')+
+        '" aria-label="Edit '+escHtml(m.name)+'" onclick="toggleRoomEdit('+m.bit+')">'+CHEV_SVG+'</button>';
+    }
+    return {cls:cls,html:html};
+  }
+  // The built-in sensor's line under the Average list, where it is a backup
+  // and not a choice.
+  function builtinNote(s){
+    return memberName(s,MEMBER_INTERNAL)+(s.avgFallback&&!pumpOffline(s)
+      ?' · in use until a sensor reports':' · backup when no sensor reports');
+  }
+  // Selected or checked Bluetooth sensors that are out because Bluetooth is
+  // off, as one sentence for the toggle row. '' when there is nothing to say.
+  function bleOffCaution(s,model){
+    if(s.bleEnabled!==false)return '';
+    var avg=s.roomMode===1,names=[];
+    model.forEach(function(m){
+      if(m.idx==null)return;
+      if(avg?((s.roomMembers|0)&(1<<m.bit)):s.roomSingle===m.bit)names.push(m.name);
+    });
+    if(!names.length)return '';
+    return names.join(' and ')+(names.length>1?' are':' is')+' not used while Bluetooth sensors are off.';
   }
 
+  // The hero owns one fact: the value the pump is fed and where it comes
+  // from. Why a sensor dropped out is the banner's line, per-sensor detail is
+  // the row's.
   function renderRoomHero(s,model){
     var avg=s.roomMode===1;
     var byBit={};model.forEach(function(m){byBit[m.bit]=m});
-    var chips='',footTxt='',warn=false;
-    var members=s.roomMembers|0;
+    var footTxt='',warn=false;
+    var builtin=memberName(s,MEMBER_INTERNAL);
     if(avg){
-      var c=contribCount(s),exclNames=[],x=0,exclChips='';
-      if(s.avgFallback&&!pumpOffline(s))chips+='<span class="chip">Built-in sensor · fallback</span>';
-      model.forEach(function(m){
-        var b=1<<m.bit;
-        if(!(members&b))return;
-        if((s.contrib|0)&b){
-          var o=offTenths(s,m.bit);
-          chips+='<span class="chip">'+escHtml(m.name)+' · '+fmtReadingTemp(adjTemp(s,m))+'°'+
-                 (o?' <span class="off">'+fmtOffSuffix(o)+'</span>':'')+'</span>';
-        }else if((s.exclOff|0)&b){
-          exclChips+='<span class="chip excl">'+escHtml(m.name)+' · BLE off</span>';x++;
-        }else if((s.exclStale|0)&b){
-          exclChips+='<span class="chip excl strike">'+escHtml(m.name)+'</span>';exclNames.push(m.name);x++;
-        }
-      });
-      chips+=exclChips;   // contributors lead, exclusions trail (frame 3b/3c order)
+      var c=contribCount(s);
+      var cs=model.filter(function(m){return (s.contrib|0)&(1<<m.bit)});
       var ageTxt=fmtAge(s.effAge);
-      if(s.avgFallback){footTxt='Selection unchanged. Averaging resumes when a sensor reports.'}
-      else if(c>=2&&dispSpread(s)>5){footTxt='Spread '+dispSpread(s).toFixed(1)+'° · equal average';warn=true}
-      else if((s.exclOff|0)&members){footTxt='BLE sensors excluded while disabled'}
-      else if(exclNames.length){footTxt='Averaging '+c+' of '+(c+x)+' · '+exclNames.join(', ')+' excluded'}
-      else if(c>=2){footTxt='Equal average · offsets applied first'+(ageTxt?' · updated '+ageTxt:'')}
-      else if(c===1){footTxt='One sensor'+(ageTxt?' · updated '+ageTxt:'')}
-      else{footTxt="Using the heat pump's built-in sensor."}
+      if(s.avgFallback){footTxt=builtin+' · no sensor is reporting';warn=true}
+      else if(c>=2){
+        footTxt=(c===2&&cs.length===2?'Average of '+cs[0].name+' and '+cs[1].name:'Average of '+c+' sensors')+
+                (ageTxt?' · '+ageTxt:'');
+      }
+      else if(c===1){footTxt=(cs.length===1?cs[0].name+' only':'One sensor')+(ageTxt?' · '+ageTxt:'')}
+      else if((s.exclOff|0)&(s.roomMembers|0)){footTxt=builtin+' · Bluetooth sensors are off'}
+      else{footTxt=builtin+((s.roomMembers|0)?'':' · no sensors checked')}
     }else{
       // Name from the bit, not the model row — the silent source's row can be
       // missing, and falling back to the internal row's name blamed the wrong
-      // sensor ("Heat Pump Sensor · no reading").
+      // sensor.
       var sel=byBit[s.roomSingle];
-      var nm=s.roomSingle===MEMBER_INTERNAL?'Built-in sensor':memberName(s,s.roomSingle);
-      if(s.roomSingle>0&&s.roomStatus===1){footTxt=nm+' stale · using the built-in sensor';warn=true}
-      else if(s.roomSingle>0&&s.roomStatus===2){footTxt=nm+' · no reading · using the built-in sensor'}
-      else{var a=sel&&fmtAge(sel.ageMs);footTxt=nm+(a?' · updated '+a:'')}
+      var nm=memberName(s,s.roomSingle);
+      if(s.roomSingle>0&&(s.roomStatus===1||s.roomStatus===2)){footTxt=builtin+' · '+nm+' is not reporting';warn=true}
+      else{var a=sel&&fmtAge(sel.ageMs);footTxt=nm+(a?' · '+a:'')}
     }
     // Link down outranks every sensor message: the hero is about the pump.
     // Neutral, not warn — the Heat Pump card above already owns the alarm.
@@ -2370,10 +2412,11 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     }
     $('heroVal').textContent=fmtReadingTemp(pumpOffline(s)?null:
       (avg&&s.avgFeeding&&s.effTemp!=null)?s.effTemp:s.room);
-    var ch=$('heroChips');setHtml(ch,chips);ch.style.display=chips?'':'none';
     var f=$('heroFoot');f.className='hero-foot'+(warn?' warn':'');f.textContent=footTxt;
   }
 
+  // The banner is for states that change what the pump is fed, and says why.
+  // A low battery is that sensor's business and sits on its row.
   function renderRoomBanner(s,model){
     var banner=$('bleBanner');
     var avg=s.roomMode===1;
@@ -2383,9 +2426,10 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     // Sensor trouble is still worth a banner while the link is down, but not
     // the clause about what the pump is reading instead.
     var offline=pumpOffline(s);
+    var covers=' The heat pump uses its built-in sensor';
     var staleM=[];model.forEach(function(m){if(avg&&(members&(1<<m.bit))&&((s.exclStale|0)&(1<<m.bit)))staleM.push(m)});
     if(avg&&s.avgFallback){
-      cls='warn';msg='No remote readings.'+(offline?'':" Using the heat pump's built-in sensor until one returns.");
+      cls='warn';msg='No sensor is reporting.'+(offline?'':covers+' until one returns.');
     }else if(avg&&staleM.length){
       var names=staleM.map(function(m){return m.name}).join(' and ');
       var aget=fmtAge(staleM[0].ageMs);
@@ -2399,33 +2443,29 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       cs.sort(function(a,b2){return adjTemp(s,a)-adjTemp(s,b2)});
       cls='caution';
       msg=(cs.length>=2?cs[0].name+' and '+cs[cs.length-1].name:'The sensors')+' disagree by '+
-          dispSpread(s).toFixed(1)+'°. Check sensor placement, or add an offset under Manage Sensors.';
+          dispSpread(s).toFixed(1)+'°. Check sensor placement, or set a calibration offset on one of them.';
     }else if(!avg&&s.roomSingle>0&&s.roomStatus===1){
       // Any remote source, Serin Link included — not just BLE slots.
       var selM=null;model.forEach(function(m){if(m.bit===s.roomSingle)selM=m});
       cls='warn';
       msg='No update from '+(selM?selM.name:memberName(s,s.roomSingle))+
-          (fmtAge(selM&&selM.ageMs)?' for '+fmtAge(selM.ageMs).replace(' ago',''):'')+
-          (!offline&&(s.bleReverted||s.roomSingle===MEMBER_LINK)?' — reverted to the built-in sensor':'');
+          (fmtAge(selM&&selM.ageMs)?' for '+fmtAge(selM.ageMs).replace(' ago',''):'')+'.'+
+          (!offline&&(s.bleReverted||s.roomSingle===MEMBER_LINK)?covers+'.':'');
     }else if(!avg&&s.roomSingle>0&&s.roomStatus===2){
       // Selected source has never reported: the pump quietly falls back, so
-      // say what's silent, why, and what's covering. This outranks the
-      // battery banner — a selection that isn't in effect matters more.
+      // say what's silent, why, and what's covering.
       cls='caution';
       if(s.roomSingle===MEMBER_LINK){
         msg=!s.remoteBonded?'Serin Link is selected but no dial is paired.'
-           :s.remoteLive===false?'No reading from Serin Link — the dial is offline'+
+           :s.remoteLive===false?'No reading from Serin Link: the dial is offline'+
               (s.remoteLastSeen>=0?' (last seen '+fmtAgo(s.remoteLastSeen)+')':'')+'.'
-           :'Serin Link is connected but hasn’t sent a reading yet.';
+           :'Serin Link is connected but has not sent a reading yet.';
       }else{
         msg='No reading yet from '+memberName(s,s.roomSingle)+'.';
       }
-      if(!offline)msg+=" Using the heat pump's built-in sensor.";
-    }else{
-      var low=null;
-      if(bleOn)(s.bleSensors||[]).forEach(function(b){if(low==null&&b.batt>=0&&b.batt<=20)low=b});
-      if(low){cls='warn';msg=(low.name||'Sensor')+' battery low ('+low.batt+'%)'}
-      else if(bleOn&&(s.bleSensors||[]).length===0&&!s.hasLinkSensor){cls='info';msg='Tap Add Sensor to pair a BLE temperature sensor.'}
+      if(!offline)msg+=covers+'.';
+    }else if(bleOn&&(s.bleSensors||[]).length===0&&!s.hasLinkSensor){
+      cls='info';msg='Tap Add Sensor to pair a Bluetooth temperature sensor.';
     }
     if(msg){banner.className='ble-banner '+cls;banner.textContent=msg;banner.style.display='flex'}
     else banner.style.display='none';
@@ -2445,16 +2485,15 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       // Only STALE exclusions degrade the summary to orange — a member out
       // because BLE is deliberately off reads as the remaining contributor
       // (frame 3f), not as a problem.
-      var members=s.roomMembers|0,c=contribCount(s),x=0,one=null;
+      var members=s.roomMembers|0,c=contribCount(s),x=0;
       model.forEach(function(m){
         if((members&(1<<m.bit))&&((s.exclStale|0)&(1<<m.bit)))x++;
-        if((s.contrib|0)&(1<<m.bit))one=m;
       });
-      if(s.avgFallback)set('error','Fallback · internal','var(--red)');
-      else if(c===0)set('idle','Heat Pump Sensor','var(--text3)');
+      // Always lead with the mode: a one-sensor average is still an average.
+      if(s.avgFallback)set('error','Average · none reporting','var(--red)');
+      else if(c===0)set('idle',memberName(s,MEMBER_INTERNAL),'var(--text3)');
       else if(x>0)set('warning','Average · '+c+' of '+(c+x),'var(--orange)');
-      else if(c===1)set('active',one?one.name:'Average · 1 sensor','var(--green)');
-      else set('active','Average · '+c+' sensors','var(--green)');
+      else set('active','Average · '+c+' sensor'+(c>1?'s':''),'var(--green)');
     }else{
       var nm=memberName(s,s.roomSingle);
       if(s.roomStatus===1)set('error',nm+' · Stale','var(--red)');
@@ -2488,36 +2527,109 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   }
   // ── room-model:end
 
-  function renderOffsetRows(s,model){
-    var el=$('offsetRows'),html='';
-    model.forEach(function(m){
-      if(!m.hasOffset)return;   // no lever exists: the pump reads its own sensor
-      var id='roomOff'+m.bit;
-      html+='<div class="off-row"><span class="nm">'+escHtml(m.name)+
-        (m.idx!=null?'<button type="button" class="icon-btn" title="Rename" onclick="renameBleSensor('+m.idx+')">✎</button>'+
-                     '<button type="button" class="icon-btn" title="Remove" onclick="removeBleSensor('+m.idx+')">✕</button>':'')+
-        '</span><span class="acts"><span class="num-chip"><input type="number" id="'+id+'" step="0.1" min="-9.9" max="9.9" oninput="markDirty(\''+id+'\')" onchange="saveRoomOffset('+m.bit+')" aria-label="Offset for '+escHtml(m.name)+'"><span class="unit">°</span></span></span></div>';
+  // The list keeps one stable wrapper per sensor: the row line is re-rendered
+  // from the state push (ages tick every second), the editor under it is
+  // built once and then only fed through applyFromDevice, so a 1 Hz push
+  // never replaces an input the user is typing in.
+  function renderRoomRows(s,model){
+    var box=$('srcRows'),avg=s.roomMode===1;
+    var list=model.filter(function(m){return !(avg&&m.bit===MEMBER_INTERNAL)});
+    var key=list.map(function(m){return m.bit}).join(',');
+    if(box.getAttribute('data-key')!==key){
+      box.textContent='';
+      list.forEach(function(m){
+        var r=document.createElement('div');r.id='srcRow'+m.bit;
+        var l=document.createElement('div');l.className='src-line';l.id='srcLine'+m.bit;
+        r.appendChild(l);box.appendChild(r);
+      });
+      box.setAttribute('data-key',key);
+    }
+    box.setAttribute('role',avg?'group':'radiogroup');
+    if(roomEditBit!=null&&!list.some(function(m){return m.bit===roomEditBit&&m.hasOffset})){
+      roomEditBit=null;roomRemoveAsk=false;
+    }
+    list.forEach(function(m){
+      var v=roomRowView(s,m),r=$('srcRow'+m.bit);
+      if(r.className!==v.cls)r.className=v.cls;
+      setHtml($('srcLine'+m.bit),v.html);
+      syncRoomEditor(s,m,r);
     });
-    setHtml(el,html);
-    model.forEach(function(m){
-      var v=offTenths(s,m.bit)/10*deltaScale();
-      applyFromDevice('roomOff'+m.bit,(Math.round(v*10)/10).toFixed(1));
+  }
+  var roomFocusName=null;   // BLE slot whose name field takes focus once its editor exists
+  function syncRoomEditor(s,m,row){
+    var ed=$('srcEdit'+m.bit);
+    if(roomEditBit!==m.bit){if(ed)ed.remove();return}
+    var offId='roomOff'+m.bit,nameId=m.idx!=null?'roomName'+m.idx:null;
+    if(!ed){
+      ed=document.createElement('div');ed.className='src-edit';ed.id='srcEdit'+m.bit;
+      var h='';
+      if(nameId){
+        h+='<div class="ef"><label for="'+nameId+'">Name</label><input type="text" class="field" id="'+nameId+
+           '" maxlength="23" autocomplete="off" spellcheck="false" oninput="markDirty(this.id)" onchange="saveBleName('+m.idx+')"></div>';
+      }
+      h+='<div class="ef"><label for="'+offId+'">Offset<small id="roomOffNote'+m.bit+'"></small></label><span class="off-ctl">'+
+         '<button type="button" class="off-step" aria-label="Lower the offset" onclick="stepRoomOffset('+m.bit+',-1)">−</button>'+
+         '<span class="off-val"><input type="number" id="'+offId+'" step="0.1" min="-9.9" max="9.9" inputmode="decimal" oninput="markDirty(this.id)" onchange="saveRoomOffset('+m.bit+')"><span class="unit">°</span></span>'+
+         '<button type="button" class="off-step" aria-label="Raise the offset" onclick="stepRoomOffset('+m.bit+',1)">+</button></span></div>';
+      if(nameId){
+        h+='<dl class="src-facts">'+(m.type?'<dt>Type</dt><dd>'+escHtml(m.type)+'</dd>':'')+
+           (m.addr?'<dt>Address</dt><dd>'+escHtml(m.addr)+'</dd>':'')+
+           '<dt>Signal</dt><dd id="roomSig'+m.idx+'"></dd></dl><div id="roomRemove'+m.idx+'"></div>';
+      }
+      ed.innerHTML=h;row.appendChild(ed);
+      clearDirty(offId);if(nameId)clearDirty(nameId);
+    }
+    var o=offTenths(s,m.bit);
+    applyFromDevice(offId,(Math.round(o/10*deltaScale()*10)/10).toFixed(1));
+    // With an offset set, show its effect on the live reading; otherwise say what it does.
+    $('roomOffNote'+m.bit).textContent=o&&m.temp!=null
+      ?fmtReadingTemp(m.temp)+'° reads as '+fmtReadingTemp(adjTemp(s,m))+'°':'Added to each reading';
+    if(!nameId)return;
+    applyFromDevice(nameId,m.name);
+    var a=Math.abs(m.rssi||0),str=a<=55?4:a<=67?3:a<=80?2:1;
+    setHtml($('roomSig'+m.idx),m.rssi&&!m.off
+      ?'<span class="signal-bars" data-strength="'+str+'" aria-hidden="true"><i></i><i></i><i></i><i></i></span>'+
+        ['','Weak','Fair','Good','Strong'][str]+' · '+String(m.rssi).replace('-','−')+' dBm'
+      :m.off?'Bluetooth off':'No signal yet');
+    setHtml($('roomRemove'+m.idx),roomRemoveAsk
+      ?'<div class="src-confirm"><span>Remove '+escHtml(m.name)+'? Its offset and place in the average are cleared.</span>'+
+        '<div class="btn-row"><button type="button" class="btn-secondary quiet" onclick="askRemoveBleSensor(false)">Cancel</button>'+
+        '<button type="button" class="btn-danger" onclick="removeBleSensor('+m.idx+')">Remove</button></div></div>'
+      :'<button type="button" class="src-remove" onclick="askRemoveBleSensor(true)">Remove Sensor</button>');
+    if(roomFocusName===m.idx){
+      roomFocusName=null;
+      var n=$(nameId);n.focus();n.select();
+    }
+  }
+
+  // A sensor just added by address: once the list carries it, open its editor
+  // on the name field so it does not stay "Sensor N".
+  var roomPendingAdd=null,roomPendingAddAt=0;
+  function openAddedSensor(s){
+    if(!roomPendingAdd)return;
+    if(Date.now()-roomPendingAddAt>15000){roomPendingAdd=null;return}
+    (s.bleSensors||[]).forEach(function(b){
+      if(roomPendingAdd&&(b.addr||'').toUpperCase()===roomPendingAdd){
+        roomPendingAdd=null;roomEditBit=MEMBER_BLE0+b.i;roomRemoveAsk=false;roomFocusName=b.i;
+      }
     });
   }
 
   function renderRoomCard(s){
+    openAddedSensor(s);
     var model=roomSensors(s);
     var avg=s.roomMode===1;
     setActive('roomModeSeg',avg?'average':'single');
-    var rows='';model.forEach(function(m){rows+=roomRowHtml(s,m)});
-    setHtml($('srcRows'),rows);
-    $('roomHelp').textContent=avg
-      ?'Check any sensors to average them. A sensor that stops reporting drops out of the average until it returns.'
-      :'The sensor the heat pump uses as the room temperature. Tap a source to switch.';
+    renderRoomRows(s,model);
+    $('roomHelp').textContent=avg?'Check the sensors to average.':'Choose the sensor the heat pump follows.';
+    var note=$('roomBuiltinNote');
+    note.style.display=avg?'':'none';
+    if(avg)note.textContent=builtinNote(s);
+    var caution=$('bleOffCaution'),ct=bleOffCaution(s,model);
+    caution.textContent=ct;caution.style.display=ct?'':'none';
     renderRoomHero(s,model);
     renderRoomBanner(s,model);
     renderRoomSummary(s,model);
-    renderOffsetRows(s,model);
   }
 
   // ── Device→field application ───────────────────────────────────────────────
@@ -2653,19 +2765,21 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
 
       // Timeout governs both remote feeds (BLE + Link) — rides the card, not
       // the BLE chrome.
-      applyFromDevice('bleTimeoutInput',s.bleTimeout||600);
+      applyFromDevice('bleTimeoutInput',String(Math.round((s.bleTimeout||600)/6)/10));
 
       // BLE-specific chrome: enable toggle + Add Sensor (absent on BLE-off builds)
       var hasBle=s.bleEnabled!==undefined;
       var bleOn=hasBle&&!!s.bleEnabled;
       $('bleEnableRow').style.display=hasBle?'':'none';
       $('bleEnableToggle').checked=bleOn;
-      $('bleAddWrap').style.display=(hasBle&&bleOn)?'':'none';
-      var addBtn=$('bleAddBtn');
+      // With Bluetooth off the control stays and says why it is unavailable.
+      $('bleAddWrap').style.display=hasBle?'':'none';
       var listFull=(s.bleSensors||[]).length>=MAX_BLE_SENSORS;
-      applyBleScanView(bleScanView(!!s.bleDiscovering,s.bleScanSec||0,listFull));
-      $('bleManualToggle').style.display=listFull?'none':'';
-      if(listFull)$('bleManualWrap').style.display='none';
+      applyBleScanView(bleScanView(bleOn&&!!s.bleDiscovering,s.bleScanSec||0,listFull,!bleOn));
+      var noAdd=listFull||!bleOn;
+      $('bleManualToggle').style.display=noAdd?'none':'';
+      if(noAdd)$('bleManualWrap').style.display='none';
+      if(!bleOn)closeBleScanList();
     }else{
       // Neither a remote-capable build nor a bonded Link dial: hide the card.
       // Reachable at runtime (not just at boot) if a Serin Link dial unpairs.
@@ -3190,9 +3304,10 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   $('bleTimeoutInput').addEventListener('input',function(){markDirty('bleTimeoutInput')});
   // Timeout saves on commit (blur/Enter) — the Save Sensor cluster it used to
   // ride along with is gone.
+  // Shown in minutes, stored in seconds (30–3600 on the device).
   $('bleTimeoutInput').addEventListener('change',function(){
-    var t=parseInt(this.value,10);
-    if(isNaN(t)||t<30||t>3600){showBleToast('Timeout must be 30–3600 seconds',true);return}
+    var t=Math.round(parseFloat(this.value)*60);
+    if(isNaN(t)||t<30||t>3600){showToast('Enter 0.5 to 60 minutes',true);return}
     if(send({cmd:'config',bleTimeout:t}))clearDirty('bleTimeoutInput');
     else showToast('Not connected — change not sent',true);
   });
@@ -3239,23 +3354,35 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     if(send({cmd:'config',roomOffIdx:bit,roomOffVal:t}))clearDirty(id);
     else showToast('Not connected — change not sent',true);
   };
-  window.renameBleSensor=function(idx){
-    // The row was drawn from the list, so no list now means the frame that
-    // carried it was rolled back. Prefilling '' from that offers a blank box
-    // for a name we simply do not have.
-    var list=lastState&&lastState.bleSensors;
-    if(!list){showToast('Sensor list not loaded — try again',true);return}
-    var cur='';
-    list.forEach(function(b){if(b.i===idx)cur=b.name||''});
-    var nm=prompt('Sensor name',cur);
-    if(nm==null) return;
-    nm=nm.trim().slice(0,23);
-    if(!nm) return;
-    if(!send({cmd:'config',bleRenIdx:idx,bleRenName:nm}))showToast('Not connected — change not sent',true);
+  // The +/− buttons beside the offset field: half a degree in the display unit.
+  window.stepRoomOffset=function(bit,dir){
+    var id='roomOff'+bit,el=$(id);if(!el)return;
+    var lim=9.9*deltaScale(),v=parseFloat(el.value);
+    if(isNaN(v))v=0;
+    v=Math.max(-lim,Math.min(lim,Math.round((v+dir*0.5)*10)/10));
+    el.value=v.toFixed(1);markDirty(id);
+    window.saveRoomOffset(bit);
+  };
+  window.toggleRoomEdit=function(bit){
+    roomEditBit=roomEditBit===bit?null:bit;roomRemoveAsk=false;
+    if(lastState)renderRoomCard(lastState);
+  };
+  window.saveBleName=function(idx){
+    var id='roomName'+idx,el=$(id);if(!el)return;
+    var nm=el.value.trim().slice(0,23);
+    if(!nm){clearDirty(id);return}   // an empty name is not a rename; the device's name returns
+    if(send({cmd:'config',bleRenIdx:idx,bleRenName:nm}))clearDirty(id);
+    else showToast('Not connected — change not sent',true);
+  };
+  // Removal is confirmed in the row's editor, by name.
+  window.askRemoveBleSensor=function(on){
+    roomRemoveAsk=!!on;
+    if(lastState)renderRoomCard(lastState);
   };
   window.removeBleSensor=function(idx){
-    if(!confirm('Remove this sensor? Its offset and place in the average are cleared.')) return;
-    if(!send({cmd:'config',bleDelIdx:idx}))showToast('Not connected — change not sent',true);
+    if(!send({cmd:'config',bleDelIdx:idx})){showToast('Not connected — change not sent',true);return}
+    roomEditBit=null;roomRemoveAsk=false;
+    if(lastState)renderRoomCard(lastState);
   };
   // Test hook: lets a headless harness drive the closure-scoped state
   // handler directly (no live WebSocket needed). Not used by the UI.
@@ -3265,7 +3392,8 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   // minutes to show up, so a session stays open until the user picks one or
   // stops it (the firmware caps it at 10 minutes): the button doubles as Stop
   // and a status line counts up from the firmware's elapsed time.
-  function bleScanView(discovering,sec,listFull){
+  function bleScanView(discovering,sec,listFull,bleOff){
+    if(bleOff)return {btn:'Turn on Bluetooth Sensors to add one',disabled:true,scanning:false,status:''};
     if(discovering){
       var m=Math.floor(sec/60),r=sec%60;
       return {btn:'Stop Scanning',disabled:false,scanning:true,
@@ -3280,11 +3408,24 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     st.textContent=v.status;st.style.display=v.status?'':'none';
   }
   function bleListFull(){return !!(lastState&&(lastState.bleSensors||[]).length>=MAX_BLE_SENSORS)}
-  function hideBleScanResults(){
-    bleScanPicked=true;   // ignore trailing pushes from the session being ended
+  function closeBleScanList(){
     $('bleScanResults').style.display='none';
     $('bleScanResults').textContent='';
+    $('bleScanDone').style.display='none';
   }
+  function hideBleScanResults(){
+    bleScanPicked=true;   // ignore trailing pushes from the session being ended
+    closeBleScanList();
+  }
+  // "Done" under the results: end the session if one is running and put the
+  // list away. A finished scan used to leave its results on screen for good.
+  window.closeBleScan=function(){
+    if($('bleAddBtn').classList.contains('scanning')){
+      send({cmd:'bleScanStop'});
+      applyBleScanView(bleScanView(false,0,bleListFull()));
+    }
+    hideBleScanResults();
+  };
   var bleScanPicked=false;
   window.startBleScan=function(){
     if(!ensureConnected()) return;
@@ -3296,8 +3437,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     }
     applyBleScanView(bleScanView(true,0,false));
     bleScanPicked=false;
-    $('bleScanResults').style.display='none';
-    $('bleScanResults').textContent='';
+    closeBleScanList();
     send({cmd:'bleScan'});
   };
   function onBleScanResults(msg){
@@ -3312,6 +3452,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     if(bleScanPicked)return;
     var el=$('bleScanResults');
     el.textContent='';
+    $('bleScanDone').style.display='';
     if(!msg.devices||msg.devices.length===0){
       if(msg.done){
         var empty=document.createElement('div');
@@ -3346,7 +3487,9 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
         reading.textContent=d.rssi+' dBm';
       }
       meta.appendChild(reading);meta.appendChild(sub);
-      row.appendChild(bars);row.appendChild(info);row.appendChild(meta);
+      var add=document.createElement('span');add.className='scan-add';add.textContent='Add';
+      row.setAttribute('aria-label','Add '+d.type+' '+d.addr);
+      row.appendChild(bars);row.appendChild(info);row.appendChild(meta);row.appendChild(add);
       el.appendChild(row);
     }
     if(msg.truncated){
@@ -3370,13 +3513,16 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
   }
   function pickBleSensor(addr){
     hideBleScanResults();
-    // Saved with a default name ("Sensor N"); rename lives under Manage Sensors.
+    // Saved with a default name ("Sensor N"); its editor opens on the name
+    // field as soon as the list carries it (openAddedSensor).
     // The firmware ends the scan on the add, so the control resets right away.
     if(!send({cmd:'config',bleAddMac:addr})){showToast('Not connected — change not sent',true);return}
+    noteAddedSensor(addr);
     applyBleScanView(bleScanView(false,0,false));
     showBleToast('Sensor added: '+addr);
   }
   window.pickBleSensor=pickBleSensor;
+  function noteAddedSensor(addr){roomPendingAdd=String(addr).toUpperCase();roomPendingAddAt=Date.now()}
   // Manual add-by-MAC — for sensors that are out of range right now, or
   // that a scan has not caught yet.
   window.toggleBleManual=function(){
@@ -3389,6 +3535,7 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     var mac=$('bleManualMac').value.trim().toUpperCase();
     if(!/^([0-9A-F]{2}:){5}[0-9A-F]{2}$/.test(mac)){showBleToast('Invalid MAC — use AA:BB:CC:DD:EE:FF',true);return}
     if(!send({cmd:'config',bleAddMac:mac})){showToast('Not connected — change not sent',true);return}
+    noteAddedSensor(mac);
     $('bleManualMac').value='';
     $('bleManualWrap').style.display='none';
     showBleToast('Sensor added: '+mac);

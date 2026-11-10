@@ -130,7 +130,7 @@ const roomRenderFactory = vm.runInThisContext(
   '    _a:{},setAttribute:function(k,v){this._a[k]=v},getAttribute:function(k){return this._a[k]}};\n' +
   '    return els[id]}\n' +
   block('room-model') + '\n' +
-  '  return {els:els,roomSensors:roomSensors,roomRowHtml:roomRowHtml,\n' +
+  '  return {els:els,roomSensors:roomSensors,roomRowView:roomRowView,builtinNote:builtinNote,bleOffCaution:bleOffCaution,\n' +
   '    renderRoomHero:renderRoomHero,renderRoomBanner:renderRoomBanner,\n' +
   '    renderRoomSummary:renderRoomSummary,pumpRoom:pumpRoom,\n' +
   '    tempSourceView:tempSourceView,MEMBER_LINK:MEMBER_LINK};\n' +
@@ -180,7 +180,7 @@ for (const name of ['setRoomMode', 'selectRoomSingle', 'toggleRoomMember']) {
 if (typeof mergeState !== 'function')
   throw new Error('state-merge block does not define mergeState()');
 const renderProbe = roomRenderFactory();
-for (const name of ['roomSensors', 'roomRowHtml', 'renderRoomHero', 'renderRoomBanner',
+for (const name of ['roomSensors', 'roomRowView', 'builtinNote', 'bleOffCaution', 'renderRoomHero', 'renderRoomBanner',
                     'renderRoomSummary', 'pumpRoom', 'tempSourceView']) {
   if (typeof renderProbe[name] !== 'function')
     throw new Error(`room-model block does not define ${name}()`);
