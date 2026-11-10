@@ -282,20 +282,20 @@ These sources can supply that reading, all managed from the **Room Sensor** card
 
 | Source | Reading from | Requires |
 |--------|--------------|----------|
-| **Heat Pump Sensor** | The unit's own internal thermistor | Nothing; always available, and the fallback for every other source |
-| **Remote Sensor** | A BLE thermometer placed in the room, up to 4 of them | A board with Bluetooth and at least one configured sensor |
+| **Built-in sensor** | The unit's own internal thermistor | Nothing; always available, and the fallback for every other source |
+| **Bluetooth sensor** | A BLE thermometer placed in the room, up to 4 of them | A board with Bluetooth and at least one configured sensor |
 | **Serin Link** | The temperature sensor inside a paired dial | A paired Serin Link whose hardware reports sensing capability |
 
 Only sources the unit can actually serve are listed. The card runs in one of two modes:
 
-- **Single** — one source feeds the heat pump. Tap a row to switch.
-- **Average** — check any number of remote sources and the firmware feeds their equal-weight mean, with each sensor's offset applied before the average is taken. Each sensing Link dial counts separately, so two dials can supply an average without a BLE sensor.
+- **One Sensor** — one source feeds the heat pump. Tap a row to switch.
+- **Average of Several** — check any number of remote sources and the firmware feeds their equal-weight mean, with each sensor's offset applied before the average is taken. Each sensing Link dial counts separately, so two dials can supply an average without a BLE sensor.
 
 Whichever mode is active, the resulting value is forwarded to the heat pump every 20 seconds. A source that goes quiet past the stale timeout (default 10 minutes, adjustable from 30 seconds to 1 hour) is dropped: in Average mode it leaves the blend until it returns, and when no remote source is left the heat pump goes back to its own thermistor. The selection is kept either way, so it recovers when readings resume.
 
 The heat pump's own sensor is never blended with a live remote reading. The CN105 echoes back whatever value it is fed as the room temperature, so the thermistor is unobservable while an override is active; checking nothing simply leaves the unit on its own sensor.
 
-### Remote Sensor (BLE)
+### Bluetooth Sensor (BLE)
 
 The firmware listens for BLE advertisements from the configured sensors. No Bluetooth pairing needed, just power the sensor on. The first sensor in the list also shows up in Apple Home as its own accessory (separate from the climate tile) reporting temperature, humidity, and battery level. Home shows a low-battery warning when the cell drops to 20% or below.
 
@@ -318,14 +318,14 @@ The firmware auto-detects the sensor type from the BLE advertisement format.
 
 The **Room Sensor** card carries the BLE settings on boards with Bluetooth:
 
-- **Single / Average** — pick between one feeding source and a blend of several
-- **Headline** — what the heat pump currently sees, the sensors behind it, and why (equal average, one sensor, fallback, or a spread warning when the contributors disagree)
-- **Source rows** — one row per available source, each showing its live reading, battery, signal, and how long ago it last reported. Tap to select in Single mode, check to include in Average mode.
-- **Add Sensor…** — scan for nearby thermometers with their live temperature and humidity, or *Enter address manually…* to type a MAC. The scan keeps looking until you pick a sensor or tap *Stop Scanning* (at most 10 minutes); some sensors take a minute or more to appear. Up to 4 sensors; each can be renamed after the room it sits in, or removed.
-- **Enable Remote Sensors** — turn BLE scanning on or off
-- **Sensor Timeout** — how long a source may go quiet before it counts as stale (30–3600 s)
-- **Manage Sensors** — rename or remove a sensor, and set a calibration offset per sensor (±9.9 °C, entered in the display unit), applied to each reading before it is used or averaged
-- **Indicators** — green (healthy), orange (stale or no data yet), gray (not configured)
+- **Heat pump sees** — the value the heat pump is fed right now and where it comes from (one sensor, the average and its contributors, or the built-in sensor during a fallback). A banner appears under it only when a sensor dropping out changes that value.
+- **Use: One Sensor / Average of Several** — pick between one feeding source and a blend of several
+- **Sensor rows** — one row per available sensor with its reading (offset applied), how long ago it last reported, and its battery. Select one in One Sensor mode, check any number in Average of Several mode. A battery at 20% or below is marked on the row.
+- **Row editor** — tap the chevron on a row to rename the sensor, set a calibration offset (±9.9 °C, entered in the display unit, added to each reading before it is used or averaged), see its type, address and signal, or remove it
+- **Add Sensor…** — scan for nearby thermometers with their live temperature and humidity, or *Enter address manually…* to type a MAC. The scan keeps looking until you add a sensor, tap *Stop Scanning*, or tap *Done* (at most 10 minutes); some sensors take a minute or more to appear. A new sensor opens on its name field. Up to 4 sensors.
+- **Bluetooth Sensors** — turn BLE scanning on or off. While it is off the Bluetooth rows stay listed and the heat pump does not use them.
+- **Ignore a Sensor After** — how long a source may go quiet before it is dropped (0.5–60 minutes)
+- **Indicators** — green (reporting), orange (no recent reading), gray (no reading yet)
 
 ## Serin Link
 

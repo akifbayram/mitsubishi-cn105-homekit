@@ -403,9 +403,10 @@ const limits=(v)=>({custom:v.custom,min:v.min,max:v.max});
   // Hero foot names the silent source, not the fallback sensor.
   ui.renderRoomHero(IDLE_LINK, model);
   assert.strictEqual(ui.els.heroFoot.textContent,
-    'Serin Link · no reading · using the built-in sensor',
-    'hero foot names the source that is silent');
-  checks++;
+    'Built-in sensor · Serin Link is not reporting',
+    'hero line names the sensor in use and the source that is silent');
+  assert.strictEqual(ui.els.heroFoot.className, 'hero-foot warn', 'a fallback hero line is warn-tier');
+  checks += 2;
 
   // The banner slot goes to the source failure, not the battery warning.
   ui.renderRoomBanner(IDLE_LINK, model);
@@ -427,16 +428,31 @@ const limits=(v)=>({custom:v.custom,min:v.min,max:v.max});
 
   // The list shows reality: built-in row carries the highlight and "In use",
   // the configured-but-silent row sits idle with a muted "Selected" badge.
-  const ih = ui.roomRowHtml(IDLE_LINK, model.find(m => m.bit === 0));
-  assert.ok(/class="src-row sel"/.test(ih), 'built-in row takes the selection highlight during fallback');
-  assert.ok(ih.indexOf('status-dot active') >= 0, 'built-in row dot goes green during fallback');
-  assert.ok(ih.indexOf('In use') >= 0, 'built-in row is labeled In use during fallback');
-  const lh = ui.roomRowHtml(IDLE_LINK, link);
-  assert.ok(lh.indexOf('status-dot idle') >= 0, 'silent link row keeps an idle dot');
-  assert.ok(lh.indexOf('Selected · no reading') >= 0, 'silent link row keeps a muted Selected badge');
-  assert.ok(!/class="src-row sel"/.test(lh), 'silent link row gives up the selection highlight');
-  assert.ok(lh.indexOf('aria-checked="true"') >= 0, 'tap semantics still follow the configured selection');
-  checks += 7;
+  const ih = ui.roomRowView(IDLE_LINK, model.find(m => m.bit === 0));
+  assert.strictEqual(ih.cls, 'src-row sel', 'built-in row takes the selection highlight during fallback');
+  assert.ok(ih.html.indexOf('status-dot') < 0, 'the built-in row carries no health dot');
+  assert.ok(ih.html.indexOf('In use') >= 0, 'built-in row is labeled In use during fallback');
+  assert.ok(ih.html.indexOf('src-lead radio"') >= 0, 'built-in row radio stays off: it is not the configured choice');
+  const lh = ui.roomRowView(IDLE_LINK, link);
+  assert.ok(lh.html.indexOf('status-dot idle') >= 0, 'silent link row keeps an idle dot');
+  assert.ok(lh.html.indexOf('src-lead radio on') >= 0, 'silent link row keeps its radio: the configuration');
+  assert.strictEqual(lh.cls, 'src-row', 'silent link row gives up the selection highlight');
+  assert.ok(lh.html.indexOf('aria-checked="true"') >= 0, 'tap semantics still follow the configured selection');
+  assert.ok(lh.html.indexOf('src-chev') >= 0 && ih.html.indexOf('src-chev') < 0,
+    'sensors with an offset get an editor chevron; the built-in sensor has none');
+  checks += 9;
+
+  // A low battery is the sensor's own line, never the card banner.
+  const lowRow = ui.roomRowView(IDLE_LINK, model.find(m => m.bit === 2));
+  assert.ok(lowRow.html.indexOf('<span class="src-low">Battery 17%</span>') >= 0, 'low battery is marked on its row');
+  assert.ok(ui.roomRowView(IDLE_LINK, model.find(m => m.bit === 3)).html.indexOf('100% battery') >= 0 ,
+    'a healthy battery is plain text');
+  assert.ok(lowRow.html.indexOf('Govee') < 0 && lowRow.html.indexOf('dBm') < 0,
+    'type and signal stay out of the row');
+  const healthy = Object.assign({}, IDLE_LINK, { roomSingle: 0, roomStatus: 0 });
+  ui.renderRoomBanner(healthy, ui.roomSensors(healthy));
+  assert.strictEqual(ui.els.bleBanner.style.display, 'none', 'a low battery alone raises no banner');
+  checks += 4;
 
   // Stale Link now gets the single-mode warn banner (it was BLE-only).
   const staleSt = Object.assign({}, IDLE_LINK, {
@@ -453,11 +469,11 @@ const limits=(v)=>({custom:v.custom,min:v.min,max:v.max});
   // and the built-in row carries no fallback markers.
   const okSt = Object.assign({}, IDLE_LINK, { roomSingle: 2, roomStatus: 0 });
   const okModel = ui.roomSensors(okSt);
-  const okRow = ui.roomRowHtml(okSt, okModel.find(m => m.bit === 2));
-  assert.ok(/class="src-row sel"/.test(okRow) && okRow.indexOf('>Active<') >= 0,
-    'a healthy selected row keeps the highlight and Active badge');
-  const okInternal = ui.roomRowHtml(okSt, okModel.find(m => m.bit === 0));
-  assert.ok(okInternal.indexOf('In use') < 0 && !/class="src-row sel"/.test(okInternal),
+  const okRow = ui.roomRowView(okSt, okModel.find(m => m.bit === 2));
+  assert.ok(okRow.cls === 'src-row sel' && okRow.html.indexOf('src-lead radio on') >= 0,
+    'a healthy selected row keeps the highlight and its radio');
+  const okInternal = ui.roomRowView(okSt, okModel.find(m => m.bit === 0));
+  assert.ok(okInternal.html.indexOf('In use') < 0 && okInternal.cls === 'src-row',
     'the built-in row carries no fallback markers while a remote is live');
   checks += 2;
 }
@@ -501,18 +517,18 @@ const limits=(v)=>({custom:v.custom,min:v.min,max:v.max});
 
   ui.renderRoomHero(LIVE, ui.roomSensors(LIVE));
   assert.strictEqual(ui.els.heroVal.textContent, '22.5', 'connected hero still shows the echoed value');
-  assert.strictEqual(ui.els.heroFoot.textContent, 'Living Room · updated 12s ago', 'connected foot unchanged');
+  assert.strictEqual(ui.els.heroFoot.textContent, 'Living Room · 12s ago', 'connected hero line names the sensor and its age');
   checks += 2;
 
   // Rows: the selection stays highlighted but is not "Active"; sensor dots
   // keep meaning "this sensor is reporting", so a live selected sensor does
   // not go grey next to a live unselected one.
-  const selRow = ui.roomRowHtml(OFF, model.find(m => m.bit === 2));
-  assert.ok(/class="src-row sel"/.test(selRow), 'selection highlight survives the outage');
-  assert.ok(selRow.indexOf('src-badge mut">Selected<') >= 0 && selRow.indexOf('>Active<') < 0,
-    'Active becomes a muted Selected while offline');
-  assert.ok(selRow.indexOf('status-dot active') >= 0, 'a live selected sensor keeps its live dot');
-  assert.ok(ui.roomRowHtml(OFF, model.find(m => m.bit === 3)).indexOf('status-dot active') >= 0,
+  const selRow = ui.roomRowView(OFF, model.find(m => m.bit === 2));
+  assert.strictEqual(selRow.cls, 'src-row sel', 'selection highlight survives the outage');
+  assert.ok(selRow.html.indexOf('src-lead radio on') >= 0 && selRow.html.indexOf('src-badge') < 0,
+    'the selection is the radio; no badge claims the pump is using it');
+  assert.ok(selRow.html.indexOf('status-dot active') >= 0, 'a live selected sensor keeps its live dot');
+  assert.ok(ui.roomRowView(OFF, model.find(m => m.bit === 3)).html.indexOf('status-dot active') >= 0,
     'an unselected live sensor keeps its live dot too');
   const intRow = model.find(m => m.bit === 0);
   assert.strictEqual(intRow.temp, null, 'built-in row shows no reading while offline');
@@ -521,17 +537,16 @@ const limits=(v)=>({custom:v.custom,min:v.min,max:v.max});
   // Fallback is a claim about what the pump reads; offline it cannot be made.
   const staleOff = Object.assign({}, OFF, { roomStatus: 1 });
   const staleModel = ui.roomSensors(staleOff);
-  const fbInt = ui.roomRowHtml(staleOff, staleModel.find(m => m.bit === 0));
-  assert.ok(fbInt.indexOf('In use') < 0 && !/class="src-row sel"/.test(fbInt) &&
-            fbInt.indexOf('status-dot idle') >= 0,
+  const fbInt = ui.roomRowView(staleOff, staleModel.find(m => m.bit === 0));
+  assert.ok(fbInt.html.indexOf('In use') < 0 && fbInt.cls === 'src-row',
     'built-in row is not "In use" while offline');
-  const fbSel = ui.roomRowHtml(staleOff, staleModel.find(m => m.bit === 2));
-  assert.ok(/class="src-row sel"/.test(fbSel) && fbSel.indexOf('Selected · stale') >= 0,
-    'a stale selection keeps its highlight and stale badge while offline');
+  const fbSel = ui.roomRowView(staleOff, staleModel.find(m => m.bit === 2));
+  assert.ok(fbSel.cls === 'src-row sel' && fbSel.html.indexOf('src-lead radio on') >= 0,
+    'a stale selection keeps its highlight and radio while offline');
   // Not overridden by a live feed here, so only the link rule blanks it.
   assert.strictEqual(staleModel.find(m => m.bit === 0).temp, null,
     'built-in row shows no reading during an offline fallback');
-  assert.ok(fbInt.indexOf('src-temp') < 0, 'built-in row renders no temperature during an offline fallback');
+  assert.ok(fbInt.html.indexOf('src-temp') < 0, 'built-in row renders no temperature during an offline fallback');
   checks += 4;
 
   // Banner: the sensor trouble stays, the claim about the pump goes.
@@ -548,7 +563,7 @@ const limits=(v)=>({custom:v.custom,min:v.min,max:v.max});
   });
   const silentModel = ui.roomSensors(silentOff);
   ui.renderRoomBanner(silentOff, silentModel);
-  assert.strictEqual(ui.els.bleBanner.textContent, 'Serin Link is connected but hasn’t sent a reading yet.',
+  assert.strictEqual(ui.els.bleBanner.textContent, 'Serin Link is connected but has not sent a reading yet.',
     'offline no-reading banner drops "Using the heat pump\'s built-in sensor"');
   ui.renderRoomHero(silentOff, silentModel);
   assert.strictEqual(ui.els.heroFoot.textContent, 'Not connected to the heat pump',
@@ -558,12 +573,12 @@ const limits=(v)=>({custom:v.custom,min:v.min,max:v.max});
   // Built-in selected: nothing is sent, so the foot and labels say only that.
   const intOff = Object.assign({}, OFF, { roomSingle: 0 });
   const intModel = ui.roomSensors(intOff);
-  const intSel = ui.roomRowHtml(intOff, intModel.find(m => m.bit === 0));
-  assert.ok(intSel.indexOf('status-dot idle') >= 0 && intSel.indexOf('src-badge mut">Selected<') >= 0,
-    'selected built-in row is idle and Selected while offline');
+  const intSel = ui.roomRowView(intOff, intModel.find(m => m.bit === 0));
+  assert.ok(intSel.html.indexOf('src-lead radio on') >= 0 && intSel.html.indexOf('src-badge') < 0,
+    'selected built-in row keeps its radio and claims nothing while offline');
   assert.strictEqual(intModel.find(m => m.bit === 0).temp, null,
     'selected built-in row shows no reading while offline');
-  assert.ok(intSel.indexOf('src-temp') < 0, 'selected built-in row renders no temperature while offline');
+  assert.ok(intSel.html.indexOf('src-temp') < 0, 'selected built-in row renders no temperature while offline');
   checks += 2;
   ui.renderRoomHero(intOff, intModel);
   assert.strictEqual(ui.els.heroFoot.textContent, 'Not connected to the heat pump',
@@ -581,16 +596,19 @@ const limits=(v)=>({custom:v.custom,min:v.min,max:v.max});
   assert.strictEqual(ui.els.roomStatusLabel.style.color, 'var(--text3)', 'header label is neutral grey');
   checks += 3;
 
-  // Average: no number, chips stay (they are sensor values), foot and header
-  // follow the same rule.
+  // Average: no number; the rows keep the sensor values; foot and header
+  // follow the same rule. The built-in sensor is a note, not a row.
   const avgOff = Object.assign({}, OFF, {
     roomMode: 1, roomMembers: 0b1100, contrib: 0b1100, avgFeeding: true, effTemp: 22.15
   });
   const avgModel = ui.roomSensors(avgOff);
   ui.renderRoomHero(avgOff, avgModel);
   assert.strictEqual(ui.els.heroVal.textContent, '--', 'average hero blanks while offline');
-  assert.ok(/Living Room/.test(ui.els.heroChips.innerHTML) && /Bedroom/.test(ui.els.heroChips.innerHTML),
-    'average chips keep the sensor values');
+  assert.ok(ui.roomRowView(avgOff, avgModel.find(m => m.bit === 2)).html.indexOf('src-lead check on') >= 0,
+    'average rows are checkboxes');
+  assert.strictEqual(ui.builtinNote(avgOff), 'Built-in sensor · backup when no sensor reports',
+    'the built-in sensor is a backup note in Average');
+  checks++;
   assert.strictEqual(ui.els.heroFoot.textContent,
     'Not connected to the heat pump · the average will be sent when it reconnects',
     'average foot explains the link');
@@ -608,11 +626,11 @@ const limits=(v)=>({custom:v.custom,min:v.min,max:v.max});
   assert.strictEqual(fbAvgModel.find(m => m.bit === 0).temp, null,
     'average built-in row shows no reading while offline');
   ui.renderRoomHero(fbAvgOff, fbAvgModel);
-  assert.ok(!/fallback/.test(ui.els.heroChips.innerHTML), 'no "Built-in sensor · fallback" chip while offline');
+  assert.ok(!/in use/.test(ui.builtinNote(fbAvgOff)), 'the note does not claim the built-in sensor is in use while offline');
   assert.strictEqual(ui.els.heroFoot.textContent, 'Not connected to the heat pump',
     'average with no live member promises nothing on reconnect');
   ui.renderRoomBanner(fbAvgOff, fbAvgModel);
-  assert.strictEqual(ui.els.bleBanner.textContent, 'No remote readings.',
+  assert.strictEqual(ui.els.bleBanner.textContent, 'No sensor is reporting.',
     'average fallback banner drops the built-in clause while offline');
   ui.renderRoomSummary(fbAvgOff, fbAvgModel);
   assert.strictEqual(ui.els.roomStatusLabel.textContent, 'Heat pump offline',
@@ -622,12 +640,47 @@ const limits=(v)=>({custom:v.custom,min:v.min,max:v.max});
   // Connected fallback keeps its existing copy.
   const fbAvgOn = Object.assign({}, fbAvgOff, { connected: true });
   ui.renderRoomBanner(fbAvgOn, ui.roomSensors(fbAvgOn));
-  assert.ok(/Using the heat pump's built-in sensor/.test(ui.els.bleBanner.textContent),
-    'connected average fallback banner is unchanged');
+  assert.ok(/uses its built-in sensor until one returns/.test(ui.els.bleBanner.textContent),
+    'connected average fallback banner names what covers');
   ui.renderRoomHero(fbAvgOn, ui.roomSensors(fbAvgOn));
-  assert.ok(/Built-in sensor · fallback/.test(ui.els.heroChips.innerHTML),
-    'connected average fallback chip is unchanged');
-  checks += 2;
+  assert.strictEqual(ui.els.heroFoot.textContent, 'Built-in sensor · no sensor is reporting',
+    'connected average fallback hero names the sensor in use');
+  assert.strictEqual(ui.builtinNote(fbAvgOn), 'Built-in sensor · in use until a sensor reports',
+    'connected average fallback note says the built-in sensor is in use');
+  ui.renderRoomSummary(fbAvgOn, ui.roomSensors(fbAvgOn));
+  assert.strictEqual(ui.els.roomStatusLabel.textContent, 'Average · none reporting',
+    'the header keeps the mode during a fallback');
+  checks += 4;
+
+  // Healthy average: the hero names its contributors once; a one-sensor
+  // average still reads as an average in the header.
+  const avgOn = Object.assign({}, avgOff, { connected: true, effAge: 12000 });
+  ui.renderRoomHero(avgOn, ui.roomSensors(avgOn));
+  assert.strictEqual(ui.els.heroFoot.textContent, 'Average of Living Room and Bedroom · 12s ago');
+  const oneOn = Object.assign({}, avgOn, { roomMembers: 0b0100, contrib: 0b0100 });
+  ui.renderRoomHero(oneOn, ui.roomSensors(oneOn));
+  assert.strictEqual(ui.els.heroFoot.textContent, 'Living Room only · 12s ago');
+  ui.renderRoomSummary(oneOn, ui.roomSensors(oneOn));
+  assert.strictEqual(ui.els.roomStatusLabel.textContent, 'Average · 1 sensor');
+  const offsetOn = Object.assign({}, oneOn, { roomOffs: [0, 0, -10, 0] });
+  const offRow = ui.roomRowView(offsetOn, ui.roomSensors(offsetOn).find(m => m.bit === 2)).html;
+  assert.ok(/class="src-temp">21\.4°<span class="adj">offset −1\.8°<\/span>/.test(offRow),
+    'a row shows the offset-applied value and names the offset in the display unit: ' + offRow);
+  checks += 4;
+
+  // Bluetooth off: the configured sensors stay listed, dimmed and untappable,
+  // and the toggle row names what dropped out.
+  const btOff = Object.assign({}, LIVE, { bleEnabled: false, roomStatus: 2 });
+  const btModel = ui.roomSensors(btOff);
+  const btRow = ui.roomRowView(btOff, btModel.find(m => m.bit === 2));
+  assert.ok(btRow.cls === 'src-row dim' && / disabled>/.test(btRow.html) && btRow.html.indexOf('Bluetooth off') >= 0 &&
+            btRow.html.indexOf('src-lead radio on') >= 0,
+    'a Bluetooth-off selection is dimmed, untappable, and still shown as the choice');
+  assert.strictEqual(ui.bleOffCaution(btOff, btModel), 'Living Room is not used while Bluetooth sensors are off.');
+  assert.strictEqual(ui.bleOffCaution(LIVE, ui.roomSensors(LIVE)), '', 'no caution while Bluetooth is on');
+  assert.strictEqual(ui.bleOffCaution(Object.assign({}, btOff, { roomSingle: 0 }), btModel), '',
+    'no caution when no Bluetooth sensor is in use');
+  checks += 4;
 
   // Climate panel source line under the Room reading.
   assert.deepStrictEqual(ui.tempSourceView(LIVE), { label: 'Living Room', live: true, stale: false },
@@ -803,6 +856,10 @@ const limits=(v)=>({custom:v.custom,min:v.min,max:v.max});
     'no session: plain Add Sensor with no status line');
   const full = bleScanView(false, 0, true);
   assert.strictEqual(full.btn, 'Sensor list full');
+  const off = bleScanView(true, 30, false, true);
+  assert.ok(off.disabled && !off.scanning && /Turn on Bluetooth Sensors/.test(off.btn),
+    'with Bluetooth off the control stays, disabled, and says why');
+  checks++;
   assert.strictEqual(full.disabled, true, 'a full list cannot start a scan');
   // A session that is already open still shows Stop even if the list filled,
   // so it can always be ended.
