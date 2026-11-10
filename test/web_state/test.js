@@ -682,6 +682,36 @@ const limits=(v)=>({custom:v.custom,min:v.min,max:v.max});
     'no caution when no Bluetooth sensor is in use');
   checks += 4;
 
+  // The firmware reports that state as "no reading" (bench, 2026-11-10). The
+  // cause is the user's switch, so the card says that once, on the toggle
+  // row, and does not call the sensor silent in the hero, banner or header.
+  ui.renderRoomHero(btOff, btModel);
+  assert.strictEqual(ui.els.heroFoot.textContent, 'Built-in sensor · Bluetooth sensors are off');
+  assert.strictEqual(ui.els.heroFoot.className, 'hero-foot', 'Bluetooth off is not a warning');
+  ui.renderRoomBanner(btOff, btModel);
+  assert.strictEqual(ui.els.bleBanner.style.display, 'none', 'no "no reading" banner for a switched-off sensor');
+  ui.renderRoomSummary(btOff, btModel);
+  assert.strictEqual(ui.els.roomStatusLabel.textContent, 'Living Room · Bluetooth off');
+  assert.strictEqual(ui.els.roomDot.className, 'status-dot idle', 'header is neutral while Bluetooth is off');
+  // A silent Serin Link is still a fault while Bluetooth is off.
+  const linkOff = Object.assign({}, btOff, { roomSingle: 1, remoteBonded: true, remoteLive: true });
+  ui.renderRoomBanner(linkOff, ui.roomSensors(linkOff));
+  assert.ok(/Serin Link/.test(ui.els.bleBanner.textContent) && ui.els.bleBanner.style.display !== 'none',
+    'Bluetooth off does not hide a Serin Link fault');
+  checks += 6;
+
+  // Offset buttons step the stored tenths of a degree C, so they are exact
+  // and reversible whatever unit the page shows.
+  let o = 0;
+  o = ui.nextOffsetTenths(o, -1); o = ui.nextOffsetTenths(o, -1);
+  assert.strictEqual(o, -10, 'two presses down is 1.0 °C');
+  o = ui.nextOffsetTenths(o, 1); o = ui.nextOffsetTenths(o, 1);
+  assert.strictEqual(o, 0, 'two presses up returns to exactly zero');
+  assert.strictEqual(ui.nextOffsetTenths(97, 1), 99, 'clamped at +9.9 °C');
+  assert.strictEqual(ui.nextOffsetTenths(-99, -1), -99, 'clamped at −9.9 °C');
+  assert.strictEqual(ui.nextOffsetTenths(undefined, 1), 5, 'an absent offset steps from zero');
+  checks += 5;
+
   // Climate panel source line under the Room reading.
   assert.deepStrictEqual(ui.tempSourceView(LIVE), { label: 'Living Room', live: true, stale: false },
     'connected source line is unchanged');

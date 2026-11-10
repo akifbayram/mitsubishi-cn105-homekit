@@ -130,7 +130,7 @@ const roomRenderFactory = vm.runInThisContext(
   '    _a:{},setAttribute:function(k,v){this._a[k]=v},getAttribute:function(k){return this._a[k]}};\n' +
   '    return els[id]}\n' +
   block('room-model') + '\n' +
-  '  return {els:els,roomSensors:roomSensors,roomRowView:roomRowView,builtinNote:builtinNote,bleOffCaution:bleOffCaution,\n' +
+  '  return {els:els,roomSensors:roomSensors,roomRowView:roomRowView,builtinNote:builtinNote,bleOffCaution:bleOffCaution,nextOffsetTenths:nextOffsetTenths,\n' +
   '    renderRoomHero:renderRoomHero,renderRoomBanner:renderRoomBanner,\n' +
   '    renderRoomSummary:renderRoomSummary,pumpRoom:pumpRoom,\n' +
   '    tempSourceView:tempSourceView,MEMBER_LINK:MEMBER_LINK};\n' +
