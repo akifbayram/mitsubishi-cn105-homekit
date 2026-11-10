@@ -47,6 +47,7 @@ private:
     static esp_err_t handleOtaUpload(httpd_req_t *req);
     static esp_err_t handleWebSocket(httpd_req_t *req);
     static esp_err_t wsPreHandshake(httpd_req_t *req);   // Host/Origin check before the 101
+    static esp_err_t wsClientConnected(httpd_req_t *req); // after the 101: register the client
     static esp_err_t handleManifest(httpd_req_t *req);
     static esp_err_t handleIcon192(httpd_req_t *req);
     static esp_err_t handleIcon512(httpd_req_t *req);
