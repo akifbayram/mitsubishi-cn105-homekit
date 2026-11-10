@@ -2295,6 +2295,14 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     return (v<0?'−':'+')+Math.abs(v).toFixed(1)+'°';
   }
   function dispSpread(s){return (s.spread||0)*deltaScale()}
+  // The offset +/− buttons. Offsets are stored in tenths of a degree C, so a
+  // press steps the STORED value by 0.5 °C (shown as 0.9 °F): stepping the
+  // displayed Fahrenheit figure and converting back rounds differently each
+  // way, and minus then plus did not return to zero.
+  function nextOffsetTenths(cur,dir){return Math.max(-99,Math.min(99,(cur|0)+(dir<0?-5:5)))}
+  // One Sensor with a Bluetooth sensor selected while Bluetooth is off: the
+  // fallback is the user's own switch, not a sensor fault, and reads as such.
+  function singleBleOff(s){return s.roomMode!==1&&s.bleEnabled===false&&s.roomSingle>=MEMBER_BLE0}
   // Skip innerHTML writes when nothing changed — cheap at 1 Hz and keeps a
   // mid-tap DOM from being replaced under the finger once ages pass minute
   // granularity.
@@ -2399,7 +2407,8 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       // sensor.
       var sel=byBit[s.roomSingle];
       var nm=memberName(s,s.roomSingle);
-      if(s.roomSingle>0&&(s.roomStatus===1||s.roomStatus===2)){footTxt=builtin+' · '+nm+' is not reporting';warn=true}
+      if(singleBleOff(s)){footTxt=builtin+' · Bluetooth sensors are off'}
+      else if(s.roomSingle>0&&(s.roomStatus===1||s.roomStatus===2)){footTxt=builtin+' · '+nm+' is not reporting';warn=true}
       else{var a=sel&&fmtAge(sel.ageMs);footTxt=nm+(a?' · '+a:'')}
     }
     // Link down outranks every sensor message: the hero is about the pump.
@@ -2444,6 +2453,8 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       cls='caution';
       msg=(cs.length>=2?cs[0].name+' and '+cs[cs.length-1].name:'The sensors')+' disagree by '+
           dispSpread(s).toFixed(1)+'°. Check sensor placement, or set a calibration offset on one of them.';
+    }else if(singleBleOff(s)){
+      // The toggle row already says which sensor is out and why.
     }else if(!avg&&s.roomSingle>0&&s.roomStatus===1){
       // Any remote source, Serin Link included — not just BLE slots.
       var selM=null;model.forEach(function(m){if(m.bit===s.roomSingle)selM=m});
@@ -2496,7 +2507,8 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       else set('active','Average · '+c+' sensor'+(c>1?'s':''),'var(--green)');
     }else{
       var nm=memberName(s,s.roomSingle);
-      if(s.roomStatus===1)set('error',nm+' · Stale','var(--red)');
+      if(singleBleOff(s))set('idle',nm+' · Bluetooth off','var(--text3)');
+      else if(s.roomStatus===1)set('error',nm+' · Stale','var(--red)');
       // A selected source that never reported is a degraded state (the pump
       // fell back), not a neutral one — caution orange, not idle gray.
       else if(s.roomStatus===2&&s.roomSingle>0)set('warning',nm+' · Not reporting','var(--orange)');
@@ -3354,14 +3366,13 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
     if(send({cmd:'config',roomOffIdx:bit,roomOffVal:t}))clearDirty(id);
     else showToast('Not connected — change not sent',true);
   };
-  // The +/− buttons beside the offset field: half a degree in the display unit.
+  // The +/− buttons beside the offset field (nextOffsetTenths has the why).
   window.stepRoomOffset=function(bit,dir){
-    var id='roomOff'+bit,el=$(id);if(!el)return;
-    var lim=9.9*deltaScale(),v=parseFloat(el.value);
-    if(isNaN(v))v=0;
-    v=Math.max(-lim,Math.min(lim,Math.round((v+dir*0.5)*10)/10));
-    el.value=v.toFixed(1);markDirty(id);
-    window.saveRoomOffset(bit);
+    if(!lastState||!lastState.roomOffs){showToast('Sensor list not loaded — try again',true);return}
+    var t=nextOffsetTenths(offTenths(lastState,bit),dir);
+    if(!send({cmd:'config',roomOffIdx:bit,roomOffVal:t})){showToast('Not connected — change not sent',true);return}
+    clearDirty('roomOff'+bit);
+    lastState.roomOffs[bit]=t;renderRoomCard(lastState);
   };
   window.toggleRoomEdit=function(bit){
     roomEditBit=roomEditBit===bit?null:bit;roomRemoveAsk=false;
