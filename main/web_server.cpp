@@ -589,7 +589,11 @@ bool WebUI::begin(CN105Controller *ctrl) {
         .is_websocket = true,
         .handle_ws_control_frames = false,
         .supported_subprotocol = NULL,
-        .ws_pre_handshake_cb = wsPreHandshake
+        .ws_pre_handshake_cb = wsPreHandshake,
+#ifdef CONFIG_HTTPD_WS_POST_HANDSHAKE_CB_SUPPORT
+        // ESP-IDF 5.5.6+ no longer calls the handler for the handshake.
+        .ws_post_handshake_cb = wsClientConnected
+#endif
     };
     if (!registerUri(&wsUri)) return false;
 

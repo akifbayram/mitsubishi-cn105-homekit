@@ -57,30 +57,36 @@ esp_err_t WebUI::wsPreHandshake(httpd_req_t *req) {
     return requireSameOrigin(req) ? ESP_OK : ESP_FAIL;
 }
 
+// A client finished its upgrade: bound its sends, register it for broadcasts
+// and bring it up to date. ESP-IDF up to 5.5.4 reaches this through the URI
+// handler's handshake call (HTTP_GET); 5.5.6 stopped making that call and
+// offers ws_post_handshake_cb in its place, so both paths lead here.
+esp_err_t WebUI::wsClientConnected(httpd_req_t *req) {
+    // The Host/Origin check already ran in wsPreHandshake, before the 101.
+    int fd = httpd_req_to_sockfd(req);
+
+    // All WS writes (including SDK control frames) run on httpd. Retire
+    // clients that cannot accept a frame promptly instead of retrying
+    // them for seconds on every queued log/state broadcast.
+    struct timeval tv = {.tv_sec = 0, .tv_usec = 250000};
+    if (setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv)) != 0 ||
+        httpd_sess_set_send_override(req->handle, fd, WebWsTransport::sendComplete) != ESP_OK)
+        return ESP_FAIL;
+    webUI._ws.connected(fd);
+
+    LOG_INFO("WebSocket client connected (fd=%d)", fd);
+    // Push initial state immediately (broadcast reaches this new client too)
+    webUI.pushState();
+    webUI.sendDeviceInfo(fd);
+    // A page (re)loaded during a long Add Sensor session missed the
+    // sensors found so far; main re-sends the list if a scan is open.
+    webUI._discoveryResync.store(true);
+    return ESP_OK;
+}
+
 esp_err_t WebUI::handleWebSocket(httpd_req_t *req) {
-    // On first call (handshake), req->method == HTTP_GET
-    if (req->method == HTTP_GET) {
-        // The Host/Origin check already ran in wsPreHandshake, before the 101.
-        int fd = httpd_req_to_sockfd(req);
-
-        // All WS writes (including SDK control frames) run on httpd. Retire
-        // clients that cannot accept a frame promptly instead of retrying
-        // them for seconds on every queued log/state broadcast.
-        struct timeval tv = {.tv_sec = 0, .tv_usec = 250000};
-        if (setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv)) != 0 ||
-            httpd_sess_set_send_override(req->handle, fd, WebWsTransport::sendComplete) != ESP_OK)
-            return ESP_FAIL;
-        webUI._ws.connected(fd);
-
-        LOG_INFO("WebSocket client connected (fd=%d)", fd);
-        // Push initial state immediately (broadcast reaches this new client too)
-        webUI.pushState();
-        webUI.sendDeviceInfo(fd);
-        // A page (re)loaded during a long Add Sensor session missed the
-        // sensors found so far; main re-sends the list if a scan is open.
-        webUI._discoveryResync.store(true);
-        return ESP_OK;
-    }
+    // Handshake call (ESP-IDF <= 5.5.4 only): req->method == HTTP_GET
+    if (req->method == HTTP_GET) return wsClientConnected(req);
 
     // Receive WebSocket frame
     httpd_ws_frame_t frame;
