@@ -82,15 +82,26 @@ body{
 .card.flush{padding:0;overflow:hidden;}
 .card-label{font-size:11.5px;font-weight:500;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;}
 
+/* Card row dividers: mirrored in index.html; this page ships independently.
+   One content-aligned line before each subsequent visible child. */
+.card-rows{--row-inset:0px;--divider-inset:0px;}
+.card-rows.inset{--row-inset:18px;--divider-inset:18px;}
+.card-rows.compact{--divider-inset:13px;}
+.card-rows>*{position:relative;}
+.card-rows>:is([hidden],.hidden){display:none;}
+.card-rows>:not([hidden],.hidden)~*::before{
+  content:"";position:absolute;top:0;left:var(--divider-inset,0px);right:var(--divider-inset,0px);
+  border-top:1px solid var(--sep);pointer-events:none;}
+
 /* ===== Wi-Fi card header row ===== */
-.wifi-hdr-row{display:flex;align-items:center;gap:11px;padding:16px 18px;border-bottom:1px solid var(--sep);}
+.wifi-hdr-row{display:flex;align-items:center;gap:11px;padding:16px 18px;}
 .icon-badge{width:40px;height:40px;border-radius:11px;background:var(--surface2);display:flex;align-items:center;justify-content:center;flex:none;color:var(--accent);}
 .icon-badge svg{width:20px;height:20px;}
 .icon-badge.off{color:var(--red);}
 .icon-badge.off svg{opacity:.45;}
 .stack-tight .t{font-size:15px;color:var(--text);font-weight:500;}
 .stack-tight .b{font-size:12px;color:var(--text2);margin-top:1px;}
-.card-pad{padding:14px 18px 18px;}
+.card-pad{padding:16px 18px 18px;}
 
 /* ===== Contextual banners ===== */
 .ble-banner{display:flex;align-items:center;gap:8px;font-size:12.5px;line-height:1.4;border-radius:var(--radius-sm);padding:10px 12px;}
@@ -109,9 +120,8 @@ body{
 .refresh-btn.spin svg{animation:spin 1s linear infinite;}
 .net-list{background:var(--surface2);border-radius:var(--radius-sm);overflow:hidden;}
 .scan-msg{padding:14px 13px;font-size:13px;color:var(--text3);text-align:center;}
-.net-row{display:flex;align-items:center;gap:10px;padding:11px 13px;border-bottom:1px solid var(--sep);cursor:pointer;
+.net-row{display:flex;align-items:center;gap:10px;padding:11px 13px;cursor:pointer;
   -webkit-user-select:none;user-select:none;}
-.net-row:last-child{border-bottom:none;}
 .net-row.selected{background:color-mix(in srgb,var(--accent) 14%,transparent);}
 .net-name{flex:1;min-width:0;font-size:14px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .net-badge{font-size:10.5px;font-weight:600;padding:2px 7px;border-radius:8px;background:var(--accent);color:#fff;flex:none;}
@@ -229,7 +239,7 @@ a:focus-visible,button:focus-visible,input:focus-visible{outline:2px solid var(-
 
   <!-- ===== NETWORK ===== -->
   <h2 class="group-label">Network &middot; Wi-Fi</h2>
-  <div class="card flush">
+  <div class="card flush card-rows inset">
     <div class="wifi-hdr-row">
       <span class="icon-badge off" id="wifiIcon"><svg viewBox="0 0 17 12" fill="currentColor"><path d="M8.5 2C5.6 2 3 3.1 1 5l1.5 1.6C4 5.2 6.1 4.3 8.5 4.3s4.5.9 6 2.3L16 5C14 3.1 11.4 2 8.5 2z"/><path d="M8.5 6.2c-1.6 0-3.1.6-4.2 1.6l1.6 1.6c.7-.6 1.6-1 2.6-1s1.9.4 2.6 1l1.6-1.6C11.6 6.8 10.1 6.2 8.5 6.2z"/><circle cx="8.5" cy="10.4" r="1.4"/></svg></span>
       <div class="stack-tight" style="flex:1;min-width:0">
@@ -246,7 +256,7 @@ a:focus-visible,button:focus-visible,input:focus-visible{outline:2px solid var(-
             <svg viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-2.2-5.9"/><path d="M21 3v5h-5"/></svg>
           </button>
         </div>
-        <div class="net-list" id="netList"><div class="scan-msg">Scanning for networks&hellip;</div></div>
+        <div class="net-list card-rows compact" id="netList"><div class="scan-msg">Scanning for networks&hellip;</div></div>
         <div class="wifi-stack">
           <input type="text" class="field" id="cfgSSID" placeholder="Network name" maxlength="32" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" aria-label="Wi-Fi network name">
           <div class="pw-wrap" id="passRow">
