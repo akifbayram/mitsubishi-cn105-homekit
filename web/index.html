@@ -389,7 +389,8 @@ select.field:has(option[value=""]:checked){color:var(--text3);font-weight:400;}
 .ble-scan-item{display:flex;align-items:center;gap:11px;background:var(--surface2);border-radius:13px;padding:12px 13px;cursor:pointer;margin-bottom:8px;width:100%;border:none;font:inherit;color:inherit;text-align:left;-webkit-appearance:none;appearance:none;}
 .ble-scan-item:active{background:var(--surface3);}
 .scan-info{flex:1;min-width:0;}
-.scan-type{font-size:14px;color:var(--text);font-weight:500;}
+.scan-type{font-size:14px;color:var(--text);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.scan-name{margin-left:6px;color:var(--text2);font-weight:400;}
 .scan-addr{font-size:11px;color:var(--text2);margin-top:1px;font-family:ui-monospace,Menlo,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .scan-meta{display:flex;flex-direction:column;align-items:flex-end;flex:none;text-align:right;}
 .scan-reading{font-size:14px;color:var(--text);font-weight:600;white-space:nowrap;}
@@ -3501,8 +3502,11 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
       var bars=document.createElement('span');bars.className='signal-bars';bars.setAttribute('data-strength',str);
       for(var b=0;b<4;b++) bars.appendChild(document.createElement('i'));
       var info=document.createElement('div');info.className='scan-info';
+      // Broadcast name beside the type, MAC alone below: the name is what
+      // tells sensor models apart, so the ellipsis falls on it last.
       var tp=document.createElement('div');tp.className='scan-type';tp.textContent=d.type;
-      var ad=document.createElement('div');ad.className='scan-addr';ad.textContent=d.addr+(d.name?' \u00b7 '+d.name:'');
+      if(d.name){var nm=document.createElement('span');nm.className='scan-name';nm.textContent=d.name;tp.appendChild(nm);tp.title=d.type+' '+d.name}
+      var ad=document.createElement('div');ad.className='scan-addr';ad.textContent=d.addr;
       info.appendChild(tp);info.appendChild(ad);
       var meta=document.createElement('div');meta.className='scan-meta';
       var reading=document.createElement('div');reading.className='scan-reading';
